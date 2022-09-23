@@ -28,20 +28,20 @@ if env.get('APP'):
     SConscript(dirs=['libsdl2-image'], exports='env')
     SConscript(dirs=['libsdl2-ttf'], exports='env')
     SConscript(dirs=['liblua'], exports='env')
-    # SConscript(dirs=['libchez'], exports='env')
+    SConscript(dirs=['libchez'], exports='env')
     SConscript(dirs=['libcmocka'], exports='env')
 
-    # SConscript(dirs=[
-    #     'libffmpeg/libavformat',
-    #     'libffmpeg/libavcodec',
-    #     'libffmpeg/libavdevice',
-    #     'libffmpeg/libavfilter',
-    #     'libffmpeg/libswscale',
-    #     'libffmpeg/libavresample',
-    #     'libffmpeg/libavutil',
-    #     'libffmpeg/libpostproc',
-    #     'libffmpeg/libswresample',
-    #     ], exports='env')
+    SConscript(dirs=[
+        'libffmpeg/libavformat',
+        'libffmpeg/libavcodec',
+        'libffmpeg/libavdevice',
+        'libffmpeg/libavfilter',
+        'libffmpeg/libswscale',
+        'libffmpeg/libavresample',
+        'libffmpeg/libavutil',
+        'libffmpeg/libpostproc',
+        'libffmpeg/libswresample',
+        ], exports='env')
 else:
     pass
 

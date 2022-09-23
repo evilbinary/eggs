@@ -21,11 +21,17 @@ source+=[
     'swresample_frame.c',
 ]
 
-
+include = [
+    '../',
+    '../../include/c',
+    '../../include/',
+    '.',
+]
 
 
 source+= [
     ]
 
 env.Library('swresample', source,
-    CFLAGS='$CFLAGS  $LIBCFLAGS -Iapp/libffmpeg/ ',)
+    CPPPATH=env.get('CPPPATH')+include,
+    CFLAGS='$CFLAGS  $LIBCFLAGS ',)

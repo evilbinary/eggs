@@ -26,7 +26,8 @@ source+= [
 include = [
     '../',
     '../../include/c',
-    '../../include/'
+    '../../include/',
+    '.',
 ]
 
 env.Library('avdevice', source,

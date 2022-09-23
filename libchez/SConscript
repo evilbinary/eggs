@@ -8,71 +8,75 @@ import os
 
 Import('env')
 
-type='a6le'
-cflags=''
+type = 'a6le'
+cflags = ''
 
-if env['ARCHTYPE']=='arm':
-    type='arm32le'
-    cflags ='-DARMV6 -DINLINES -DGC_MACROS -DARMV6 -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
-elif env['ARCHTYPE']=='x86':
-    type='i3le'
-    cflags ='-DI386 -DINLINES -DGC_MACROS  -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
+if env['ARCHTYPE'] == 'arm':
+    type = 'arm32le'
+    cflags = '-DARMV6 -DINLINES -DGC_MACROS -DARMV6 -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
+elif env['ARCHTYPE'] == 'x86':
+    type = 'i3le'
+    cflags = '-DI386 -DINLINES -DGC_MACROS  -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
 else:
-    print('libchez not support',env['ARCHTYPE'])
+    print('libchez not support', env['ARCHTYPE'])
 
-source=[]
-source+= ['c/statics.c',
-         'c/segment.c',
-         'c/alloc.c', 
-         'c/symbol.c', 
-         'c/intern.c', 
-         'c/gcwrapper.c', 
-        'c/number.c',
-         'c/schsig.c', 
-         'c/io.c',
-        'c/new-io.c',
-        'c/print.c',
-        'c/fasl.c',
-        'c/stats.c',
-        'c/foreign.c',
-        'c/prim.c',
-        'c/prim5.c',
-        'c/flushcache.c',
-        'c/schlib.c', 
-        'c/thread.c',
-        # 'c/expeditor.c',
-        'c/scheme.c', 
-        'c/gc.c',
-        'c/gc-ocd.c', 
-        'c/gc-oce.c',
-        'c/gc-011.c', 
-        'c/arm32le.c',
-        'c/compress-io.c'
-]
-source+= Glob(type+'/*.h')
+source = []
+source += ['c/statics.c',
+           'c/segment.c',
+           'c/alloc.c',
+           'c/symbol.c',
+           'c/intern.c',
+           'c/gcwrapper.c',
+           'c/number.c',
+           'c/schsig.c',
+           'c/io.c',
+           'c/new-io.c',
+           'c/print.c',
+           'c/fasl.c',
+           'c/stats.c',
+           'c/foreign.c',
+           'c/prim.c',
+           'c/prim5.c',
+           'c/flushcache.c',
+           'c/schlib.c',
+           'c/thread.c',
+           # 'c/expeditor.c',
+           'c/scheme.c',
+           'c/gc.c',
+           'c/gc-ocd.c',
+           'c/gc-oce.c',
+           'c/gc-011.c',
+           'c/arm32le.c',
+           'c/compress-io.c'
+           ]
+source += Glob(type+'/*.h')
 
 
 include = [
     'src',
     'include',
     '.',
-    '../eggs/libuuid',
-    '../eggs/liblz4/lib',
-    '../eggs/libzlib',
+    '../libuuid',
+    '../liblz4/lib',
+    '../libzlib',
+    '../include/c',
+    '../include',
     'c',
     type,
     '../'+type
 ]
 
-libs=[
+libs = [
     'libzlib.a',
     'liblz4.a',
     'libuuid.a'
 ]
-libpath=[
-    
+libpath = [
+
 ]
 
 
-
-env.Library('chez', source,CFLAGS='$CFLAGS $LIBCFLAGS '+cflags )
+env.Library('chez', source,  LIBS=libs+env.get('LIBS'),
+            LIBPATH=env.get('LIBPATH')+libpath,
+            CPPPATH=env.get('CPPPATH')+include,
+            CFLAGS='$CFLAGS $LIBCFLAGS  '+cflags, )
