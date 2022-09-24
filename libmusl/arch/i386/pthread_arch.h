@@ -1,7 +1,9 @@
 static inline uintptr_t __get_tp()
 {
 	uintptr_t tp;
-	__asm__ ("movl %%gs:0,%0" : "=r" (tp) );
+	//todo
+	// __asm__ ("movl %%gs:0,%0" : "=r" (tp) );
+	tp= __syscall(SYS_getpid);
 	return tp;
 }
 

@@ -451,7 +451,7 @@ static int printf_core(FILE *f, const char *fmt, va_list *ap, union arg *nl_arg,
 
 		/* Update output count, end loop when fmt is exhausted */
 		cnt += l;
-		if (!*s) break;
+		if (s==NULL || !*s) break;
 
 		/* Handle literal text and %% format specifiers */
 		for (a=s; *s && *s!='%'; s++);
