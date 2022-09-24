@@ -42,6 +42,10 @@ if env.get('APP'):
         'libffmpeg/libpostproc',
         'libffmpeg/libswresample',
         ], exports='env')
+    
+    if env.get('DEFAULT_LIBC') == 'libmusl':
+        SConscript(dirs=['libmusl'], exports='env')
+
 else:
     pass
 

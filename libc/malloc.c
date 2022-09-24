@@ -20,7 +20,6 @@ void *realloc(void *p, size_t size) {
     return NULL;
   }
   if (p == NULL) return malloc(size);
-  if (real_size > size) real_size = size;
   ptr = malloc(size);
   memcpy(ptr, p, real_size);
   free(p);
@@ -28,10 +27,9 @@ void *realloc(void *p, size_t size) {
 }
 
 void *calloc(size_t nobj, size_t size) {
-  int real_size;
-  void *p;
-  real_size = nobj * size;
-  p = malloc(real_size);
+  int malloc_size = nobj * size;
+  void *p= malloc(malloc_size);
+  int real_size = malloc_usable_size(p);
   memset(p, 0, real_size);
   return p;
 }
