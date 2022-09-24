@@ -20,7 +20,7 @@
 #define SWS_MAX_FILTER_SIZE 256
 
 #include "stdint.h"
-
+#include <errno.h>
 
 #ifdef X86 
 

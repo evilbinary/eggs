@@ -23,7 +23,6 @@ libpath=[
 include=[
     '.',
     '../libs/include/',
-    '../include/c',
     '../include/',
     '../../duck/libs/include'
 ]+libpath

@@ -99,10 +99,8 @@ source+= [
 
 include = [
     '../',
-    '../../include/c',
     '../../include/'
 ]
 
 env.Library('avutil', source,
-    CPPPATH=env.get('CPPPATH')+include,
-    CFLAGS='$CFLAGS  $LIBCFLAGS ',)
+    CPPPATH=env.get('CPPPATH')+include)

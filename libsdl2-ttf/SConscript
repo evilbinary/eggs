@@ -31,7 +31,6 @@ source +=[
 include = [
     '.',
     '../',
-    '../include/c',
     '../include/',
     '../libsdl2/include',
     '../libpng',

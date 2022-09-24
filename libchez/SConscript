@@ -59,7 +59,6 @@ include = [
     '../libuuid',
     '../liblz4/lib',
     '../libzlib',
-    '../include/c',
     '../include',
     'c',
     type,

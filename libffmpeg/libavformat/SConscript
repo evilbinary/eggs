@@ -69,7 +69,6 @@ source+= [
 
 include = [
     '../',
-    '../../include/c',
     '../../include/'
 ]
 

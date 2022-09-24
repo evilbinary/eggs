@@ -16,7 +16,6 @@ source+= Glob('*.c')
 
 include = [
     '../',
-    '../../include/c',
     '../../include/'
 ]
 
