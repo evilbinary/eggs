@@ -39,6 +39,7 @@ if env.get('DEFAULT_LIBC') == 'libmusl':
 else:
     env['LIBPATH'] += ['../libc/']
     env['CPPPATH'] += [
+        '#/eggs/include/c',
         '../include/c',
         '../include',
     ]
