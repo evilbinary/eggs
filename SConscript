@@ -8,7 +8,9 @@ import os
 import platform
 import copy
 
-Import('env')
+Import('appEnv')
+
+env=appEnv
 
 current = Dir('.').srcnode().path
 
@@ -40,8 +42,6 @@ else:
     env['LIBPATH'] += ['../libc/']
     env['CPPPATH'] += [
         '#/eggs/include/c',
-        '../include/c',
-        '../include',
     ]
     env['CFLAGS'] += '  -DLIBYC '
 

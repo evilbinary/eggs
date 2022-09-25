@@ -46,6 +46,7 @@ source=[
 source+= Glob('math/*.c')
 source+= Glob('environ/*.c')
 source+= Glob('sys/*.c')
+source+= Glob('crt/*.c')
 
 if env['ARCHTYPE'] =='arm':
     source=source+[
@@ -58,9 +59,8 @@ elif env['ARCHTYPE']=='x86':
         'i386/setjmp.s'
     ]
     
+
 env.Library('c',source ,CFLAGS='$CFLAGS')
 
-source=[]
-source+= Glob('crt/*.c')
 
-env.Object('crt',source ,CFLAGS='$CFLAGS')
+# env.Library('crt',source ,CFLAGS='$CFLAGS')

@@ -1,21 +1,24 @@
 #include "stdio.h"
 
-int main();
+__attribute__((weak)) int main();
 
-int __libc_start_main(int (*)(), int, char **);
+int __libc_start_main(int (*)(), int, char **,char **);
 
-void start(long *p) {
-  int argc = p[0];
-  char **argv = (void *)(p + 1);
-  char **envp = (void *)(p + 2);
-  int ret = __libc_start_main(main, argc, argv);
+typedef struct exec{
+    int argc;
+    char** argv;
+    char **envp;
+    char* filename;
+}exec_t;
+
+void start(exec_t *p) {
+  int ret = __libc_start_main(main, p->argc, p->argv,p->envp);
   exit(ret);
 }
 
 
 int __libc_start_main(int (*main)(int, char **, char **), int argc,
-                      char **argv) {
-  char **envp = argv + argc + 1;
+                      char **argv,char **envp) {
   //init libc here
   return main(argc,argv,envp);
 }
