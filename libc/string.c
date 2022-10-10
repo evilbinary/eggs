@@ -240,6 +240,7 @@ char* strerror(int errnum) {
 }
 
 size_t strlen(const char* s) {
+  if(s==NULL) return 0;
   size_t ans = 0;
   while (s[ans++] != '\0') {
   };

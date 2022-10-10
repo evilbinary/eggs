@@ -287,6 +287,7 @@ int fsync(int fd) {
   return 1;
 }
 
+//单位是微秒 1ms = 1000us
 int usleep(unsigned useconds) {
 	struct timespec tv = {
 		.tv_sec = useconds/1000000,
