@@ -11,6 +11,7 @@ DIR *opendir(const char *dirname) {
   DIR *dir = (DIR *)malloc(sizeof(DIR));
   dir->fd = fd;
   dir->buffer_pos = 0;
+  dir->buffer_end = 0;
   return dir;
 }
 
