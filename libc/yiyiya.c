@@ -81,7 +81,7 @@ void ya_free(void* ptr) {
   block->next = free_block_list_head.next;
   free_block_list_head.next = block;
   void* addr = ((char*)block) + sizeof(free_block_t);
-  memset(addr,0,block->size);
+  //memset(addr,0,block->size);
 }
 
 size_t ya_real_size(void* ptr){
