@@ -14,21 +14,15 @@ void free(void *addr) { ya_free(addr); }
 
 void *realloc(void *p, size_t size) {
   void *ptr;
-  int real_size = ya_real_size(p);
   if (size == 0) {
     free(p);
     return NULL;
   }
   if (p == NULL) return malloc(size);
-  if (size > real_size) {
-    ptr = malloc(size);
-    if(ptr!=NULL){
-      memcpy(ptr, p, real_size);
-    }else{
-      printf("malloc error\n");
-    }
-    free(p);
-  }
+  int real_size = ya_real_size(p);
+  ptr = malloc(size);
+  memcpy(ptr, p, real_size);
+  free(p);
   return ptr;
 }
 
