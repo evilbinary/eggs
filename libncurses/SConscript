@@ -161,7 +161,7 @@ source+=[
 	'base/version.c'
 ]
 	
-cflags = '-DHAVE_CONFIG_H -DNDEBUG -DXTSTRINGDEFINES -fPIC -Iapp/libncurses/include'
+cflags = '-DHAVE_CONFIG_H -DNDEBUG -DXTSTRINGDEFINES -fPIC -Ieggs/libncurses/include'
 
 
 

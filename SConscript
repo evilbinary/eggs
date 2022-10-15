@@ -67,6 +67,7 @@ if env.get('APP'):
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
         SConscript(dirs=['libmusl'], exports='env')
+        # SConscript(dirs=['libncurses'], exports='env')
     else:
         SConscript(dirs=['libc'], exports='env')
 
