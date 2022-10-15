@@ -13,8 +13,8 @@ libs=[
     'libjpeg.a',
     'libpng.a',
     'libalgorithm.a',
-    'libc.a'
-]
+]+env['LIBC']
+
 libpath=[
     '../libjpeg/',
     '../libpng/',
