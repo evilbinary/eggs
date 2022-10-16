@@ -59,8 +59,8 @@ int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * forma
     //     return -1;
     // }
 
-    // /* Save the info and return! */
-    // SDL_SetWindowData(window, DUMMY_SURFACE, surface);
+    /* Save the info and return! */
+    SDL_SetWindowData(window, DUMMY_SURFACE, surface);
     // *format = surface_format;
     // *pixels = surface->pixels;
     // *pitch = surface->pitch;
@@ -69,7 +69,6 @@ int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * forma
 
 int SDL_DUMMY_UpdateWindowFramebuffer(_THIS, SDL_Window * window, const SDL_Rect * rects, int numrects)
 {
-    //printf("SDL_DUMMY_UpdateWindowFramebuffer\n");
 
     static int frame_number;
     SDL_Surface *surface;
@@ -86,9 +85,7 @@ int SDL_DUMMY_UpdateWindowFramebuffer(_THIS, SDL_Window * window, const SDL_Rect
                      SDL_GetWindowID(window), ++frame_number);
         SDL_SaveBMP(surface, file);
     }
-
     screen_flush();
-    
     return 0;
 }
 
