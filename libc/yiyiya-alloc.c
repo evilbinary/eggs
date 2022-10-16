@@ -26,25 +26,35 @@ void* ya_sbrk(size_t size) {
 typedef struct block {
   size_t size;
   struct block* next;
+  struct block* prev;
   char free;
   u32 magic;
 } block_t;
 
 block_t* g_block_list = NULL;
+block_t* g_block_list_last = NULL;
 
 #define ya_block_ptr(ptr) ((block_t*)ptr - 1);
+#define ya_block_addr(ptr) ((block_t*)ptr + 1);
+
 #define MAGIC_FREE 999999999
 #define MAGIC_USE 888888888
 
-block_t* ya_new_block(size_t size, block_t* last) {
+block_t* ya_new_block(size_t size) {
   block_t* block = ya_sbrk(size + sizeof(block_t));
-  if (last) {
-    last->next = block;
-  }
   block->free = 0;
   block->next = NULL;
+  block->prev = NULL;
   block->size = size;
   block->magic = MAGIC_USE;
+  if (g_block_list == NULL) {
+    g_block_list = block;
+    g_block_list_last = block;
+  } else {
+    g_block_list_last->next = block;
+    block->prev = g_block_list_last;
+    g_block_list_last = block;
+  }
   return block;
 }
 
@@ -59,7 +69,7 @@ block_t* ya_find_free_block(size_t size) {
     block = block->next;
   }
   if (find_block == NULL) {
-    find_block = ya_new_block(size, g_block_list);
+    find_block = ya_new_block(size);
   }
   return find_block;
 }
@@ -70,14 +80,15 @@ void* ya_alloc(size_t size) {
   }
   block_t* block;
   if (g_block_list == NULL) {
-    block = ya_new_block(size, NULL);
-    g_block_list = block;
+    block = ya_new_block(size);
   } else {
     block = ya_find_free_block(size);
   }
   block->free = 0;
   block->magic = MAGIC_USE;
-  return (block + 1);
+  void* addr = ya_block_addr(block);
+  printf("alloc %x size=%d\n", addr, size);
+  return addr;
 }
 
 void ya_free(void* ptr) {
@@ -85,10 +96,34 @@ void ya_free(void* ptr) {
     return;
   }
   block_t* block = ya_block_ptr(ptr);
+  printf("free  %x size=%d\n", ptr, block->size);
+
   assert(block->free == 0);
   assert(block->magic == MAGIC_USE);
   block->free = 1;
   block->magic = MAGIC_FREE;
+  block_t* next = block->next;
+  if (next != NULL) {
+    if (next->free == 1) {
+      block->size += next->size + sizeof(block_t);
+      block->next = next->next;
+      int size = next->size;
+      if(next->next){
+        next->next->prev=block;
+      }
+      // memset(next,0,size);
+    }
+  }
+  block_t* prev = block->prev;
+  if (prev != NULL) {
+    if (prev->free == 1) {
+      prev->size += block->size;
+      prev->next = block->next;
+      if (block->next != NULL) {
+        block->next->prev = prev;
+      }
+    }
+  }
 }
 
 void* ya_realloc(void* p, size_t size) {
