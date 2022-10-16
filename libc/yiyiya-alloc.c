@@ -9,6 +9,7 @@
 #include "yiyiya.h"
 
 #define PAGE_SIZE 4096
+#define DEBUG 1
 
 static int page_size = -1;
 static char* last_heap_addr = NULL;
@@ -87,7 +88,9 @@ void* ya_alloc(size_t size) {
   block->free = 0;
   block->magic = MAGIC_USE;
   void* addr = ya_block_addr(block);
+#ifdef DEBUG
   printf("alloc %x size=%d\n", addr, size);
+#endif
   return addr;
 }
 
@@ -96,8 +99,9 @@ void ya_free(void* ptr) {
     return;
   }
   block_t* block = ya_block_ptr(ptr);
+#ifdef DEBUG
   printf("free  %x size=%d\n", ptr, block->size);
-
+#endif
   assert(block->free == 0);
   assert(block->magic == MAGIC_USE);
   block->free = 1;
@@ -108,8 +112,8 @@ void ya_free(void* ptr) {
       block->size += next->size + sizeof(block_t);
       block->next = next->next;
       int size = next->size;
-      if(next->next){
-        next->next->prev=block;
+      if (next->next) {
+        next->next->prev = block;
       }
       // memset(next,0,size);
     }
@@ -122,6 +126,8 @@ void ya_free(void* ptr) {
       if (block->next != NULL) {
         block->next->prev = prev;
       }
+      int size = block->size;
+      // memset(block,0,size);
     }
   }
 }
