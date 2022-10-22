@@ -28,7 +28,7 @@ typedef struct block {
   size_t size;
   struct block* next;
   struct block* prev;
-  char free;
+  u32 free;
   u32 magic;
 } block_t;
 
@@ -40,10 +40,12 @@ block_t* g_block_list_last = NULL;
 
 #define MAGIC_FREE 999999999
 #define MAGIC_USE 888888888
+#define BLOCK_FREE 123456789
+#define BLOCK_USED 987654321
 
 block_t* ya_new_block(size_t size) {
   block_t* block = ya_sbrk(size + sizeof(block_t));
-  block->free = 0;
+  block->free = BLOCK_USED;
   block->next = NULL;
   block->prev = NULL;
   block->size = size;
@@ -63,7 +65,7 @@ block_t* ya_find_free_block(size_t size) {
   block_t* block = g_block_list;
   block_t* find_block = NULL;
   while (block) {
-    if (block->free == 1 && block->size >= size) {
+    if (block->free == BLOCK_FREE && block->size >= size) {
       find_block = block;
       break;
     }
@@ -85,7 +87,7 @@ void* ya_alloc(size_t size) {
   } else {
     block = ya_find_free_block(size);
   }
-  block->free = 0;
+  block->free = BLOCK_USED;
   block->magic = MAGIC_USE;
   void* addr = ya_block_addr(block);
 #ifdef DEBUG
@@ -102,13 +104,13 @@ void ya_free(void* ptr) {
 #ifdef DEBUG
   printf("free  %x size=%d\n", ptr, block->size);
 #endif
-  assert(block->free == 0);
+  assert(block->free == BLOCK_USED );
   assert(block->magic == MAGIC_USE);
-  block->free = 1;
+  block->free = BLOCK_FREE;
   block->magic = MAGIC_FREE;
   block_t* next = block->next;
   if (next != NULL) {
-    if (next->free == 1) {
+    if (next->free == BLOCK_FREE) {
       block->size += next->size + sizeof(block_t);
       block->next = next->next;
       int size = next->size;
@@ -120,7 +122,7 @@ void ya_free(void* ptr) {
   }
   block_t* prev = block->prev;
   if (prev != NULL) {
-    if (prev->free == 1) {
+    if (prev->free == BLOCK_FREE) {
       prev->size += block->size;
       prev->next = block->next;
       if (block->next != NULL) {
