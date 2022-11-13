@@ -9,20 +9,114 @@
 #include "yiyiya.h"
 
 #define PAGE_SIZE 4096
-#define DEBUG 1
+// #define DEBUG 1
+
+int ya_brk(void* end) { return syscall1(SYS_BRK, end); }
+
+//version 1
+
+// struct block {
+//   size_t size;
+//   bool free;
+//   struct block* prev;
+// };
+
+// typedef struct block block_t;
+
+// block_t* g_block_list = NULL;
+
+// #define BLOCK_SIZE sizeof(block_t)
+// #define ya_block_ptr(ptr) ((block_t*)ptr - 1);
+// #define ya_block_addr(ptr) ((block_t*)ptr + 1);
+
+
+// void* ya_sbrk(size_t inc){
+//   return syscall1(SYS_SBRK, inc);
+// }
+
+// void* ya_alloc(size_t size) {
+//   block_t* block = g_block_list;
+//   while (block) {
+//     if (block->size >= size) {
+//       break;
+//     }
+//     block = block->prev;
+//   }
+//   if (block == NULL) {
+//     block = (block_t*)ya_sbrk(size + BLOCK_SIZE);
+//     if (block == (void*)-1) {
+//       return NULL;
+//     }
+//     block->size = size;
+//     block->prev = g_block_list;
+//     g_block_list = block;
+//   }
+//   block->free = false;
+//   return (void*)(block + 1);
+// }
+
+// void ya_free(void* ptr) {
+//   if (ptr == NULL) return;
+//   block_t* block = (block_t*)ptr - 1;
+//   block->free = true;
+//   block = g_block_list;
+//   while (block->prev && block->free) {
+//     block = block->prev;
+//   }
+//   if (block->free) {
+//     g_block_list = block->prev;
+//     ya_brk(block);
+//   } else {
+//     g_block_list = block;
+//     ya_brk((char*)block + block->size + BLOCK_SIZE);
+//   }
+// }
+
+// void* ya_realloc(void* p, size_t size) {
+//   if (p == NULL) {
+//     return malloc(size);
+//   }
+//   block_t* block = ya_block_ptr(p);
+//   if (block->size >= size) {
+//     return p;
+//   }
+//   void* new_p = malloc(size);
+//   memcpy(new_p, p, block->size);
+//   free(p);
+//   return new_p;
+// }
+
+// void* ya_calloc(size_t nobj, size_t nsize) {
+//   size_t size = nobj * nsize;
+//   void* ptr = malloc(size);
+//   memset(ptr, 0, size);
+//   return ptr;
+// }
+
+// size_t ya_real_size(void* ptr) {
+//   block_t* block = ya_block_ptr(ptr);
+//   return block->size;
+// }
+
+
+//version 2
 
 static int page_size = -1;
 static char* last_heap_addr = NULL;
 const size_t align_to = 16;
 
-void* ya_sbrk(size_t size) {
-  if (last_heap_addr == NULL) {
-    last_heap_addr = syscall0(SYS_VHEAP);
-  }
-  void* addr = last_heap_addr;
-  last_heap_addr += size;
-  return addr;
+void* ya_sbrk(size_t inc){
+  return syscall1(SYS_SBRK, inc);
 }
+
+// void* ya_sbrk(size_t size) {
+//   if (last_heap_addr == NULL) {
+//     last_heap_addr = syscall1(SYS_BRK,0);
+//   }
+//   void* addr = last_heap_addr;
+//   last_heap_addr += size;
+//   return addr;
+// }
 
 typedef struct block {
   size_t size;
@@ -160,6 +254,8 @@ size_t ya_real_size(void* ptr) {
   return block->size;
 }
 
+
+//version 3
 // typedef struct free_block {
 //   size_t size;
 //   struct free_block* next;

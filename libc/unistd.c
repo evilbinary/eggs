@@ -1,15 +1,16 @@
+#include "unistd.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <support.h>
-#include "unistd.h"
-#include "time.h"
+
 #include "limits.h"
 #include "stdarg.h"
 #include "syscall.h"
+#include "time.h"
 
-#define UNIMPL() printf("unimpl %s:%d %s\n",__FILE__,__LINE__,__FUNCTION__)
-
+#define UNIMPL() printf("unimpl %s:%d %s\n", __FILE__, __LINE__, __FUNCTION__)
 
 char **environ = NULL;  ///< Global environment information
 
@@ -115,7 +116,7 @@ off_t lseek(int fd, off_t position, int whence) {
   if (file == NULL) {
     return (position - 1);
   }
-  int ret=fseek(file, position, whence);
+  int ret = fseek(file, position, whence);
   return ret;
 }
 
@@ -130,10 +131,9 @@ int rmdir(const char *directory) {
 }
 
 unsigned int sleep(unsigned int seconds) {
-  struct timespec tv = { .tv_sec = seconds, .tv_nsec = 0 };
-	if (nanosleep(&tv, &tv))
-		return tv.tv_sec;
-	return 0;
+  struct timespec tv = {.tv_sec = seconds, .tv_nsec = 0};
+  if (nanosleep(&tv, &tv)) return tv.tv_sec;
+  return 0;
 }
 
 int truncate(const char *filename, off_t offset) {
@@ -289,11 +289,9 @@ int fsync(int fd) {
 
 //单位是微秒 1ms = 1000us
 int usleep(unsigned useconds) {
-	struct timespec tv = {
-		.tv_sec = useconds/1000000,
-		.tv_nsec = (useconds%1000000)*1000
-	};
-	return nanosleep(&tv, &tv);
+  struct timespec tv = {.tv_sec = useconds / 1000000,
+                        .tv_nsec = (useconds % 1000000) * 1000};
+  return nanosleep(&tv, &tv);
 }
 
 int lockf(int fd, int op, off_t size) {
@@ -301,23 +299,17 @@ int lockf(int fd, int op, off_t size) {
   return 1;
 }
 
-int symlink(const char *existing, const char *new){
-   UNIMPL();
-}
+int symlink(const char *existing, const char *new) { UNIMPL(); }
 
-ssize_t readlink(const char *restrict path, char *restrict buf, size_t bufsize){
-   UNIMPL();
-}
-
-long sysconf(int name){
+ssize_t readlink(const char *restrict path, char *restrict buf,
+                 size_t bufsize) {
   UNIMPL();
 }
 
-int setuid(uid_t uid){
-  UNIMPL();
-}
+long sysconf(int name) { UNIMPL(); }
 
-int setgid(gid_t gid){
-  UNIMPL();
+int setuid(uid_t uid) { UNIMPL(); }
 
-}
+int setgid(gid_t gid) { UNIMPL(); }
+
+int brk(void *end) { return ya_brk(end); }

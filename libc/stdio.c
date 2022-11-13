@@ -33,9 +33,10 @@ int putc(int ch , FILE *f){
   return fputc(ch,f);
 }
 
+
 int printf(const char *format, ...) {
-  char printf_buffer[512];
-  memset(printf_buffer, 0, 512);
+  char printf_buffer[1024];
+  memset(printf_buffer, 0, 1024);
   int i;
   va_list args;
   va_start(args, format);
