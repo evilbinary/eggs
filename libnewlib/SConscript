@@ -17,7 +17,7 @@ current = Dir('.').srcnode()
 if os.path.exists(current.abspath+'/lib'):
     print 'configure is up-to-date'
 else:
-    env.Command('config.mak', 'configure', 'cd %s && ./configure --prefix=%s/lib --target=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS"  --disable-nls' %
+    env.Command('config.mak', 'configure', 'cd %s && ./configure --prefix=%s/lib --target=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS" --disable-nls ' %
                 (current.path,current.abspath, env['CC_PREFIX'].replace('elf-','elf') ))
 env.Command('libnewlib',
             'Makefile',
