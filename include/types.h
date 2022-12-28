@@ -36,12 +36,11 @@ typedef unsigned int u_int;
 typedef signed char int8_t;
 typedef signed short int16_t;
 typedef signed int int32_t;
-typedef signed _Int64   int64_t;
+typedef signed _Int64 int64_t;
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned _Int64 uint64_t;
-
 
 #ifndef _INTPTR_T
 #define _INTPTR_T
@@ -53,10 +52,9 @@ typedef _Addr intptr_t;
 typedef unsigned _Addr uintptr_t;
 #endif
 
-#ifndef _SIZE_T 
-#define _SIZE_T 
+#ifndef _SIZE_T
+#define _SIZE_T
 typedef unsigned size_t;
 #endif
-
 
 #endif

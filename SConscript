@@ -7,6 +7,7 @@
 import os
 import platform
 import copy
+from xenv.env import add_libc
 
 Import('appEnv')
 
@@ -14,36 +15,8 @@ env=appEnv
 
 current = Dir('.').srcnode().path
 
+add_libc(env)
 
-
-if env.get('DEFAULT_LIBC') == 'libmusl':
-    env['CFLAGS'] += ' -D__LIB_MUSL__  -static '
-    env['LIBPATH'] += ['../libmusl/lib/']
-    env['CPPPATH'] += [
-        '#/eggs/libmusl',
-        '#/eggs/libmusl/include',
-        '#/eggs/libmusl/obj/include/',
-        '#/eggs/libmusl/arch/generic/',
-        '#/eggs/ibmusl/arch/generic/bits'
-    ]
-    env['LIBC'] = ['libm.a', 'libmusl.a']
-
-    if env['ARCHTYPE'] == 'x86':
-        env['CPPPATH'] += [
-            '#/eggs/libmusl/arch/i386/',
-            '#/eggs/libmusl/arch/i386/bits'
-
-        ]
-    elif arch_type == 'arm':
-        env['CPPPATH'] += ['../libmusl/arch/arm/']
-    else:
-        print('no support libmusl type %s' % (arch))
-else:
-    env['LIBPATH'] += ['../libc/']
-    env['CPPPATH'] += [
-        '#/eggs/include/c',
-    ]
-    env['CFLAGS'] += '  -DLIBYC '
 
 if env.get('APP'):
     SConscript(dirs=['libjpeg'], exports='env')
@@ -67,7 +40,8 @@ if env.get('APP'):
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
         SConscript(dirs=['libmusl'], exports='env')
-        # SConscript(dirs=['libncurses'], exports='env')
+    elif env.get('DEFAULT_LIBC') == 'libnewlib':
+        SConscript(dirs=['libnewlib'], exports='env')
     else:
         SConscript(dirs=['libc'], exports='env')
 

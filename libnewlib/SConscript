@@ -1,0 +1,24 @@
+# coding:utf-8
+# *******************************************************************
+# * Copyright 2021-2080 evilbinary
+# * 作者: evilbinary on 01/01/20
+# * 邮箱: rootdebug@163.c",om
+# ********************************************************************
+import os
+
+Import('env')
+
+cflags = ''
+
+source = []
+
+current = Dir('.').srcnode()
+
+if os.path.exists(current.abspath+'/lib'):
+    print 'configure is up-to-date'
+else:
+    env.Command('config.mak', 'configure', 'cd %s && ./configure --prefix=%s/lib --target=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS"  --disable-nls' %
+                (current.path,current.abspath, env['CC_PREFIX'].replace('elf-','elf') ))
+env.Command('libnewlib',
+            'Makefile',
+            'cd %s && make -j8 && make install' % (current.path))

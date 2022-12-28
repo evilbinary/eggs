@@ -1,0 +1,46 @@
+source "site.exp"
+
+if { ! [isnative] } {
+    verbose "skipping cygload because it's not native \"$target_triplet\" != \"$build_triplet\""
+    return
+}
+
+proc ws_spawn {cmd args} {
+    global rv
+    verbose "running $cmd\n"
+    set rv {}
+    # First item in rv is the return code, second item is the message
+    lappend rv [catch "exec $cmd" message] $message
+    verbose send "catchCode = $rv\n"
+}
+
+if { [string match "i686" $target_alias] } {
+    set entrypoint "_cygloadCRTStartup@0"
+} else {
+    set entrypoint "cygloadCRTStartup"
+}
+
+ws_spawn "$MINGW_CXX $srcdir/$subdir/cygload.cc -o mingw-cygload.exe -static -Wl,-e,$entrypoint"
+
+if { $rv != {0 {}} } {
+    verbose -log "$rv"
+    fail "cygload (compile)"
+} else {
+    if { $verbose } {
+        set redirect_output "./mingw-cygwin.log"
+    } else {
+        set redirect_output /dev/null
+    }
+    set windows_runtime_root [exec cygpath -m $runtime_root]
+    ws_spawn "./mingw-cygload.exe -cygwin $windows_runtime_root/cygwin0.dll > $redirect_output"
+    if { $rv != {0 {}} } {
+        verbose -log "cygload: $rv"
+        fail "cygload (execute)"
+    } else {
+        pass "cygload"
+    }
+    catch { file delete "mingw-cygload.exe" } err
+    if { $err != "" } {
+        note "error deleting mingw-cygload.exe: $err"
+    }
+}
