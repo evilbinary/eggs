@@ -14,11 +14,12 @@ source = []
 
 current = Dir('.').srcnode().path
 
-if os.path.exists('config.mak'):
+if os.path.exists('config.mak') and False:
     print 'configure is up-to-date'
 else:
-    env.Command('config.mak', 'configure', 'cd %s && ./configure CC=%s CROSS_COMPILE=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS"' %
+    env.Command('config.mak', 'configure', 'cd %s && ./configure CC=%s CROSS_COMPILE=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS" --disable-optimize --enable-debug=yes' %
                 (current, env['CC'], env['CC_PREFIX']))
+
 env.Command('libmusl',
             'Makefile',
             'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))

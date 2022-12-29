@@ -78,9 +78,11 @@ static inline void a_spin()
 }
 
 #define a_crash a_crash
+#include <stdio.h>
 static inline void a_crash()
 {
-	__asm__ __volatile__( "hlt" : : : "memory" );
+	printf("i have crash\n");
+	//__asm__ __volatile__( "hlt" : : : "memory" );
 }
 
 #define a_ctz_64 a_ctz_64
