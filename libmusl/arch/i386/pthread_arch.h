@@ -1,4 +1,4 @@
-#define SYS_THREAD_SELF 414
+#define SYS_THREAD_SELF 514
 
 static inline uintptr_t __get_tp()
 {
