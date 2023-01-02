@@ -44,8 +44,7 @@ int __set_thread_area(void *p)
 		__a_gettp_ptr = __a_gettp_kuser;
 		__a_cas_ptr = __a_cas_kuser;
 		__a_barrier_ptr = __a_barrier_kuser;
-		//todo
-		//if (ver < 2) a_crash();
+		if (ver < 2) a_crash();
 		if (ver < 3) __a_barrier_ptr = __a_barrier_oldkuser;
 	}
 #endif

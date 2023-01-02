@@ -1,10 +1,13 @@
 #if ((__ARM_ARCH_6K__ || __ARM_ARCH_6KZ__ || __ARM_ARCH_6ZK__) && !__thumb__) \
  || __ARM_ARCH_7A__ || __ARM_ARCH_7R__ || __ARM_ARCH >= 7
 
+#define SYS_THREAD_SELF 514
+
 static inline uintptr_t __get_tp()
 {
 	uintptr_t tp;
-	__asm__ ( "mrc p15,0,%0,c13,c0,3" : "=r"(tp) );
+	//__asm__ ( "mrc p15,0,%0,c13,c0,3" : "=r"(tp) );
+	tp= __syscall(SYS_THREAD_SELF);
 	return tp;
 }
 
