@@ -31,6 +31,10 @@ void __init_libc(char **envp, char *pn)
 	if (aux[AT_SYSINFO]) __sysinfo = aux[AT_SYSINFO];
 	libc.page_size = aux[AT_PAGESZ];
 
+	if(libc.page_size==0){
+	  libc.page_size=4096;
+	}
+
 	if (!pn) pn = (void*)aux[AT_EXECFN];
 	if (!pn) pn = "";
 	__progname = __progname_full = pn;
