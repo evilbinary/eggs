@@ -116,6 +116,8 @@ typedef struct block {
   struct block* next;
   struct block* prev;
   u32 free;
+  u32 count;
+  u32 no;
   u32 magic;
 } block_t;
 
@@ -212,7 +214,7 @@ void ya_free(void* ptr) {
   assert((*end) == MAGIC_END);
 
   block->count = 0;
-  kmemset(ptr, 0, block->size);
+  memset(ptr, 0, block->size);
   ptr = NULL;
 
   // if (next != NULL) {
