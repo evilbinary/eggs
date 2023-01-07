@@ -46,7 +46,6 @@ static inline void a_barrier()
 static inline int a_cas(volatile int *p, int t, int s)
 {
 	for (;;) {
-		sss
 		register int r0 __asm__("r0") = t;
 		register int r1 __asm__("r1") = s;
 		register volatile int *r2 __asm__("r2") = p;

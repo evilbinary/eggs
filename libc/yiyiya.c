@@ -160,6 +160,11 @@ int ya_nanosleep(const struct timespec *req, struct timespec *rem){
 }
 
 
+void * ya_mremap(void *old_addr, size_t old_len, size_t new_len, int flags, ...){
+
+	return (void *)syscall4(SYS_MREMAP, old_addr, old_len, new_len, flags);
+}
+
 void __main() {
   // printf("main call\n");
 }

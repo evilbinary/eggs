@@ -41,7 +41,9 @@ source=[
     'password.c',
     'fenv.c',
     'alloc.c',
-    'yiyiya-alloc.c'
+    'yiyiya-alloc.c',
+    'stack_guard.c',
+    'mman.c'
 ]
 
 source+= Glob('math/*.c')
