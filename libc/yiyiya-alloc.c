@@ -213,8 +213,6 @@ void ya_free(void* ptr) {
 
   block->count = 0;
   kmemset(ptr, 0, block->size);
-  block->count = 0;
-  block_t* next = block->next;
   ptr = NULL;
 
   // if (next != NULL) {
