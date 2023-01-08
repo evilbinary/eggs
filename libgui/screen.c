@@ -10,6 +10,7 @@
 #include "image.h"
 #include "stdarg.h"
 #include "syscall.h"
+#include "fcntl.h"
 
 screen_info_t gscreen;
 
@@ -555,7 +556,7 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
 }
 
 void screen_init() {
-  int fd = open("/dev/fb", 0);
+  int fd = open("/dev/fb", O_RDWR);
   printf("screen init fd:%d\n",fd);
   ioctl(fd, IOC_READ_FRAMBUFFER_INFO, &(gscreen.fb),
         sizeof(framebuffer_info_t));

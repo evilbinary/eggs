@@ -18,9 +18,7 @@ if os.path.exists('config.mak'):
     print 'configure is up-to-date'
 else:
     flag=''
-    if env.get('PLATFORM')=='raspi2':
-        flag+=' -mcpu=cortex-a7  -mtune=cortex-a7 -mfpu=vfpv4  -mfloat-abi=softfp'
-
+    flag+=env['CFLAGS']
     cmd='cd %s && ./configure CC=%s CROSS_COMPILE=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS %s" --disable-optimize --enable-debug=yes' %(current, env['CC'], env['CC_PREFIX'],flag)
    
     env.Command('config.mak', 'configure', cmd)
