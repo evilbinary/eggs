@@ -12,10 +12,23 @@
 // #define DEBUG 1
 #define ALIGN(x, a) (x + (a - 1)) & ~(a - 1)
 
+
 int ya_brk(void* end) { return syscall1(SYS_BRK, end); }
+static char* last_heap_addr = NULL;
+const size_t align_to = 16;
+
+void* ya_sbrk(size_t inc) {
+  // align size to multiple of 4 bytes
+  inc = ALIGN(inc, align_to);
+  int ret = ya_brk(last_heap_addr);
+  if (ret > 0) {
+    last_heap_addr += inc;
+    return last_heap_addr;
+  }
+  return last_heap_addr;
+}
 
 // version 1
-// const size_t align_to = 16;
 
 // struct block {
 //   size_t size;
@@ -30,11 +43,6 @@ int ya_brk(void* end) { return syscall1(SYS_BRK, end); }
 // #define BLOCK_SIZE sizeof(block_t)
 // #define ya_block_ptr(ptr) ((block_t*)ptr - 1);
 // #define ya_block_addr(ptr) ((block_t*)ptr + 1);
-
-// void* ya_sbrk(size_t inc) {
-//   inc = ALIGN(inc, align_to);
-//   return syscall1(SYS_SBRK, inc);
-// }
 
 // void* ya_alloc(size_t size) {
 //   block_t* block = g_block_list;
@@ -101,15 +109,6 @@ int ya_brk(void* end) { return syscall1(SYS_BRK, end); }
 // }
 
 // version 2
-
-static char* last_heap_addr = NULL;
-const size_t align_to = 16;
-
-void* ya_sbrk(size_t inc){
-  // align size to multiple of 4 bytes
-  inc = (inc + 3) & ~3;
-  return syscall1(SYS_SBRK, inc);
-}
 
 typedef struct block {
   size_t size;
@@ -204,7 +203,7 @@ void ya_free(void* ptr) {
 #ifdef DEBUG
   printf("free  %x size=%d\n", ptr, block->size);
 #endif
-  assert(block->free == BLOCK_USED );
+  assert(block->free == BLOCK_USED);
   assert(block->magic == MAGIC_USE);
   block->free = BLOCK_FREE;
   block->magic = MAGIC_FREE;
