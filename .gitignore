@@ -10,3 +10,7 @@ kernel
 eggs/libmusl/config.mak
 eggs/libmusl/temp.txt
 eggs/libmusl/temp2.txt
+
+libmusl/config.mak
+libmusl/temp2.txt
+libmusl/temp.txt
