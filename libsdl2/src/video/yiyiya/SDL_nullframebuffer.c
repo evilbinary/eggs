@@ -33,7 +33,7 @@
 int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * format, void ** pixels, int *pitch)
 {
     printf("SDL_DUMMY_CreateWindowFramebuffer\n");
-    SDL_Surface *surface;
+    SDL_Surface *surface=NULL;
     const Uint32 surface_format = SDL_PIXELFORMAT_ARGB8888;
     int w, h;
     int bpp;
