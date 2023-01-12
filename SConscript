@@ -17,6 +17,9 @@ current = Dir('.').srcnode().path
 
 add_libc(env)
 
+returns=[]
+
+libc=None
 
 if env.get('APP'):
     SConscript(dirs=['libjpeg'], exports='env')
@@ -39,11 +42,16 @@ if env.get('APP'):
     SConscript(dirs=['libffmpeg'], exports='env')
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
-        SConscript(dirs=['libmusl'], exports='env')
+        libc=SConscript(dirs=['libmusl'], exports='env')
     elif env.get('DEFAULT_LIBC') == 'libnewlib':
-        SConscript(dirs=['libnewlib'], exports='env')
+        libc=SConscript(dirs=['libnewlib'], exports='env')
     else:
-        SConscript(dirs=['libc'], exports='env')
-
+        libc=SConscript(dirs=['libc'], exports='env')
 else:
     pass
+
+returns+=libc
+
+Export('appEnv')
+
+Return('returns')

@@ -19,6 +19,7 @@ if os.path.exists(current.abspath+'/lib'):
 else:
     env.Command('config.mak', 'configure', 'cd %s && ./configure --prefix=%s/lib --target=%s CFLAGS="-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS" --disable-nls ' %
                 (current.path,current.abspath, env['CC_PREFIX'].replace('elf-','elf') ))
-env.Command('libnewlib',
+
+env['LIBC_BUILD']=env.Command('libnewlib',
             'Makefile',
             'cd %s && make -j8 && make install' % (current.path))

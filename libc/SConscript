@@ -63,7 +63,7 @@ elif env['ARCHTYPE']=='x86':
     ]
     
 
-env.Library('c',source ,CFLAGS='$CFLAGS')
+env['LIBC_BUILD']=env.Library('c',source ,CFLAGS='$CFLAGS')
 
 
 # env.Library('crt',source ,CFLAGS='$CFLAGS')
