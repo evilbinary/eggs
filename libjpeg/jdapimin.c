@@ -241,12 +241,13 @@ GLOBAL(int)
 jpeg_read_header (j_decompress_ptr cinfo, boolean require_image)
 {
   int retcode;
-	
+
   if (cinfo->global_state != DSTATE_START &&
       cinfo->global_state != DSTATE_INHEADER)
     ERREXIT1(cinfo, JERR_BAD_STATE, cinfo->global_state);
- 
+
   retcode = jpeg_consume_input(cinfo);
+
   switch (retcode) {
   case JPEG_REACHED_SOS:
     retcode = JPEG_HEADER_OK;
@@ -298,15 +299,12 @@ jpeg_consume_input (j_decompress_ptr cinfo)
     /*FALLTHROUGH*/
   case DSTATE_INHEADER:
     retcode = (*cinfo->inputctl->consume_input) (cinfo);
-   
     if (retcode == JPEG_REACHED_SOS) { /* Found SOS, prepare to decompress */
-    
       /* Set up default parameters based on header data */
       default_decompress_parms(cinfo);
       /* Set global state: ready for start_decompress */
       cinfo->global_state = DSTATE_READY;
     }
-   
     break;
   case DSTATE_READY:
     /* Can't advance past first SOS until start_decompress is called */
@@ -322,7 +320,6 @@ jpeg_consume_input (j_decompress_ptr cinfo)
     retcode = (*cinfo->inputctl->consume_input) (cinfo);
     break;
   default:
- 
     ERREXIT1(cinfo, JERR_BAD_STATE, cinfo->global_state);
   }
   return retcode;

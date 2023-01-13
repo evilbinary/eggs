@@ -1,4 +1,6 @@
+#include "jinclude.h"
 #include "jpeglib.h"
+#include "jmemsys.h"		/* import the system-dependent declarations */
 
 
 void * jpeg_get_small JPP((j_common_ptr cinfo, size_t sizeofobject)){

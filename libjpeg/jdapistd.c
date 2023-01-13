@@ -51,7 +51,7 @@ jpeg_start_decompress (j_decompress_ptr cinfo)
     /* If file has multiple scans, absorb them all into the coef buffer */
     if (cinfo->inputctl->has_multiple_scans) {
 #ifdef D_MULTISCAN_FILES_SUPPORTED
-      while (1) {
+      for (;;) {
 	int retcode;
 	/* Call progress monitor hook if present */
 	if (cinfo->progress != NULL)

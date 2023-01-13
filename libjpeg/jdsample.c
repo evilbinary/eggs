@@ -97,7 +97,6 @@ sep_upsample (j_decompress_ptr cinfo,
   jpeg_component_info * compptr;
   JDIMENSION num_rows;
 
-  GUI_USE_PARA(in_row_groups_avail);
   /* Fill the conversion buffer, if it's empty */
   if (upsample->next_row_out >= cinfo->max_v_samp_factor) {
     for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
@@ -158,8 +157,6 @@ METHODDEF(void)
 fullsize_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
 		   JSAMPARRAY input_data, JSAMPARRAY * output_data_ptr)
 {
-  GUI_USE_PARA(compptr);
-  GUI_USE_PARA(cinfo);
   *output_data_ptr = input_data;
 }
 
@@ -173,9 +170,6 @@ METHODDEF(void)
 noop_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
 	       JSAMPARRAY input_data, JSAMPARRAY * output_data_ptr)
 {
-  GUI_USE_PARA(cinfo);
-  GUI_USE_PARA(compptr);
-  GUI_USE_PARA(input_data);
   *output_data_ptr = NULL;	/* safety check */
 }
 
@@ -245,7 +239,6 @@ h2v1_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
   JSAMPROW outend;
   int inrow;
 
-  GUI_USE_PARA(compptr);
   for (inrow = 0; inrow < cinfo->max_v_samp_factor; inrow++) {
     inptr = input_data[inrow];
     outptr = output_data[inrow];
@@ -274,7 +267,6 @@ h2v2_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
   JSAMPROW outend;
   int inrow, outrow;
 
-  GUI_USE_PARA(compptr);
   inrow = outrow = 0;
   while (outrow < cinfo->max_v_samp_factor) {
     inptr = input_data[inrow];
@@ -336,7 +328,7 @@ h2v1_fancy_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
     /* Special case for last column */
     invalue = GETJSAMPLE(*inptr);
     *outptr++ = (JSAMPLE) ((invalue * 3 + GETJSAMPLE(inptr[-1]) + 1) >> 2);
-    *outptr   = (JSAMPLE) invalue;
+    *outptr++ = (JSAMPLE) invalue;
   }
 }
 
@@ -392,7 +384,7 @@ h2v2_fancy_upsample (j_decompress_ptr cinfo, jpeg_component_info * compptr,
 
       /* Special case for last column */
       *outptr++ = (JSAMPLE) ((thiscolsum * 3 + lastcolsum + 8) >> 4);
-      *outptr   = (JSAMPLE) ((thiscolsum * 4 + 7) >> 4);
+      *outptr++ = (JSAMPLE) ((thiscolsum * 4 + 7) >> 4);
     }
     inrow++;
   }

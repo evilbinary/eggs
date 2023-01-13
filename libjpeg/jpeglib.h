@@ -722,7 +722,7 @@ struct jpeg_destination_mgr {
 
 /* Data source object for decompression */
 
-typedef struct jpeg_source_mgr {
+struct jpeg_source_mgr {
   const JOCTET * next_input_byte; /* => next byte to read from buffer */
   size_t bytes_in_buffer;	/* # of bytes remaining in buffer */
 
@@ -731,7 +731,7 @@ typedef struct jpeg_source_mgr {
   JMETHOD(void, skip_input_data, (j_decompress_ptr cinfo, long num_bytes));
   JMETHOD(boolean, resync_to_restart, (j_decompress_ptr cinfo, int desired));
   JMETHOD(void, term_source, (j_decompress_ptr cinfo));
-} jpeg_source_mgr;
+};
 
 
 /* Memory manager object.
@@ -814,8 +814,70 @@ typedef JMETHOD(boolean, jpeg_marker_parser_method, (j_decompress_ptr cinfo));
  * Note JPP requires double parentheses.
  */
 
+#ifdef HAVE_PROTOTYPES
 #define JPP(arglist)	arglist
+#else
+#define JPP(arglist)	()
+#endif
 
+
+/* Short forms of external names for systems with brain-damaged linkers.
+ * We shorten external names to be unique in the first six letters, which
+ * is good enough for all known systems.
+ * (If your compiler itself needs names to be unique in less than 15 
+ * characters, you are out of luck.  Get a better compiler.)
+ */
+
+#ifdef NEED_SHORT_EXTERNAL_NAMES
+#define jpeg_std_error		jStdError
+#define jpeg_CreateCompress	jCreaCompress
+#define jpeg_CreateDecompress	jCreaDecompress
+#define jpeg_destroy_compress	jDestCompress
+#define jpeg_destroy_decompress	jDestDecompress
+#define jpeg_stdio_dest		jStdDest
+#define jpeg_stdio_src		jStdSrc
+#define jpeg_set_defaults	jSetDefaults
+#define jpeg_set_colorspace	jSetColorspace
+#define jpeg_default_colorspace	jDefColorspace
+#define jpeg_set_quality	jSetQuality
+#define jpeg_set_linear_quality	jSetLQuality
+#define jpeg_add_quant_table	jAddQuantTable
+#define jpeg_quality_scaling	jQualityScaling
+#define jpeg_simple_progression	jSimProgress
+#define jpeg_suppress_tables	jSuppressTables
+#define jpeg_alloc_quant_table	jAlcQTable
+#define jpeg_alloc_huff_table	jAlcHTable
+#define jpeg_start_compress	jStrtCompress
+#define jpeg_write_scanlines	jWrtScanlines
+#define jpeg_finish_compress	jFinCompress
+#define jpeg_write_raw_data	jWrtRawData
+#define jpeg_write_marker	jWrtMarker
+#define jpeg_write_m_header	jWrtMHeader
+#define jpeg_write_m_byte	jWrtMByte
+#define jpeg_write_tables	jWrtTables
+#define jpeg_read_header	jReadHeader
+#define jpeg_start_decompress	jStrtDecompress
+#define jpeg_read_scanlines	jReadScanlines
+#define jpeg_finish_decompress	jFinDecompress
+#define jpeg_read_raw_data	jReadRawData
+#define jpeg_has_multiple_scans	jHasMultScn
+#define jpeg_start_output	jStrtOutput
+#define jpeg_finish_output	jFinOutput
+#define jpeg_input_complete	jInComplete
+#define jpeg_new_colormap	jNewCMap
+#define jpeg_consume_input	jConsumeInput
+#define jpeg_calc_output_dimensions	jCalcDimensions
+#define jpeg_save_markers	jSaveMarkers
+#define jpeg_set_marker_processor	jSetMarker
+#define jpeg_read_coefficients	jReadCoefs
+#define jpeg_write_coefficients	jWrtCoefs
+#define jpeg_copy_critical_parameters	jCopyCrit
+#define jpeg_abort_compress	jAbrtCompress
+#define jpeg_abort_decompress	jAbrtDecompress
+#define jpeg_abort		jAbort
+#define jpeg_destroy		jDestroy
+#define jpeg_resync_to_restart	jResyncRestart
+#endif /* NEED_SHORT_EXTERNAL_NAMES */
 
 
 /* Default error-management setup */
@@ -845,8 +907,8 @@ EXTERN(void) jpeg_destroy_decompress JPP((j_decompress_ptr cinfo));
 
 /* Standard data source and destination managers: stdio streams. */
 /* Caller is responsible for opening the file before and closing after. */
-/* EXTERN(void) jpeg_stdio_dest JPP((j_compress_ptr cinfo, FILE * outfile)); */
-/* EXTERN(void) jpeg_stdio_src JPP((j_decompress_ptr cinfo, FILE * infile)); */
+EXTERN(void) jpeg_stdio_dest JPP((j_compress_ptr cinfo, FILE * outfile));
+EXTERN(void) jpeg_stdio_src JPP((j_decompress_ptr cinfo, FILE * infile));
 
 /* Default parameter setup for compression */
 EXTERN(void) jpeg_set_defaults JPP((j_compress_ptr cinfo));

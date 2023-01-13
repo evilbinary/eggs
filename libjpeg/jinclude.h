@@ -35,13 +35,15 @@
 #include <stddef.h>
 #endif
 
-//#include <stdlib.h>
+#ifdef HAVE_STDLIB_H
+#include <stdlib.h>
+#endif
 
 #ifdef NEED_SYS_TYPES_H
 #include <sys/types.h>
 #endif
 
-//#include <stsdio.h>
+#include <stdio.h>
 
 /*
  * We need memory copying and zeroing functions, plus strncpy().

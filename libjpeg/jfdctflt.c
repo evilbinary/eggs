@@ -165,7 +165,4 @@ jpeg_fdct_float (FAST_FLOAT * data)
   }
 }
 
-#else
-void jfdctflt_C(void);
-void jfdctflt_C(void) {} /* Avoid empty object files */
 #endif /* DCT_FLOAT_SUPPORTED */

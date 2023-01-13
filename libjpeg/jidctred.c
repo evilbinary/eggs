@@ -395,7 +395,4 @@ jpeg_idct_1x1 (j_decompress_ptr cinfo, jpeg_component_info * compptr,
   output_buf[0][output_col] = range_limit[dcval & RANGE_MASK];
 }
 
-#else
-void jidctred_C(void);
-void jidctred_C(void) {} /* Avoid empty object files */
 #endif /* IDCT_SCALING_SUPPORTED */

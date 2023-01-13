@@ -239,7 +239,4 @@ jpeg_idct_float (j_decompress_ptr cinfo, jpeg_component_info * compptr,
   }
 }
 
-#else
-void jidctflt_C(void);
-void jidctflt_C(void) {} /* Avoid empty object files */
 #endif /* DCT_FLOAT_SUPPORTED */

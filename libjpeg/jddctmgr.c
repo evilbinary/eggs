@@ -85,7 +85,9 @@ typedef union {
  * a matching multiplier table.
  */
 
-METHODDEF(void) start_pass (j_decompress_ptr cinfo) {
+METHODDEF(void)
+start_pass (j_decompress_ptr cinfo)
+{
   my_idct_ptr idct = (my_idct_ptr) cinfo->idct;
   int ci, i;
   jpeg_component_info *compptr;
@@ -93,7 +95,8 @@ METHODDEF(void) start_pass (j_decompress_ptr cinfo) {
   inverse_DCT_method_ptr method_ptr = NULL;
   JQUANT_TBL * qtbl;
 
-  for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components; ci++, compptr++) {
+  for (ci = 0, compptr = cinfo->comp_info; ci < cinfo->num_components;
+       ci++, compptr++) {
     /* Select the proper IDCT routine for this component's scaling */
     switch (compptr->DCT_scaled_size) {
 #ifdef IDCT_SCALING_SUPPORTED

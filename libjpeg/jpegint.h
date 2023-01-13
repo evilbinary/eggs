@@ -263,13 +263,9 @@ struct jpeg_color_quantizer {
 
 /* Miscellaneous useful macros */
 
-#ifdef MAX
-  #undef MAX
-#endif
+#undef MAX
 #define MAX(a,b)	((a) > (b) ? (a) : (b))
-#ifdef MIN
-  #undef MIN
-#endif
+#undef MIN
 #define MIN(a,b)	((a) < (b) ? (a) : (b))
 
 
@@ -293,6 +289,45 @@ struct jpeg_color_quantizer {
 #define SHIFT_TEMPS
 #define RIGHT_SHIFT(x,shft)	((x) >> (shft))
 #endif
+
+
+/* Short forms of external names for systems with brain-damaged linkers. */
+
+#ifdef NEED_SHORT_EXTERNAL_NAMES
+#define jinit_compress_master	jICompress
+#define jinit_c_master_control	jICMaster
+#define jinit_c_main_controller	jICMainC
+#define jinit_c_prep_controller	jICPrepC
+#define jinit_c_coef_controller	jICCoefC
+#define jinit_color_converter	jICColor
+#define jinit_downsampler	jIDownsampler
+#define jinit_forward_dct	jIFDCT
+#define jinit_huff_encoder	jIHEncoder
+#define jinit_phuff_encoder	jIPHEncoder
+#define jinit_marker_writer	jIMWriter
+#define jinit_master_decompress	jIDMaster
+#define jinit_d_main_controller	jIDMainC
+#define jinit_d_coef_controller	jIDCoefC
+#define jinit_d_post_controller	jIDPostC
+#define jinit_input_controller	jIInCtlr
+#define jinit_marker_reader	jIMReader
+#define jinit_huff_decoder	jIHDecoder
+#define jinit_phuff_decoder	jIPHDecoder
+#define jinit_inverse_dct	jIIDCT
+#define jinit_upsampler		jIUpsampler
+#define jinit_color_deconverter	jIDColor
+#define jinit_1pass_quantizer	jI1Quant
+#define jinit_2pass_quantizer	jI2Quant
+#define jinit_merged_upsampler	jIMUpsampler
+#define jinit_memory_mgr	jIMemMgr
+#define jdiv_round_up		jDivRound
+#define jround_up		jRound
+#define jcopy_sample_rows	jCopySamples
+#define jcopy_block_row		jCopyBlocks
+#define jzero_far		jZeroFar
+#define jpeg_zigzag_order	jZIGTable
+#define jpeg_natural_order	jZAGTable
+#endif /* NEED_SHORT_EXTERNAL_NAMES */
 
 
 /* Compression module initialization routines */
@@ -345,7 +380,7 @@ EXTERN(void) jzero_far JPP((void FAR * target, size_t bytestozero));
 #if 0				/* This table is not actually needed in v6a */
 extern const int jpeg_zigzag_order[]; /* natural coef order to zigzag order */
 #endif
-extern const int jpeg_natural_order[DCTSIZE2+16]; /* zigzag coef order to natural order */
+extern const int jpeg_natural_order[]; /* zigzag coef order to natural order */
 
 /* Suppress undefined-structure complaints if necessary. */
 
