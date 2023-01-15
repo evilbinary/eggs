@@ -20,9 +20,11 @@ returns = []
 libpath = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#/', '')
 libs = ''
 
-ldflags = env['LINKFLAGS']+ ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
+ldflags = env['LINKFLAGS'] + \
+    ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
 
 cflags += env['CFLAGS']
+
 
 def patch_path(var):
     return var.replace(
@@ -35,22 +37,38 @@ if env.get('MYLIB'):
 
 
 def config_build():
-    params=[
+    params = [
         '--enable-cross-compile',
         '--arch='+env['ARCHTYPE'],
         '--target-os=linux',
         '--cross-prefix='+env['CC_PREFIX'],
         '--extra-cflags=%s  %s %s' % (
             libpath, libs, cflags),
-        '--extra-ldflags=%s ' % (ldflags ),
+        '--extra-ldflags=%s ' % (ldflags),
         '--host-extralibs=',
         '--enable-gpl',
         '--enable-nonfree',
         '--enable-static',
         '--disable-programs',
+        '--disable-stripping',
         '--disable-doc',
         '--disable-pthreads',
         '--disable-shared',
+        '--disable-htmlpages',
+        '--disable-manpages',
+        '--disable-podpages',
+        '--disable-txtpages',
+
+        '--disable-encoders ',
+        '--disable-decoders ',
+        '--enable-decoder=aac',
+        '--enable-decoder=aac_at',
+        '--enable-decoder=h264',
+        '--enable-decoder=h264_mediacodec',
+        '--disable-demuxers ',
+        '--enable-demuxer=aac',
+        '--enable-demuxer=h264',
+
     ]
 
     params = map(patch_path, params)
@@ -77,8 +95,8 @@ if os.path.exists('ffbuild/config.mak'):
         os.remove('ffbuild/config.mak')
         config_build()
     env.Command('ffmpeg2',
-                       './ffbuild/config.mak-'+env.get('ARCHTYPE'),
-                       'cd %s && make -j8' % (current))
+                './ffbuild/config.mak-'+env.get('ARCHTYPE'),
+                'cd %s && make -j8' % (current))
 else:
     config_build()
 
