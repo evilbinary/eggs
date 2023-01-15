@@ -45,6 +45,9 @@ if os.path.exists('config.mak'):
         print('remove configure')
         os.remove('config.mak')
         config_build()
+    musl=env.Command('musl',
+        'config.mak-'+env.get('ARCHTYPE'),
+        'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))
 else:
     config_build()
 
