@@ -21,12 +21,16 @@ libavformat/asfdec_f.o: libavformat/asfdec_f.c \
  libavutil/samplefmt.h libavformat/avformat.h ../libmusl/include/time.h \
  libavcodec/avcodec.h libavutil/samplefmt.h libavutil/avutil.h \
  libavutil/buffer.h libavutil/channel_layout.h libavutil/frame.h \
- libavutil/buffer.h libavutil/log.h libavutil/pixfmt.h \
- libavutil/rational.h libavcodec/version.h libavutil/version.h \
+ libavutil/buffer.h libavutil/hwcontext.h libavutil/frame.h \
+ libavutil/log.h libavutil/pixfmt.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
  libavformat/avio.h libavformat/version.h libavformat/avio_internal.h \
  libavformat/url.h libavformat/avlanguage.h libavformat/id3v2.h \
  libavformat/internal.h libavutil/bprint.h libavutil/avstring.h \
  libavformat/os_support.h ../libmusl/include/sys/stat.h \
  ../libmusl/include/sys/time.h ../libmusl/include/sys/select.h \
- ../libmusl/arch/i386/bits/stat.h libavformat/metadata.h \
+ ../libmusl/arch/i386/bits/stat.h ../libmusl/include/sys/socket.h \
+ ../libmusl/arch/generic/bits/socket.h libavformat/metadata.h \
  libavformat/riff.h libavformat/asf.h libavformat/asfcrypt.h

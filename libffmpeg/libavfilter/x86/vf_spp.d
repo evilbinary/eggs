@@ -17,9 +17,8 @@ libavfilter/x86/vf_spp.o: libavfilter/x86/vf_spp.c libavutil/attributes.h \
  libavutil/dict.h libavutil/pixfmt.h libavutil/x86/emms.h \
  libavutil/libm.h libavutil/intfloat.h libavutil/mathematics.h \
  libavutil/rational.h libavutil/x86/asm.h libavfilter/vf_spp.h \
- libavcodec/avcodec.h libavutil/samplefmt.h libavutil/avutil.h \
- libavutil/buffer.h libavutil/channel_layout.h libavutil/dict.h \
- libavutil/frame.h libavutil/buffer.h libavutil/samplefmt.h \
- libavutil/log.h libavutil/pixfmt.h libavutil/rational.h \
- libavcodec/version.h libavutil/version.h libavcodec/avdct.h \
- libavutil/opt.h libavfilter/avfilter.h libavfilter/version.h
+ libavcodec/avdct.h libavutil/opt.h libavutil/samplefmt.h \
+ libavfilter/avfilter.h libavutil/avutil.h libavutil/buffer.h \
+ libavutil/dict.h libavutil/frame.h libavutil/buffer.h libavutil/log.h \
+ libavutil/samplefmt.h libavutil/pixfmt.h libavutil/rational.h \
+ libavfilter/version.h libavutil/version.h

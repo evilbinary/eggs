@@ -18,10 +18,14 @@ libavfilter/vf_mcdeint.o: libavfilter/vf_mcdeint.c libavutil/opt.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/samplefmt.h \
  libavutil/pixdesc.h libavcodec/avcodec.h libavutil/samplefmt.h \
  libavutil/avutil.h libavutil/buffer.h libavutil/channel_layout.h \
- libavutil/dict.h libavutil/frame.h libavutil/buffer.h libavutil/log.h \
- libavutil/pixfmt.h libavutil/rational.h libavcodec/version.h \
- libavutil/version.h libavfilter/avfilter.h libavfilter/version.h \
- libavfilter/formats.h libavfilter/internal.h libavutil/internal.h \
+ libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
+ libavutil/hwcontext.h libavutil/frame.h libavutil/log.h \
+ libavutil/pixfmt.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
+ libavfilter/avfilter.h libavfilter/version.h libavfilter/formats.h \
+ libavfilter/version.h libavfilter/internal.h libavutil/internal.h \
  libavfilter/framepool.h libavfilter/framequeue.h libavfilter/thread.h \
- libavfilter/version.h libavfilter/video.h libavcodec/internal.h \
+ libavfilter/video.h libavcodec/internal.h libavutil/fifo.h \
  libavutil/mathematics.h libavcodec/avcodec.h

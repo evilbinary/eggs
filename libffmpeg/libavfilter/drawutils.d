@@ -22,4 +22,4 @@ libavfilter/drawutils.o: libavfilter/drawutils.c \
  libavutil/frame.h libavutil/buffer.h libavutil/samplefmt.h \
  libavutil/log.h libavutil/samplefmt.h libavutil/pixfmt.h \
  libavutil/rational.h libavfilter/version.h libavutil/version.h \
- libavfilter/formats.h
+ libavfilter/formats.h libavfilter/version.h

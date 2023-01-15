@@ -21,8 +21,12 @@ libavfilter/vf_smartblur.o: libavfilter/vf_smartblur.c libavutil/opt.h \
  libavutil/version.h libavfilter/avfilter.h libavutil/buffer.h \
  libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
  libavutil/samplefmt.h libavutil/rational.h libavfilter/version.h \
- libavfilter/formats.h libavfilter/internal.h libavutil/internal.h \
- libavfilter/framepool.h libavfilter/framequeue.h libavfilter/thread.h \
- libavfilter/version.h libavfilter/video.h libavcodec/avcodec.h \
- libavutil/channel_layout.h libavcodec/version.h libavcodec/internal.h \
- libavutil/mathematics.h libavcodec/avcodec.h
+ libavfilter/formats.h libavfilter/version.h libavfilter/internal.h \
+ libavutil/internal.h libavfilter/framepool.h libavfilter/framequeue.h \
+ libavfilter/thread.h libavfilter/video.h libavcodec/avcodec.h \
+ libavutil/channel_layout.h libavutil/hwcontext.h libavutil/frame.h \
+ libavcodec/bsf.h libavcodec/codec_id.h libavcodec/codec_par.h \
+ libavcodec/packet.h libavcodec/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
+ libavcodec/internal.h libavutil/fifo.h libavutil/mathematics.h \
+ libavcodec/avcodec.h

@@ -18,12 +18,16 @@ libavfilter/vf_overlay.o: libavfilter/vf_overlay.c libavfilter/avfilter.h \
  libavutil/buffer.h libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
  libavutil/samplefmt.h libavutil/log.h libavutil/samplefmt.h \
  libavutil/pixfmt.h libavutil/rational.h libavfilter/version.h \
- libavutil/version.h libavfilter/formats.h libavutil/common.h \
- libavutil/eval.h libavutil/avstring.h libavutil/pixdesc.h \
- libavutil/imgutils.h libavutil/pixdesc.h libavutil/mathematics.h \
- libavutil/opt.h libavutil/timestamp.h libavfilter/internal.h \
- libavutil/internal.h libavfilter/framepool.h libavfilter/framequeue.h \
- libavfilter/thread.h libavfilter/version.h libavfilter/video.h \
- libavcodec/avcodec.h libavutil/channel_layout.h libavcodec/version.h \
- libavcodec/internal.h libavcodec/avcodec.h libavfilter/drawutils.h \
- libavfilter/framesync.h libavfilter/bufferqueue.h libavutil/avassert.h
+ libavutil/version.h libavfilter/formats.h libavfilter/version.h \
+ libavutil/common.h libavutil/eval.h libavutil/avstring.h \
+ libavutil/pixdesc.h libavutil/imgutils.h libavutil/pixdesc.h \
+ libavutil/mathematics.h libavutil/opt.h libavutil/timestamp.h \
+ libavfilter/internal.h libavutil/internal.h libavfilter/framepool.h \
+ libavfilter/framequeue.h libavfilter/thread.h libavfilter/video.h \
+ libavcodec/avcodec.h libavutil/channel_layout.h libavutil/hwcontext.h \
+ libavutil/frame.h libavcodec/bsf.h libavcodec/codec_id.h \
+ libavcodec/codec_par.h libavcodec/packet.h libavcodec/version.h \
+ libavcodec/codec.h libavcodec/codec_id.h libavcodec/codec_desc.h \
+ libavcodec/version.h libavcodec/internal.h libavutil/fifo.h \
+ libavcodec/avcodec.h libavfilter/drawutils.h libavfilter/framesync.h \
+ libavfilter/bufferqueue.h libavutil/avassert.h libavfilter/vf_overlay.h

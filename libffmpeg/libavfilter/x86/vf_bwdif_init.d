@@ -21,4 +21,4 @@ libavfilter/x86/vf_bwdif_init.o: libavfilter/x86/vf_bwdif_init.c \
  libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
  libavutil/samplefmt.h libavutil/log.h libavutil/samplefmt.h \
  libavutil/pixfmt.h libavutil/rational.h libavfilter/version.h \
- libavutil/version.h
+ libavutil/version.h libavfilter/yadif.h libavutil/opt.h

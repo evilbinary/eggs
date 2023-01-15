@@ -18,4 +18,4 @@ libavfilter/allfilters.o: libavfilter/allfilters.c libavutil/thread.h \
  libavutil/buffer.h libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
  libavutil/samplefmt.h libavutil/log.h libavutil/samplefmt.h \
  libavutil/pixfmt.h libavutil/rational.h libavfilter/version.h \
- libavutil/version.h libavfilter/opencl_allkernels.h
+ libavutil/version.h libavfilter/filter_list.c

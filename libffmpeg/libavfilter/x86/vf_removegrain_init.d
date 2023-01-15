@@ -2,7 +2,7 @@ libavfilter/x86/vf_removegrain_init.o: \
  libavfilter/x86/vf_removegrain_init.c libavutil/attributes.h \
  libavutil/cpu.h ../libmusl/include/stddef.h \
  ../libmusl/obj/include/bits/alltypes.h libavutil/attributes.h \
- libavutil/x86/cpu.h config.h libavutil/cpu_internal.h libavutil/cpu.h \
+ libavutil/x86/cpu.h libavutil/cpu_internal.h config.h libavutil/cpu.h \
  libavfilter/removegrain.h libavfilter/avfilter.h libavutil/avutil.h \
  libavutil/common.h ../libmusl/include/errno.h \
  ../libmusl/include/features.h ../libmusl/arch/generic/bits/errno.h \

@@ -58,7 +58,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     if (av_frame_is_writable(in)) {
         out = in;
     } else {
-        out = ff_get_audio_buffer(inlink, in->nb_samples);
+        out = ff_get_audio_buffer(outlink, in->nb_samples);
         if (!out) {
             av_frame_free(&in);
             return AVERROR(ENOMEM);
@@ -126,7 +126,7 @@ static int config_input(AVFilterLink *inlink)
     const double offset = 1. - s->depth / 2.;
     int i;
 
-    s->table_size = inlink->sample_rate / s->freq;
+    s->table_size = lrint(inlink->sample_rate / s->freq + 0.5);
     s->table = av_malloc_array(s->table_size, sizeof(*s->table));
     if (!s->table)
         return AVERROR(ENOMEM);

@@ -16,17 +16,22 @@ libavformat/aiffenc.o: libavformat/aiffenc.c ../libmusl/include/stdint.h \
  libavutil/dict.h libavutil/pixfmt.h libavutil/x86/emms.h \
  libavutil/attributes.h libavutil/cpu.h libavutil/libm.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/samplefmt.h \
- libavformat/avformat.h ../libmusl/include/time.h libavcodec/avcodec.h \
- libavutil/samplefmt.h libavutil/avutil.h libavutil/buffer.h \
- libavutil/channel_layout.h libavutil/dict.h libavutil/frame.h \
- libavutil/buffer.h libavutil/log.h libavutil/pixfmt.h \
- libavutil/rational.h libavcodec/version.h libavutil/version.h \
- libavformat/avio.h libavutil/common.h libavformat/version.h \
- libavformat/internal.h libavutil/bprint.h libavutil/avstring.h \
- libavformat/os_support.h ../libmusl/include/sys/stat.h \
- ../libmusl/include/sys/time.h ../libmusl/include/sys/select.h \
- ../libmusl/arch/i386/bits/stat.h libavformat/aiff.h \
- libavformat/avio_internal.h libavformat/url.h libavformat/isom.h \
- libavutil/mastering_display_metadata.h libavutil/frame.h \
- libavutil/spherical.h libavutil/stereo3d.h libavformat/dv.h \
- libavformat/id3v2.h libavformat/metadata.h
+ libavcodec/packet_internal.h libavcodec/packet.h libavutil/buffer.h \
+ libavutil/dict.h libavutil/rational.h libavcodec/version.h \
+ libavutil/version.h libavformat/avformat.h ../libmusl/include/time.h \
+ libavcodec/avcodec.h libavutil/samplefmt.h libavutil/avutil.h \
+ libavutil/channel_layout.h libavutil/frame.h libavutil/buffer.h \
+ libavutil/hwcontext.h libavutil/frame.h libavutil/log.h \
+ libavutil/pixfmt.h libavcodec/bsf.h libavcodec/codec_id.h \
+ libavcodec/codec_par.h libavcodec/codec.h libavcodec/codec_id.h \
+ libavcodec/codec_desc.h libavcodec/version.h libavformat/avio.h \
+ libavutil/common.h libavformat/version.h libavformat/internal.h \
+ libavutil/bprint.h libavutil/avstring.h libavformat/os_support.h \
+ ../libmusl/include/sys/stat.h ../libmusl/include/sys/time.h \
+ ../libmusl/include/sys/select.h ../libmusl/arch/i386/bits/stat.h \
+ ../libmusl/include/sys/socket.h ../libmusl/arch/generic/bits/socket.h \
+ libavformat/aiff.h libavformat/avio_internal.h libavformat/url.h \
+ libavformat/isom.h libavutil/encryption_info.h \
+ libavutil/mastering_display_metadata.h libavutil/spherical.h \
+ libavutil/stereo3d.h libavformat/dv.h libavformat/id3v2.h \
+ libavformat/metadata.h

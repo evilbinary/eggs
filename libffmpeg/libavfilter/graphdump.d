@@ -3,9 +3,9 @@ libavfilter/graphdump.o: libavfilter/graphdump.c \
  ../libmusl/obj/include/bits/alltypes.h libavutil/channel_layout.h \
  ../libmusl/include/stdint.h ../libmusl/arch/i386/bits/stdint.h \
  libavutil/bprint.h ../libmusl/include/stdarg.h libavutil/attributes.h \
- libavutil/avstring.h ../libmusl/include/stddef.h libavutil/pixdesc.h \
- ../libmusl/include/inttypes.h libavutil/pixfmt.h libavutil/avconfig.h \
- libavutil/version.h libavutil/macros.h libavfilter/avfilter.h \
+ libavutil/avstring.h ../libmusl/include/stddef.h libavutil/version.h \
+ libavutil/macros.h libavutil/pixdesc.h ../libmusl/include/inttypes.h \
+ libavutil/pixfmt.h libavutil/avconfig.h libavfilter/avfilter.h \
  libavutil/attributes.h libavutil/avutil.h libavutil/common.h \
  ../libmusl/include/errno.h ../libmusl/arch/generic/bits/errno.h \
  ../libmusl/include/limits.h ../libmusl/arch/generic/bits/limits.h \
@@ -20,7 +20,11 @@ libavfilter/graphdump.o: libavfilter/graphdump.c \
  libavutil/samplefmt.h libavutil/log.h libavutil/samplefmt.h \
  libavutil/pixfmt.h libavutil/rational.h libavfilter/version.h \
  libavutil/version.h libavfilter/internal.h libavutil/internal.h \
- libavfilter/formats.h libavfilter/framepool.h libavfilter/framequeue.h \
- libavfilter/thread.h libavfilter/version.h libavfilter/video.h \
- libavcodec/avcodec.h libavcodec/version.h libavcodec/internal.h \
- libavutil/mathematics.h libavcodec/avcodec.h
+ libavfilter/formats.h libavfilter/version.h libavfilter/framepool.h \
+ libavfilter/framequeue.h libavfilter/thread.h libavfilter/video.h \
+ libavcodec/avcodec.h libavutil/hwcontext.h libavutil/frame.h \
+ libavcodec/bsf.h libavcodec/codec_id.h libavcodec/codec_par.h \
+ libavcodec/packet.h libavcodec/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
+ libavcodec/internal.h libavutil/fifo.h libavutil/mathematics.h \
+ libavcodec/avcodec.h

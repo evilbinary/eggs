@@ -20,7 +20,11 @@ libavfilter/vf_copy.o: libavfilter/vf_copy.c libavutil/imgutils.h \
  libavutil/buffer.h libavutil/samplefmt.h libavutil/log.h \
  libavutil/samplefmt.h libavutil/pixfmt.h libavutil/rational.h \
  libavfilter/version.h libavutil/version.h libavfilter/internal.h \
- libavfilter/formats.h libavfilter/framepool.h libavfilter/framequeue.h \
- libavfilter/thread.h libavfilter/version.h libavfilter/video.h \
- libavcodec/avcodec.h libavutil/channel_layout.h libavcodec/version.h \
- libavcodec/internal.h libavutil/mathematics.h libavcodec/avcodec.h
+ libavfilter/formats.h libavfilter/version.h libavfilter/framepool.h \
+ libavfilter/framequeue.h libavfilter/thread.h libavfilter/video.h \
+ libavcodec/avcodec.h libavutil/channel_layout.h libavutil/hwcontext.h \
+ libavutil/frame.h libavcodec/bsf.h libavcodec/codec_id.h \
+ libavcodec/codec_par.h libavcodec/packet.h libavcodec/version.h \
+ libavcodec/codec.h libavcodec/codec_id.h libavcodec/codec_desc.h \
+ libavcodec/version.h libavcodec/internal.h libavutil/fifo.h \
+ libavutil/mathematics.h libavcodec/avcodec.h

@@ -1,4 +1,5 @@
 libavfilter/vf_colorchannelmixer.o: libavfilter/vf_colorchannelmixer.c \
+ ../libmusl/include/float.h ../libmusl/arch/i386/bits/float.h \
  libavutil/opt.h libavutil/rational.h ../libmusl/include/stdint.h \
  ../libmusl/obj/include/bits/alltypes.h \
  ../libmusl/arch/i386/bits/stdint.h ../libmusl/include/limits.h \
@@ -16,12 +17,16 @@ libavfilter/vf_colorchannelmixer.o: libavfilter/vf_colorchannelmixer.c \
  libavutil/dict.h libavutil/pixfmt.h libavutil/x86/emms.h \
  libavutil/attributes.h libavutil/cpu.h libavutil/libm.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/samplefmt.h \
- libavfilter/avfilter.h libavutil/avutil.h libavutil/buffer.h \
- libavutil/dict.h libavutil/frame.h libavutil/buffer.h libavutil/log.h \
- libavutil/samplefmt.h libavutil/pixfmt.h libavutil/rational.h \
- libavfilter/version.h libavutil/version.h libavfilter/drawutils.h \
- libavfilter/formats.h libavfilter/internal.h libavutil/internal.h \
- libavfilter/framepool.h libavfilter/framequeue.h libavfilter/thread.h \
- libavfilter/version.h libavfilter/video.h libavcodec/avcodec.h \
- libavutil/channel_layout.h libavcodec/version.h libavcodec/internal.h \
+ libavutil/pixdesc.h libavfilter/avfilter.h libavutil/avutil.h \
+ libavutil/buffer.h libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
+ libavutil/log.h libavutil/samplefmt.h libavutil/pixfmt.h \
+ libavutil/rational.h libavfilter/version.h libavutil/version.h \
+ libavfilter/drawutils.h libavfilter/formats.h libavfilter/version.h \
+ libavfilter/internal.h libavutil/internal.h libavfilter/framepool.h \
+ libavfilter/framequeue.h libavfilter/thread.h libavfilter/video.h \
+ libavcodec/avcodec.h libavutil/channel_layout.h libavutil/hwcontext.h \
+ libavutil/frame.h libavcodec/bsf.h libavcodec/codec_id.h \
+ libavcodec/codec_par.h libavcodec/packet.h libavcodec/version.h \
+ libavcodec/codec.h libavcodec/codec_id.h libavcodec/codec_desc.h \
+ libavcodec/version.h libavcodec/internal.h libavutil/fifo.h \
  libavutil/mathematics.h libavcodec/avcodec.h

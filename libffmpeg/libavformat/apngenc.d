@@ -18,13 +18,17 @@ libavformat/apngenc.o: libavformat/apngenc.c libavformat/avformat.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/rational.h \
  libavutil/avutil.h libavutil/buffer.h libavutil/channel_layout.h \
  libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
- libavutil/samplefmt.h libavutil/log.h libavutil/pixfmt.h \
- libavutil/rational.h libavcodec/version.h libavutil/version.h \
+ libavutil/samplefmt.h libavutil/hwcontext.h libavutil/frame.h \
+ libavutil/log.h libavutil/pixfmt.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
  libavformat/avio.h libavutil/common.h libavformat/version.h \
  libavformat/internal.h libavutil/bprint.h libavutil/avstring.h \
  libavformat/os_support.h ../libmusl/include/sys/stat.h \
  ../libmusl/include/sys/time.h ../libmusl/include/sys/select.h \
- ../libmusl/arch/i386/bits/stat.h libavutil/avassert.h libavutil/crc.h \
- libavutil/intreadwrite.h libavutil/bswap.h libavutil/x86/bswap.h \
- libavutil/x86/intreadwrite.h libavutil/opt.h libavcodec/png.h \
- libavcodec/apng.h
+ ../libmusl/arch/i386/bits/stat.h ../libmusl/include/sys/socket.h \
+ ../libmusl/arch/generic/bits/socket.h libavutil/avassert.h \
+ libavutil/crc.h libavutil/intreadwrite.h libavutil/bswap.h \
+ libavutil/x86/bswap.h libavutil/x86/intreadwrite.h libavutil/opt.h \
+ libavcodec/png.h libavcodec/pngdsp.h libavcodec/apng.h

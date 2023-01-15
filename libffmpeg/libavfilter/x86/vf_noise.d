@@ -1,7 +1,7 @@
 libavfilter/x86/vf_noise.o: libavfilter/x86/vf_noise.c \
- libavutil/attributes.h libavutil/x86/cpu.h config.h libavutil/cpu.h \
+ libavutil/attributes.h libavutil/x86/cpu.h libavutil/cpu.h \
  ../libmusl/include/stddef.h ../libmusl/obj/include/bits/alltypes.h \
- libavutil/attributes.h libavutil/cpu_internal.h libavutil/cpu.h \
+ libavutil/attributes.h libavutil/cpu_internal.h config.h libavutil/cpu.h \
  libavutil/x86/asm.h ../libmusl/include/stdint.h \
  ../libmusl/arch/i386/bits/stdint.h libavfilter/vf_noise.h \
  libavutil/lfg.h libavfilter/avfilter.h libavutil/avutil.h \

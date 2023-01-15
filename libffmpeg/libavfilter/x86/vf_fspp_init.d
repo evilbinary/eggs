@@ -1,7 +1,7 @@
 libavfilter/x86/vf_fspp_init.o: libavfilter/x86/vf_fspp_init.c \
- libavutil/attributes.h libavutil/x86/cpu.h config.h libavutil/cpu.h \
+ libavutil/attributes.h libavutil/x86/cpu.h libavutil/cpu.h \
  ../libmusl/include/stddef.h ../libmusl/obj/include/bits/alltypes.h \
- libavutil/attributes.h libavutil/cpu_internal.h libavutil/cpu.h \
+ libavutil/attributes.h libavutil/cpu_internal.h config.h libavutil/cpu.h \
  libavfilter/vf_fspp.h libavfilter/avfilter.h libavutil/avutil.h \
  libavutil/common.h ../libmusl/include/errno.h \
  ../libmusl/include/features.h ../libmusl/arch/generic/bits/errno.h \

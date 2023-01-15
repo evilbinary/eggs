@@ -18,10 +18,15 @@ libavformat/aqtitledec.o: libavformat/aqtitledec.c libavformat/avformat.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/rational.h \
  libavutil/avutil.h libavutil/buffer.h libavutil/channel_layout.h \
  libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
- libavutil/samplefmt.h libavutil/log.h libavutil/pixfmt.h \
- libavutil/rational.h libavcodec/version.h libavutil/version.h \
+ libavutil/samplefmt.h libavutil/hwcontext.h libavutil/frame.h \
+ libavutil/log.h libavutil/pixfmt.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
  libavformat/avio.h libavutil/common.h libavformat/version.h \
  libavformat/internal.h libavutil/bprint.h libavutil/avstring.h \
  libavformat/os_support.h ../libmusl/include/sys/stat.h \
  ../libmusl/include/sys/time.h ../libmusl/include/sys/select.h \
- ../libmusl/arch/i386/bits/stat.h libavformat/subtitles.h libavutil/opt.h
+ ../libmusl/arch/i386/bits/stat.h ../libmusl/include/sys/socket.h \
+ ../libmusl/arch/generic/bits/socket.h libavformat/subtitles.h \
+ libavutil/opt.h

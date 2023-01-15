@@ -18,8 +18,12 @@ libavdevice/avdevice.o: libavdevice/avdevice.c libavutil/avassert.h \
  libavutil/samplefmt.h libavutil/pixfmt.h libavcodec/avcodec.h \
  libavutil/avutil.h libavutil/buffer.h libavutil/channel_layout.h \
  libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
- libavutil/samplefmt.h libavutil/log.h libavutil/rational.h \
- libavcodec/version.h libavutil/version.h libavdevice/avdevice.h \
- libavdevice/version.h libavutil/opt.h libavformat/avformat.h \
- ../libmusl/include/time.h libavformat/avio.h libavutil/common.h \
- libavformat/version.h libavdevice/internal.h libavutil/ffversion.h
+ libavutil/samplefmt.h libavutil/hwcontext.h libavutil/frame.h \
+ libavutil/log.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
+ libavdevice/avdevice.h libavdevice/version.h libavutil/opt.h \
+ libavformat/avformat.h ../libmusl/include/time.h libavformat/avio.h \
+ libavutil/common.h libavformat/version.h libavdevice/internal.h \
+ libavutil/ffversion.h

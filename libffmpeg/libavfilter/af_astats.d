@@ -1,12 +1,12 @@
 libavfilter/af_astats.o: libavfilter/af_astats.c \
  ../libmusl/include/float.h ../libmusl/arch/i386/bits/float.h \
- libavutil/opt.h libavutil/rational.h ../libmusl/include/stdint.h \
- ../libmusl/obj/include/bits/alltypes.h \
+ ../libmusl/include/math.h ../libmusl/include/features.h \
+ ../libmusl/obj/include/bits/alltypes.h libavutil/opt.h \
+ libavutil/rational.h ../libmusl/include/stdint.h \
  ../libmusl/arch/i386/bits/stdint.h ../libmusl/include/limits.h \
- ../libmusl/include/features.h ../libmusl/arch/generic/bits/limits.h \
- libavutil/attributes.h libavutil/avutil.h libavutil/common.h \
- ../libmusl/include/errno.h ../libmusl/arch/generic/bits/errno.h \
- ../libmusl/include/inttypes.h ../libmusl/include/math.h \
+ ../libmusl/arch/generic/bits/limits.h libavutil/attributes.h \
+ libavutil/avutil.h libavutil/common.h ../libmusl/include/errno.h \
+ ../libmusl/arch/generic/bits/errno.h ../libmusl/include/inttypes.h \
  ../libmusl/include/stdio.h ../libmusl/include/stdlib.h \
  ../libmusl/include/string.h libavutil/macros.h libavutil/version.h \
  libavutil/avconfig.h config.h libavutil/intmath.h \
@@ -22,7 +22,11 @@ libavfilter/af_astats.o: libavfilter/af_astats.c \
  libavutil/log.h libavutil/samplefmt.h libavutil/pixfmt.h \
  libavutil/rational.h libavfilter/version.h libavutil/version.h \
  libavfilter/internal.h libavutil/internal.h libavfilter/formats.h \
- libavfilter/framepool.h libavfilter/framequeue.h libavfilter/thread.h \
- libavfilter/version.h libavfilter/video.h libavcodec/avcodec.h \
- libavutil/channel_layout.h libavcodec/version.h libavcodec/internal.h \
- libavutil/mathematics.h libavcodec/avcodec.h
+ libavfilter/version.h libavfilter/framepool.h libavfilter/framequeue.h \
+ libavfilter/thread.h libavfilter/video.h libavcodec/avcodec.h \
+ libavutil/channel_layout.h libavutil/hwcontext.h libavutil/frame.h \
+ libavcodec/bsf.h libavcodec/codec_id.h libavcodec/codec_par.h \
+ libavcodec/packet.h libavcodec/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
+ libavcodec/internal.h libavutil/fifo.h libavutil/mathematics.h \
+ libavcodec/avcodec.h

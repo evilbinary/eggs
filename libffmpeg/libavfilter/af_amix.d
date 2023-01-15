@@ -16,13 +16,17 @@ libavfilter/af_amix.o: libavfilter/af_amix.c libavutil/attributes.h \
  libavutil/libm.h libavutil/intfloat.h libavutil/mathematics.h \
  libavutil/rational.h libavutil/fifo.h libavutil/samplefmt.h \
  libavutil/avassert.h libavutil/avstring.h libavutil/channel_layout.h \
- libavutil/common.h libavutil/float_dsp.h libavutil/mathematics.h \
- libavutil/opt.h libavutil/samplefmt.h libavfilter/audio.h \
- libavfilter/avfilter.h libavutil/avutil.h libavutil/buffer.h \
- libavutil/dict.h libavutil/frame.h libavutil/buffer.h libavutil/log.h \
- libavutil/pixfmt.h libavutil/rational.h libavfilter/version.h \
- libavutil/version.h libavfilter/internal.h libavutil/internal.h \
- libavfilter/formats.h libavfilter/framepool.h libavfilter/framequeue.h \
- libavfilter/thread.h libavfilter/version.h libavfilter/video.h \
- libavcodec/avcodec.h libavcodec/version.h libavcodec/internal.h \
+ libavutil/common.h libavutil/eval.h libavutil/float_dsp.h \
+ libavutil/mathematics.h libavutil/opt.h libavutil/samplefmt.h \
+ libavfilter/audio.h libavfilter/avfilter.h libavutil/avutil.h \
+ libavutil/buffer.h libavutil/dict.h libavutil/frame.h libavutil/buffer.h \
+ libavutil/log.h libavutil/pixfmt.h libavutil/rational.h \
+ libavfilter/version.h libavutil/version.h libavfilter/internal.h \
+ libavutil/internal.h libavfilter/formats.h libavfilter/version.h \
+ libavfilter/framepool.h libavfilter/framequeue.h libavfilter/thread.h \
+ libavfilter/video.h libavcodec/avcodec.h libavutil/hwcontext.h \
+ libavutil/frame.h libavcodec/bsf.h libavcodec/codec_id.h \
+ libavcodec/codec_par.h libavcodec/packet.h libavcodec/version.h \
+ libavcodec/codec.h libavcodec/codec_id.h libavcodec/codec_desc.h \
+ libavcodec/version.h libavcodec/internal.h libavutil/fifo.h \
  libavcodec/avcodec.h libavfilter/filters.h

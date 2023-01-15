@@ -15,16 +15,20 @@ libavformat/asfenc.o: libavformat/asfenc.c libavutil/avassert.h \
  libavutil/dict.h libavutil/pixfmt.h libavutil/x86/emms.h \
  libavutil/attributes.h libavutil/cpu.h libavutil/libm.h \
  libavutil/intfloat.h libavutil/mathematics.h libavutil/rational.h \
- libavutil/dict.h libavutil/mathematics.h libavutil/parseutils.h \
- ../libmusl/include/time.h libavutil/opt.h libavutil/samplefmt.h \
- libavformat/avformat.h libavcodec/avcodec.h libavutil/samplefmt.h \
- libavutil/avutil.h libavutil/buffer.h libavutil/channel_layout.h \
- libavutil/frame.h libavutil/buffer.h libavutil/log.h libavutil/pixfmt.h \
- libavutil/rational.h libavcodec/version.h libavutil/version.h \
+ libavutil/dict.h libavutil/mathematics.h libavutil/opt.h \
+ libavutil/samplefmt.h libavformat/avformat.h ../libmusl/include/time.h \
+ libavcodec/avcodec.h libavutil/samplefmt.h libavutil/avutil.h \
+ libavutil/buffer.h libavutil/channel_layout.h libavutil/frame.h \
+ libavutil/buffer.h libavutil/hwcontext.h libavutil/frame.h \
+ libavutil/log.h libavutil/pixfmt.h libavutil/rational.h libavcodec/bsf.h \
+ libavcodec/codec_id.h libavcodec/codec_par.h libavcodec/packet.h \
+ libavcodec/version.h libavutil/version.h libavcodec/codec.h \
+ libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
  libavformat/avio.h libavutil/common.h libavformat/version.h \
  libavformat/avlanguage.h libavformat/avio_internal.h libavformat/url.h \
  libavformat/internal.h libavutil/bprint.h libavutil/avstring.h \
  libavformat/os_support.h ../libmusl/include/sys/stat.h \
  ../libmusl/include/sys/time.h ../libmusl/include/sys/select.h \
- ../libmusl/arch/i386/bits/stat.h libavformat/riff.h \
+ ../libmusl/arch/i386/bits/stat.h ../libmusl/include/sys/socket.h \
+ ../libmusl/arch/generic/bits/socket.h libavformat/riff.h \
  libavformat/metadata.h libavformat/asf.h
