@@ -76,6 +76,9 @@ EtkWidget* etk_wnd_manager_get_select_widget(EtkWndManager* thiz,e32 x,e32 y){
 		if(p->visable==1&&is_rect_cross(p->rect,cursor)){
 			return p;
 		}
+		if(p==p->prev){
+			break;
+		}
 		p=p->prev;
 	}
 	return NULL;

@@ -50,6 +50,9 @@
 #ifndef EINPROGRESS
 #define EINPROGRESS     WSAEINPROGRESS
 #endif
+#ifndef ENOTCONN
+#define ENOTCONN        WSAENOTCONN
+#endif
 
 #define getsockopt(a, b, c, d, e) getsockopt(a, b, c, (char*) d, e)
 #define setsockopt(a, b, c, d, e) setsockopt(a, b, c, (const char*) d, e)
@@ -59,7 +62,7 @@ int ff_neterrno(void);
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-// #include <netdb.h>
+#include <netdb.h>
 
 #define ff_neterrno() AVERROR(errno)
 #endif /* HAVE_WINSOCK2_H */
