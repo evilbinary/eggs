@@ -5,6 +5,7 @@
 *.gdb
 *.elf
 *.dbg
+*.d
 kernel
 
 eggs/libmusl/config.mak
