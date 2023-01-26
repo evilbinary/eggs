@@ -13,6 +13,17 @@
  */
 
 #include "types.h"
+#include "stdio.h"
+
+
+#ifdef ARM
+#define HAVE_PROTOTYPES 1
+// typedef unsigned char boolean;
+// #define HAVE_BOOLEAN
+// #ifdef JPEG_INTERNALS
+// #define INLINE __inline__
+// #endif
+#endif
 
 /*
  * These symbols indicate the properties of your machine or compiler.

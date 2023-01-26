@@ -16,7 +16,6 @@
 
 #include "types.h"
 #include "stdio.h"
-
 #ifdef ARM
 #define HAVE_PROTOTYPES 1
 // typedef unsigned char boolean;

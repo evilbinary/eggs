@@ -68,6 +68,9 @@ def config_build():
         '--disable-demuxers ',
         '--enable-demuxer=aac',
         '--enable-demuxer=h264',
+        '--disable-vfp',
+        # '--disable-neon',
+        '--disable-inline-asm'
 
     ]
 
