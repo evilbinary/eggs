@@ -36,7 +36,7 @@ if env.get('MYLIB'):
     libpath += ' -I'+env.get('CC_LIB_PATH')
 
 
-def config_build():
+def config_build(config=True):
     params = [
         '--enable-cross-compile',
         '--arch='+env['ARCHTYPE'],
@@ -74,20 +74,25 @@ def config_build():
 
     ]
 
-    params = map(patch_path, params)
+    if config:
+        params = map(patch_path, params)
 
-    configured = env.AutoConfig(Dir('.'),
-                                AutoConfigParams=params,
-                                AutoConfigTarget='config.mk',
-                                AutoConfigSource='configure'
-                                )
+        configured = env.AutoConfig(Dir('.'),
+                                    AutoConfigParams=params,
+                                    AutoConfigTarget='config.mk',
+                                    AutoConfigSource='configure'
+                                    )
+        env.Command('./ffbuild/config.mak-'+env.get('ARCHTYPE'), configured,
+                    'cd %s && make clean && cp ./ffbuild/config.mak ./ffbuild/config.mak-%s' % (current, env.get('ARCHTYPE')))
 
-    env.Command('./ffbuild/config.mak-'+env.get('ARCHTYPE'), configured, 'cd %s && make clean && cp ./ffbuild/config.mak ./ffbuild/config.mak-%s' %
-                (current, env.get('ARCHTYPE')))
+    else:
+        configured = './ffbuild/config.mak-'+env.get('ARCHTYPE'),
+
     musl = env.Command('ffmpeg',
                        configured,
                        'cd %s && make -j8' % (current))
-
+    env.Requires('ffmpeg','musl')
+    
     returns.append(musl)
 
 
@@ -97,11 +102,13 @@ if os.path.exists('ffbuild/config.mak'):
         print('remove configure')
         os.remove('ffbuild/config.mak')
         config_build()
-    env.Command('ffmpeg2',
-                './ffbuild/config.mak-'+env.get('ARCHTYPE'),
-                'cd %s && make -j8' % (current))
+    else:
+        config_build(False)
 else:
     config_build()
+
+
+env.Clean('ffmpeg',['ffbuild/config.mak']+ Glob('./**/**.[o|a]') )
 
 
 Return('returns')

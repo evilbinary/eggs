@@ -15,41 +15,48 @@ source = []
 
 current = Dir('.').srcnode().path
 
-returns=[]
+returns = []
 
-def config_build():
-    params = [env['CC'],
-              'CROSS_COMPILE='+env['CC_PREFIX'],
-              'CFLAGS=-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS %s' % (
-        env['CFLAGS']),
-        '--disable-optimize --enable-debug=yes'
-    ]
 
-    configured = env.AutoConfig(Dir('.'),
-                                AutoConfigParams=params,
-                                AutoConfigTarget='config.mk',
-                                AutoConfigSource='configure'
-                                )
+def config_build(config=True):
+    if config:
 
-    env.Command('./config.mak-'+env.get('ARCHTYPE'),configured,'cd %s && make clean && cp ./config.mak ./config.mak-%s' %
-                (current, env.get('ARCHTYPE')))
-    musl=env.Command('musl',
-            configured,
-            'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))
+        params = [env['CC'],
+                  'CROSS_COMPILE='+env['CC_PREFIX'],
+                  'CFLAGS=-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS %s' % (
+            env['CFLAGS']),
+            '--disable-optimize --enable-debug=yes'
+        ]
 
+        configured = env.AutoConfig(Dir('.'),
+                                    AutoConfigParams=params,
+                                    AutoConfigTarget='config.mk',
+                                    AutoConfigSource='configure'
+                                    )
+
+        env.Command('./config.mak-'+env.get('ARCHTYPE'), configured, 'cd %s && make clean && cp ./config.mak ./config.mak-%s' %
+                    (current, env.get('ARCHTYPE')))
+    else:
+        configured = 'config.mak-'+env.get('ARCHTYPE')
+    musl = env.Command('musl',
+                           configured,
+                           'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))
     returns.append(musl)
 
 if os.path.exists('config.mak'):
-    print('configure is up-to-date')
+    print('configure libmusl is up-to-date')
     if not os.path.exists('config.mak-'+env.get('ARCHTYPE')):
         print('remove configure')
         os.remove('config.mak')
         config_build()
-    musl=env.Command('musl',
-        'config.mak-'+env.get('ARCHTYPE'),
-        'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))
+    else:
+        config_build(False)
 else:
     config_build()
 
+
+
+
+env.Clean('musl',['config.mak']+ Glob('./**/**.[o|a]') )
 
 Return('returns')
