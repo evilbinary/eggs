@@ -32,7 +32,7 @@ def patch_path(var):
 
 
 if env.get('MYLIB'):
-    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')
+    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' -lm'
     libpath += ' -I'+env.get('CC_LIB_PATH')
 
 
@@ -59,19 +59,36 @@ def config_build(config=True):
         '--disable-podpages',
         '--disable-txtpages',
 
-        '--disable-encoders ',
-        '--disable-decoders ',
-        '--enable-decoder=aac',
-        '--enable-decoder=aac_at',
-        '--enable-decoder=h264',
-        '--enable-decoder=h264_mediacodec',
-        '--disable-demuxers ',
-        '--enable-demuxer=aac',
-        '--enable-demuxer=h264',
+        # '--disable-encoders ',
+        # '--disable-decoders ',
+        # '--enable-decoder=aac',
+        # '--enable-decoder=aac_at',
+        # '--enable-decoder=h264',
+        # '--enable-decoder=h264_mediacodec',
+        # '--disable-demuxers ',
+        # '--enable-demuxer=aac',
+        # '--enable-demuxer=h264',
         '--disable-vfp',
         # '--disable-neon',
-        '--disable-inline-asm'
+        '--disable-inline-asm',
 
+
+        '--disable-dct',
+        '--disable-asm',
+
+        # '--disable-yasm',
+        # '--disable-yasm',
+		# '--disable-stripping',
+		# 
+		# '--disable-encoders',
+		# '--disable-decoders',
+		# '--enable-decoder=aac',
+		# '--enable-decoder=aac_at',
+		# '--enable-decoder=h264',
+		# '--enable-decoder=h264_mediacodec',
+		# '--disable-demuxers ',
+		# '--enable-demuxer=aac',
+		# '--enable-demuxer=h264',
     ]
 
     if config:
