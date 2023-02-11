@@ -105,9 +105,10 @@ def config_build(config=True):
     else:
         configured = './ffbuild/config.mak-'+env.get('ARCHTYPE'),
 
+    job_number = env.GetOption('num_jobs')
     musl = env.Command('ffmpeg',
                        configured,
-                       'cd %s && make -j8' % (current))
+                       'cd %s && make -j%d' % (current,job_number))
     env.Requires('ffmpeg','musl')
     
     returns.append(musl)

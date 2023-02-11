@@ -38,9 +38,12 @@ def config_build(config=True):
                     (current, env.get('ARCHTYPE')))
     else:
         configured = 'config.mak-'+env.get('ARCHTYPE')
+
+    job_number = env.GetOption('num_jobs')
+    print("Number of parallel build jobs:", job_number)
     musl = env.Command('musl',
                            configured,
-                           'cd %s && make -j8 && cp lib/libc.a lib/libmusl.a' % (current))
+                           'cd %s && make -j%d && cp lib/libc.a lib/libmusl.a' % (current,job_number))
     returns.append(musl)
 
 if os.path.exists('config.mak'):
