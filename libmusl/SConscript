@@ -60,6 +60,6 @@ else:
 
 
 
-env.Clean('musl',['config.mak']+ Glob('./**/**.[o|a]') )
+env.Clean('musl',['config.mak']+ Glob('./**/**.[o|a]')+['obj','lib'] )
 
 Return('returns')
