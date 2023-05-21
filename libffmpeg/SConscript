@@ -32,7 +32,7 @@ def patch_path(var):
 
 
 if env.get('MYLIB'):
-    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' -lm'
+    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
     libpath += ' -I'+env.get('CC_LIB_PATH')
 
 
@@ -92,8 +92,7 @@ def config_build(config=True):
     ]
 
     if config:
-        params = map(patch_path, params)
-
+        params = list(map(patch_path, params))
         configured = env.AutoConfig(Dir('.'),
                                     AutoConfigParams=params,
                                     AutoConfigTarget='config.mk',
