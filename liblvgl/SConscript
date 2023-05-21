@@ -17,6 +17,7 @@ sources=[
 ]
 sources+= Glob('src/core/*.c')
 sources+= Glob('src/draw/*.c')
+sources+= Glob('src/draw/sw/*.c')
 sources+= Glob('src/font/*.c')
 sources+= Glob('src/gpu/*.c')
 sources+= Glob('src/hal/*.c')

@@ -37,8 +37,6 @@
 #if LV_SPRINTF_CUSTOM == 0
 
 #include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
 
 #define PRINTF_DISABLE_SUPPORT_FLOAT    (!LV_SPRINTF_USE_FLOAT)
 
@@ -134,10 +132,10 @@ static inline void _out_buffer(char character, void * buffer, size_t idx, size_t
 // internal null output
 static inline void _out_null(char character, void * buffer, size_t idx, size_t maxlen)
 {
-    (void)character;
-    (void)buffer;
-    (void)idx;
-    (void)maxlen;
+    LV_UNUSED(character);
+    LV_UNUSED(buffer);
+    LV_UNUSED(idx);
+    LV_UNUSED(maxlen);
 }
 
 // internal secure strlen
@@ -289,10 +287,9 @@ static size_t _ntoa_long_long(out_fct_type out, char * buffer, size_t idx, size_
     // write if precision != 0 and value is != 0
     if(!(flags & FLAGS_PRECISION) || value) {
         do {
-            div_t d=div(value, base);
-            const char digit = (char)d.rem;
+            const char digit = (char)(value % base);
             buf[len++] = digit < 10 ? '0' + digit : (flags & FLAGS_UPPERCASE ? 'A' : 'a') + digit - 10;
-            value= d.quot;
+            value /= base;
         } while(value && (len < PRINTF_NTOA_BUFFER_SIZE));
     }
 
@@ -701,6 +698,9 @@ static int _vsnprintf(out_fct_type out, char * buffer, const size_t maxlen, cons
                         else
 #endif
                             flags |= FLAGS_LONG;
+
+                        if(*(format + 1) == 'V')
+                            format++;
                     }
                     else if(*format == 'o') {
                         base =  8U;
@@ -748,6 +748,14 @@ static int _vsnprintf(out_fct_type out, char * buffer, const size_t maxlen, cons
                             idx = _ntoa_long(out, buffer, idx, maxlen, (unsigned int)(value > 0 ? value : 0 - value), value < 0, base, precision,
                                              width, flags);
                         }
+                    }
+                    else if(*format == 'V') {
+                        lv_vaformat_t * vaf = va_arg(va, lv_vaformat_t *);
+                        va_list copy;
+
+                        va_copy(copy, *vaf->va);
+                        idx += _vsnprintf(out, buffer + idx, maxlen - idx, vaf->fmt, copy);
+                        va_end(copy);
                     }
                     else {
                         // unsigned
