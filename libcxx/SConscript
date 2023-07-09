@@ -1,0 +1,39 @@
+# coding:utf-8
+# *******************************************************************
+# * Copyright 2021-2080 evilbinary
+# * 作者: evilbinary on 01/01/20
+# * 邮箱: rootdebug@163.com
+# ********************************************************************
+import os
+
+Import('env')
+
+cflags=' -ffreestanding -fpic '
+
+cxxflags=' -fno-use-cxa-atexit -fno-threadsafe-statics -D_LIBCPP_HAS_NO_THREADS -D_LIBCPP_HAS_NO_MONOTONIC_CLOCK -D_LIBCPP_HAS_MUSL_LIBC -D_LIBCPP_HAS_NO_LIBRARY_ALIGNED_ALLOCATION    -D_LIBCPP_BUILDING_LIBRARY -D_POSIX_C_SOURCE -D_LIBCXXABI_HAS_NO_THREADS -D_GNU_SOURCE  '+cflags
+
+libs=[
+    'libmusl.a',
+    'libcxxabi.a',
+]+env['LIBC']
+
+libpath=[
+
+]
+include=[
+    '.',
+    './include',
+    '../../duck/libs/include'
+]+libpath
+
+
+source = []
+source += Glob('src/*.cpp')
+
+
+env.Library('libcxx', source,
+    LIBS=libs,
+    LIBPATH=libpath+env.get('LIBPATH'),
+    CPPPATH=include+env.get('CPPPATH'),
+    CXXFLAGS='$CXXFLAGS '+cxxflags,
+    CFLAGS='$CFLAGS '+cflags)
