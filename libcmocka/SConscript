@@ -8,7 +8,7 @@ import os
 
 Import('env')
 
-cflags='-Iapp/libcmocka/include \
+cflags='-Ieggs/libcmocka/include \
         -I. \
         '
 

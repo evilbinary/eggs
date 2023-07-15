@@ -1,0 +1,96 @@
+/*
+  Simple DirectMedia Layer
+  Copyright (C) 1997-2022 Sam Lantinga <slouken@libsdl.org>
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+*/
+#include "SDL_config.h"
+
+#if defined(SDL_TIMER_DUMMY) || defined(SDL_TIMERS_DISABLED)
+
+#include "SDL_timer.h"
+#include "../SDL_timer_c.h"
+
+static SDL_bool ticks_started = SDL_FALSE;
+
+void SDL_StartTicks(void)
+{
+}
+
+Uint32 SDL_GetTicks (void)
+{
+	SDL_Unsupported();
+	return 0;
+}
+
+void SDL_Delay (Uint32 ms)
+{
+	SDL_Unsupported();
+}
+
+#include "SDL_thread.h"
+
+/* Data to handle a single periodic alarm */
+static int timer_alive = 0;
+static SDL_Thread *timer = NULL;
+
+static int RunTimer(void *unused)
+{
+	while ( timer_alive ) {
+		if ( SDL_timer_running ) {
+			SDL_ThreadedTimerCheck();
+		}
+		SDL_Delay(1);
+	}
+	return(0);
+}
+
+/* This is only called if the event thread is not running */
+int SDL_SYS_TimerInit(void)
+{
+	timer_alive = 1;
+	timer = SDL_CreateThread(RunTimer, NULL);
+	if ( timer == NULL )
+		return(-1);
+	return(SDL_SetTimerThreaded(1));
+}
+
+void SDL_SYS_TimerQuit(void)
+{
+	timer_alive = 0;
+	if ( timer ) {
+		SDL_WaitThread(timer, NULL);
+		timer = NULL;
+	}
+}
+
+int SDL_SYS_StartTimer(void)
+{
+	SDL_SetError("Internal logic error: threaded timer in use");
+	return(-1);
+}
+
+void SDL_SYS_StopTimer(void)
+{
+	return;
+}
+
+
+
+#endif /* SDL_TIMER_DUMMY || SDL_TIMERS_DISABLED */
+
+/* vi: set ts=4 sw=4 expandtab: */

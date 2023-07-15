@@ -43,6 +43,9 @@ if env.get('APP'):
     # SConscript(dirs=['libstdc++'], exports='env')
     SConscript(dirs=['libcxx'], exports='env')
     SConscript(dirs=['libcxxabi'], exports='env')
+    SConscript(dirs=['libsdl'], exports='env')
+    SConscript(dirs=['libsdl-ttf'], exports='env')
+    SConscript(dirs=['libsdl-image'], exports='env')
 
 
     if env.get('DEFAULT_LIBC') == 'libmusl':

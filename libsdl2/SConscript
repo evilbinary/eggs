@@ -60,5 +60,5 @@ source +=[
 
 
 env.Library('sdl2', source,
-    CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__ -Iapp/libgui/ -Iapp/libjpeg -Iapp/libsdl2 -Iapp/libsdl2/include -I.',
+    CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__ -Ieggs/libgui/ -Ieggs/libjpeg -Ieggs/libsdl2 -Ieggs/libsdl2/include -I.',
     LINKFLAGS= '$LINKFLAGS $USER')
