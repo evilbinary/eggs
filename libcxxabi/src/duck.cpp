@@ -47,19 +47,19 @@ double __aeabi_f2d(float f)
 }
 
 
-int __aeabi_idivmod(int numerator, int denominator)
-{
-    int quotient = numerator / denominator;
-    int remainder = numerator % denominator;
-    return (quotient << 16) | (remainder & 0xFFFF);
-}
+// int __aeabi_idivmod(int numerator, int denominator)
+// {
+//     int quotient = numerator / denominator;
+//     int remainder = numerator % denominator;
+//     return (quotient << 16) | (remainder & 0xFFFF);
+// }
 
 
-int __aeabi_idiv(int numerator, int denominator)
-{
-    int quotient = numerator / denominator;
-    return quotient;
-}
+// int __aeabi_idiv(int numerator, int denominator)
+// {
+//     int quotient = numerator / denominator;
+//     return quotient;
+// }
 
 // #include "unwind.h"
 

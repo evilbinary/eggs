@@ -12,6 +12,10 @@
 #include "types.h"
 #include "event.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define ASC_WIDTH 8
 #define CHS_WIDTH 16
 #define SPACING 2
@@ -99,5 +103,9 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
                              i32 dose_use_mask_color);
 
 void screen_flush();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
