@@ -1,0 +1,111 @@
+# coding:utf-8
+# *******************************************************************
+# * Copyright 2021-2080 evilbinary
+# * 作者: evilbinary on 01/01/20
+# * 邮箱: rootdebug@163.c",om
+# ********************************************************************
+import os
+import SCons
+
+Import('env')
+
+cflags = ' -L../libmusl/lib '
+
+source = []
+
+current = Dir('.').srcnode().path+'/libstdc++-v3'
+
+returns = []
+
+libpath = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#/', '')
+libs = ''
+
+ldflags = env['LINKFLAGS'] + \
+    ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
+
+cflags += env['CFLAGS']
+
+
+def patch_path(var):
+    return var.replace(
+        'eggs/libmusl', '../libmusl')
+
+
+# if env.get('MYLIB'):
+#     ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
+#     libpath += ' -I'+env.get('CC_LIB_PATH')
+
+
+def config_build(config=True):
+    params = [
+        '--with-cross-host='+env['CC_PREFIX'],
+        '-disable-multilib',
+        '--with-target-subdir=.',
+        '--build=i386-linux',
+        '--host=arm-none-eabi',
+        # '--build='+env['CC_PREFIX'].replace('eabi-','eabi'),
+        # '--target='+env['CC_PREFIX'].replace('eabi-','eabi'),
+        # '--host='+env['CC_PREFIX'].replace('eabi-','eabi'),
+        '--disable-shared',
+        '--enable-static',
+        '--disable-nls',
+        '--disable-libstdcxx-pch',
+        'CFLAGS=%s'%(cflags),
+        '-enable-languages=c,c++',
+        '--disable-libstdcxx-threads',
+        '--disable-nls',
+
+        # ' --with-gxx-include-dir='
+
+        # '--arch='+env['ARCHTYPE'],
+        # '--target-os=linux',
+        #'--cross-prefix='+env['CC_PREFIX'],
+        # '--enable-cxx-flags=%s  %s %s' % (
+        #     libpath, libs, cflags),
+        # '--extra-ldflags=%s ' % (ldflags),
+        # '--host-extralibs=',
+       
+    ]
+    # Build表示编译交叉编译器的平台
+    # Host表示交叉编译器将运行的平台
+    # Target表示交叉编译器运行生成的可执行文件或者库所针对的平台
+    # '--host=aarch64-linux',
+    # '--target=aarch64-linux',
+
+    if config:
+        params = list(map(patch_path, params))
+        configured = env.AutoConfig(Dir('./libstdc++-v3/'),
+                                    AutoConfigParams=params,
+                                    AutoConfigTarget='config.h',
+                                    AutoConfigSource='configure'
+                                    )
+        env.Command('libstdc++', configured,
+                    'cd %s && make clean ' % (current ))
+
+    else:
+        configured = 'libstdc++-v3/config.h',
+
+    job_number = env.GetOption('num_jobs')
+    musl = env.Command('libstdc++',
+                       configured,
+                       'cd %s && make -j%d' % (current,job_number))
+    # env.Requires('musl')
+    
+    returns.append(musl)
+
+
+if os.path.exists('libstdc++-v3/config.h'):
+    print('configure is up-to-date')
+    if not os.path.exists('libstdc++-v3/config.h'):
+        print('remove configure')
+        os.remove('libstdc++-v3/config.h')
+        config_build()
+    else:
+        config_build(False)
+else:
+    config_build()
+
+# env.Clean('libstdc++',['libstdc++/config.h']+ Glob('./**/**.[o|a]') )
+
+
+Return('returns')

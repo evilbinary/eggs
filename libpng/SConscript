@@ -8,6 +8,7 @@ import os
 
 Import('env')
 
+cflags= '-DPNG_DEBUG=1  $CFLAGS $LIBCFLAGS -Ieggs/libzlib/ -I. '
 
 env.Library('png', [
     "png.c",
@@ -25,4 +26,4 @@ env.Library('png', [
     "pngwrite.c",
     "pngwtran.c",
     "pngwutil.c",
-],CFLAGS='$CFLAGS $LIBCFLAGS -Iapp/libzlib/ -I.')
+],CFLAGS=cflags)

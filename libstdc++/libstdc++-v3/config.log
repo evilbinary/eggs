@@ -1,0 +1,37 @@
+This file contains any messages produced by compilers while
+running configure, to aid debugging if configure makes a mistake.
+
+configure:648: checking host system type
+configure:669: checking target system type
+configure:687: checking build system type
+configure:740: checking for a BSD compatible install
+configure:793: checking whether build environment is sane
+configure:850: checking whether make sets ${MAKE}
+configure:883: checking for Cygwin environment
+configure:916: checking for mingw32 environment
+configure:980: checking for working aclocal
+configure:993: checking for working autoconf
+configure:1006: checking for working automake
+configure:1019: checking for working autoheader
+configure:1032: checking for working makeinfo
+configure:1067: checking for gcc
+configure:1146: checking whether we are using GNU C
+configure:1170: checking whether gcc accepts -g
+configure:1215: checking for c++
+configure:1250: checking whether we are using GNU C++
+configure:1274: checking whether c++ accepts -g
+configure:1305: checking for arm-none-eabi-as
+configure:1337: checking for arm-none-eabi-ar
+configure:1369: checking for arm-none-eabi-ranlib
+configure:1445: checking for a BSD compatible install
+configure:1499: checking whether to enable maintainer-specific portions of Makefiles
+configure:1668: checking for ld used by GCC
+configure:1736: checking if the linker (/Library/Developer/CommandLineTools/usr/bin/ld) is GNU ld
+configure:1753: checking for /Library/Developer/CommandLineTools/usr/bin/ld option to reload object files
+configure:1765: checking for BSD-compatible nm
+configure:1803: checking whether ln -s works
+configure:1824: checking how to recognise dependant libraries
+configure:1988: checking for object suffix
+configure:2151: checking for arm-none-eabi-ranlib
+configure:2218: checking for arm-none-eabi-strip
+configure:2389: checking how to run the C++ preprocessor
