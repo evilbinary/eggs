@@ -8,13 +8,13 @@ import os
 
 Import('env')
 
-cflags=' -Iapp/libgui/ \
-        -Iapp/libjpeg \
-        -Iapp/libsdl2 \
-        -Iapp/libsdl2/include \
+cflags=' -Ieggs/libgui/ \
+        -Ieggs/libjpeg \
+        -Ieggs/libsdl2 \
+        -Ieggs/libsdl2/include \
         -I. \
-        -Iapp/libpng/ \
-        -Iapp/libwebp/ \
+        -Ieggs/libpng/ \
+        -Ieggs/libwebp/ \
                         '
 
 source=[]

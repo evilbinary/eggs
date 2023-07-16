@@ -31,9 +31,9 @@ def patch_path(var):
         'eggs/libmusl', '../libmusl')
 
 
-if env.get('MYLIB'):
-    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
-    libpath += ' -I'+env.get('CC_LIB_PATH')
+# if env.get('MYLIB'):
+#     ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
+#     libpath += ' -I'+env.get('CC_LIB_PATH')
 
 
 def config_build(config=True):
@@ -41,7 +41,7 @@ def config_build(config=True):
         '--enable-cross-compile',
         '--arch='+env['ARCHTYPE'],
         '--target-os=linux',
-        '--cross-prefix='+env['CC_PREFIX'],
+        #'--cross-prefix='+env['CC_PREFIX'],
         '--extra-cflags=%s  %s %s' % (
             libpath, libs, cflags),
         '--extra-ldflags=%s ' % (ldflags),

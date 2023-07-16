@@ -30,4 +30,4 @@ source+= [
 
 
 env.Library('uuid', source+[
-],CFLAGS='$CFLAGS $LIBCFLAGS -Iapp/libzlib -Iapp/libuuid  -I. '+cflags )
+],CFLAGS='$CFLAGS $LIBCFLAGS -Ieggs/libzlib -Ieggs/libuuid  -I. '+cflags )

@@ -168,4 +168,4 @@ cflags = '-DHAVE_CONFIG_H -DNDEBUG -DXTSTRINGDEFINES -fPIC -Ieggs/libncurses/inc
 
 
 env.Library('ncurses', source+[
-],CFLAGS='$CFLAGS $LIBCFLAGS -Iapp/libncurses/ -I. ' + cflags)
+],CFLAGS='$CFLAGS $LIBCFLAGS -Ieggs/libncurses/ -I. ' + cflags)

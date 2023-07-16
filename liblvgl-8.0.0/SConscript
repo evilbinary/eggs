@@ -30,4 +30,4 @@ env.Library('lvgl', sources+[
     '../libjpeg/libjpeg.a',
     '../libgui/libgui.a',
     ],
-    CFLAGS='$CFLAGS -DLV_CONF_INCLUDE_SIMPLE  -Iapp/liblvgl/ $LIBCFLAGS -Iapp/libgui/ -Iapp/libjpeg/',)
+    CFLAGS='$CFLAGS -DLV_CONF_INCLUDE_SIMPLE  -Ieggs/liblvgl/ $LIBCFLAGS -Ieggs/libgui/ -Ieggs/libjpeg/',)

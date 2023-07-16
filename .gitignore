@@ -15,3 +15,4 @@ eggs/libmusl/temp2.txt
 libmusl/config.mak
 libmusl/temp2.txt
 libmusl/temp.txt
+**/*.d
