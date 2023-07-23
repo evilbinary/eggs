@@ -23,9 +23,11 @@ def config_build(config=True):
 
         params = [env['CC'],
                   'CROSS_COMPILE='+env['CC_PREFIX'],
-                  'CFLAGS=-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS %s' % (
+                  'CFLAGS=-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS %s ' % (
             env['CFLAGS']),
-            '--disable-optimize --enable-debug=yes'
+            '--disable-optimize',
+            '--enable-debug=yes',
+            '--enable-shared=yes'
         ]
 
         configured = env.AutoConfig(Dir('.'),
@@ -43,7 +45,7 @@ def config_build(config=True):
     print("Number of parallel build jobs:", job_number)
     musl = env.Command('musl',
                            configured,
-                           'cd %s && make -j%d && cp lib/libc.a lib/libmusl.a' % (current,job_number))
+                           'cd %s && make -j%d && cp lib/libc.a lib/libmusl.a && cp lib/libc.so lib/libmusl2.so' % (current,job_number))
     returns.append(musl)
 
 if os.path.exists('config.mak'):
