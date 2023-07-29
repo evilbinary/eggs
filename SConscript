@@ -46,6 +46,7 @@ if env.get('APP'):
     SConscript(dirs=['libsdl'], exports='env')
     SConscript(dirs=['libsdl-ttf'], exports='env')
     SConscript(dirs=['libsdl-image'], exports='env')
+    SConscript(dirs=['libgaga'], exports='env')
 
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
