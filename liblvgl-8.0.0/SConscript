@@ -26,7 +26,7 @@ sources+= Glob('src/extra/*.c')
 sources+= Glob('src/extra/**/*.c')
 sources+= Glob('src/extra/**/**/*.c')
 
-env.Library('lvgl', sources+[
+env.Library('lvgl-8.0.0', sources+[
     '../libjpeg/libjpeg.a',
     '../libgui/libgui.a',
     ],

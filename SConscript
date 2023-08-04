@@ -28,6 +28,7 @@ if env.get('APP'):
     SConscript(dirs=['libzlib'], exports='env')
     SConscript(dirs=['libpng'], exports='env')
     SConscript(dirs=['liblvgl'], exports='env')
+    SConscript(dirs=['liblvgl-8.0.0'], exports='env')
     SConscript(dirs=['libuuid'], exports='env')
     SConscript(dirs=['liblvqrcode'], exports='env')
     SConscript(dirs=['liblz4'], exports='env')
