@@ -37,12 +37,14 @@ void* client_call(client_t* client, void* fn, ...) {
   va_end(ap);
 
   memmove(api->args, arg, MAX_ARGS_BUF);
-  api->state = API_REDAY;
-  printf("call client %s ready\n", client->name);
+  // api->state = API_REDAY;
+  __sync_lock_test_and_set(&api->state, API_REDAY);
+  printf("call client %s ready api state %d\n", client->name, api->state);
   while (api->state == API_REDAY) {
   }
   printf("client %s state: %d\n", client->name, api->state);
-  api->state = API_FINISH;
+  // api->state = API_FINISH;
+  __sync_lock_test_and_set(&api->state, API_FINISH);
   return api->ret;
 }
 
@@ -69,8 +71,10 @@ void client_run(client_t* client, client_fn fn) {
       api = &client->apis[i];
       if (api->state == API_REDAY) {
         printf("client run %s state: %d\n", client->name, api->state);
-        api->ret = fn(api->fn, api->args);
-        api->state = API_RETURN;
+        __sync_lock_test_and_set(&api->ret, fn(api->fn, api->args));
+        __sync_lock_test_and_set(&api->state, API_RETURN);
+        // api->ret = fn(api->fn, api->args);
+        // api->state = API_RETURN;
       }
     }
   }
