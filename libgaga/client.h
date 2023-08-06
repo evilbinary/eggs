@@ -2,6 +2,7 @@
 #define CLIENT_H
 
 #define MAX_ARGS_BUF 128
+#define MAX_INSTANCE 16
 
 enum {
   SYS_NEW_CLIENT = 1,
@@ -44,6 +45,8 @@ typedef struct client {
   int api_size;
   api_t* apis;
   int state;
+  int count;
+  struct client *instance[MAX_INSTANCE];
 } client_t;
 
 typedef struct client_ctl {
@@ -53,5 +56,8 @@ typedef struct client_ctl {
 } client_ctl_t;
 
 typedef void* (*client_fn)(void* fn,void* args);
+
+
+client_t* client_get(char* name);
 
 #endif

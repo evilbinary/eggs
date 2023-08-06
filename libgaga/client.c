@@ -40,7 +40,15 @@ void* client_call(client_t* client, void* fn, ...) {
   // api->state = API_REDAY;
   __sync_lock_test_and_set(&api->state, API_REDAY);
   printf("call client %s ready api state %d\n", client->name, api->state);
+  int count = 0;
   while (api->state == API_REDAY) {
+    count++;
+    if (count > 100000000 && client->count > 0) {
+      // todo get client stragtegy
+      client_t* c = client->instance[1];
+      count = 0;
+      return client_call(c, fn, arg);
+    }
   }
   printf("client %s state: %d\n", client->name, api->state);
   // api->state = API_FINISH;
