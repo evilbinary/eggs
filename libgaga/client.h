@@ -38,6 +38,7 @@ typedef struct client {
   char* name;
   int tid;
   int id;
+  int cid;
   int token;
   int fd;
   int service_id;
@@ -58,6 +59,13 @@ typedef struct client_ctl {
 typedef void* (*client_fn)(void* fn,void* args);
 
 
+client_t* client_regist(char* name);
+void clirent_un_regist(client_t* client);
+
 client_t* client_get(char* name);
+
+void client_run_one(client_t* client, client_fn fn);
+
+void client_run(client_t* client, client_fn fn);
 
 #endif

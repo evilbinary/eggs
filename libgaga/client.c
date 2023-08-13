@@ -88,6 +88,29 @@ void client_run(client_t* client, client_fn fn) {
   }
 }
 
+void client_run_one(client_t* client, client_fn fn) {
+  if (client == NULL) {
+    printf("error client is null\n");
+    return;
+  }
+  if (fn == NULL) {
+    printf("error fn is null\n");
+    return;
+  }
+  client->state = SYS_RUNNING;
+  api_t* api = NULL;
+  for (int i = 0; i < client->api_size; i++) {
+    api = &client->apis[i];
+    if (api->state == API_REDAY) {
+      printf("client run %s state: %d\n", client->name, api->state);
+      __sync_lock_test_and_set(&api->ret, fn(api->fn, api->args));
+      __sync_lock_test_and_set(&api->state, API_RETURN);
+      // api->ret = fn(api->fn, api->args);
+      // api->state = API_RETURN;
+    }
+  }
+}
+
 client_t* client_regist(char* name) {
   int fd = open("/dev/gaga", O_RDWR);
   printf("client open fd:%d\n", fd);
