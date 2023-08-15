@@ -41,10 +41,10 @@ __clzdi2 (long long val)
 
 
 
-double __aeabi_f2d(float f)
-{
-    return static_cast<double>(f);
-}
+// double __aeabi_f2d(float f)
+// {
+//     return static_cast<double>(f);
+// }
 
 
 // int __aeabi_idivmod(int numerator, int denominator)
