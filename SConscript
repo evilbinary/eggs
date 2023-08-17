@@ -40,7 +40,7 @@ if env.get('APP'):
     SConscript(dirs=['liblua'], exports='env')
     SConscript(dirs=['libchez'], exports='env')
     SConscript(dirs=['libcmocka'], exports='env')
-    # SConscript(dirs=['libffmpeg'], exports='env')
+    SConscript(dirs=['libffmpeg'], exports='env')
     # SConscript(dirs=['libstdc++'], exports='env')
     SConscript(dirs=['libcxx'], exports='env')
     SConscript(dirs=['libcxxabi'], exports='env')

@@ -25,23 +25,25 @@ ldflags = env['LINKFLAGS'] + \
 
 cflags += env['CFLAGS']
 
-
 def patch_path(var):
     return var.replace(
         'eggs/libmusl', '../libmusl')
 
 
-# if env.get('MYLIB'):
-#     ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
-#     libpath += ' -I'+env.get('CC_LIB_PATH')
+if env.get('MYLIB'):
+    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
+    libpath += ' -I'+env.get('CC_LIB_PATH')
 
 
 def config_build(config=True):
     params = [
+        '--cc='+env['CC'],
+        '--ar='+env['AR'],
+        '--ranlib='+env['RANLIB'],
         '--enable-cross-compile',
         '--arch='+env['ARCHTYPE'],
         '--target-os=linux',
-        #'--cross-prefix='+env['CC_PREFIX'],
+        # '--cross-prefix='+env['CC_PREFIX'],
         '--extra-cflags=%s  %s %s' % (
             libpath, libs, cflags),
         '--extra-ldflags=%s ' % (ldflags),
@@ -75,6 +77,7 @@ def config_build(config=True):
 
         '--disable-dct',
         '--disable-asm',
+        '--disable-network',
 
         # '--disable-yasm',
         # '--disable-yasm',
