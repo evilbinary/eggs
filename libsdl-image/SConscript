@@ -6,7 +6,9 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cliEnv')
+
+env=cliEnv
 
 cflags=' -Ieggs/libgui/ \
         -Ieggs/libjpeg/ \

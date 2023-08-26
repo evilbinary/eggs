@@ -6,7 +6,9 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cliEnv')
+
+env=cliEnv
 
 source=[]
 

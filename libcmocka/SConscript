@@ -6,22 +6,19 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cliEnv')
+env=cliEnv.Clone()
 
-cflags='-Ieggs/libcmocka/include \
-        -I. \
-        '
 
-source=[]
+env.AddInclude([
+    '#eggs/libcmocka/include',
+    '.'
+])
 
-source+=Glob('src/*.c')
+env.AddCflags([
+    '-DHAVE_SIGNAL_H'
+])
 
-source +=[
-    ]
-
-libs=[]
-
-env.Library('cmocka', source,
-    LIBS=libs+env.get('LIBS'),
-    CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__ -DHAVE_SIGNAL_H  '+cflags,
-    LINKFLAGS= '$LINKFLAGS $USER')
+env.Library('cmocka', [
+    Glob('src/*.c')
+])

@@ -7,59 +7,44 @@
 import os
 import platform
 import copy
-from xenv.env import add_libc
 
 Import('appEnv')
 
-env=appEnv
+env = appEnv
 
 current = Dir('.').srcnode().path
 
-add_libc(env)
 
-returns=[]
+returns = []
 
-libc=None
+libc = None
 
 if env.get('APP'):
-    SConscript(dirs=['libjpeg'], exports='env')
-    SConscript(dirs=['libgui'], exports='env')
-    SConscript(dirs=['libetk'], exports='env')
-    SConscript(dirs=['libzlib'], exports='env')
-    SConscript(dirs=['libpng'], exports='env')
-    SConscript(dirs=['liblvgl'], exports='env')
-    SConscript(dirs=['liblvgl-8.0.0'], exports='env')
-    SConscript(dirs=['libuuid'], exports='env')
-    SConscript(dirs=['liblvqrcode'], exports='env')
-    SConscript(dirs=['liblz4'], exports='env')
-    SConscript(dirs=['libfreetype'], exports='env')
-    SConscript(dirs=['libwebp'], exports='env')
-    SConscript(dirs=['libsdl2'], exports='env')
-    SConscript(dirs=['libsdl2-image'], exports='env')
-    SConscript(dirs=['libsdl2-ttf'], exports='env')
-    SConscript(dirs=['liblua'], exports='env')
-    SConscript(dirs=['libchez'], exports='env')
-    SConscript(dirs=['libcmocka'], exports='env')
-    SConscript(dirs=['libffmpeg'], exports='env')
-    # SConscript(dirs=['libstdc++'], exports='env')
-    SConscript(dirs=['libcxx'], exports='env')
-    SConscript(dirs=['libcxxabi'], exports='env')
-    SConscript(dirs=['libsdl'], exports='env')
-    SConscript(dirs=['libsdl-ttf'], exports='env')
-    SConscript(dirs=['libsdl-image'], exports='env')
-    SConscript(dirs=['libgaga'], exports='env')
+    dirs = ['libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
+            'liblvgl', 'liblvgl-8.0.0', 'libuuid',
+            'liblvqrcode', 'liblz4', 'libfreetype',
+            'libwebp', 'libsdl2', 'libsdl2-ttf',
+            'libsdl2-image', 'liblua',
+            'libchez', 'libcmocka', 'libffmpeg',
+            # 'libstdc++'
+            'libcxx', 'libcxxabi',
+            'libsdl', 'libsdl-ttf', 'libsdl-image',
+            'libgaga',
+            # 'libiconv'
+            ]
 
+    SConscript(dirs=dirs)
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
-        libc=SConscript(dirs=['libmusl'], exports='env')
+        libc = SConscript(dirs=['libmusl'], exports='env')
     elif env.get('DEFAULT_LIBC') == 'libnewlib':
-        libc=SConscript(dirs=['libnewlib'], exports='env')
+        libc = SConscript(dirs=['libnewlib'], exports='env')
     else:
-        libc=SConscript(dirs=['libc'], exports='env')
+        libc = SConscript(dirs=['libc'], exports='env')
 else:
     pass
 
-returns+=libc
+returns += libc
 
 Export('appEnv')
 

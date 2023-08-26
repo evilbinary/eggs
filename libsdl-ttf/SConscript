@@ -6,7 +6,8 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cliEnv')
+env=cliEnv
 
 cflags='-DSDL_IMAGE_USE_COMMON_BACKEND \
 		-DLOAD_BMP -DLOAD_GIF -DLOAD_LBM -DLOAD_PCX -DLOAD_PNM \

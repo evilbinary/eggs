@@ -8,32 +8,23 @@ import os
 
 Import('env')
 
-cflags=' -ffreestanding -fpic '
+env = env.Clone()
 
-cxxflags='  -fno-use-cxa-atexit -fno-threadsafe-statics -D_LIBCPP_HAS_MUSL_LIBC -D_LIBCPP_HAS_NO_LIBRARY_ALIGNED_ALLOCATION    -D_LIBCPP_BUILDING_LIBRARY -D_POSIX_C_SOURCE  -D_GNU_SOURCE -D_LIBCPP_HAS_NO_MONOTONIC_CLOCK  -D_LIBCPP_HAS_NO_THREADS -D_LIBCXXABI_HAS_NO_THREADS  '+cflags #  -D_LIBCPP_HAS_THREAD_API_PTHREAD
+env.UseLibC()
+env.UseLibrary(['cxxabi'])
+env.AddCxxFlags(['-ffreestanding -fpic',
+                '-fpermissive',
+                 '-fno-use-cxa-atexit -fno-threadsafe-statics -D_LIBCPP_HAS_MUSL_LIBC -D_LIBCPP_HAS_NO_LIBRARY_ALIGNED_ALLOCATION    -D_LIBCPP_BUILDING_LIBRARY -D_POSIX_C_SOURCE  -D_GNU_SOURCE -D_LIBCPP_HAS_NO_MONOTONIC_CLOCK  -D_LIBCPP_HAS_NO_THREADS -D_LIBCXXABI_HAS_NO_THREADS '
+                 # -D_LIBCPP_HAS_THREAD_API_PTHREAD
+                 ])
 
-libs=[
-    'libmusl.a',
-    'libcxxabi.a',
-]+env['LIBC']
-
-libpath=[
-
-]
-include=[
+env.AddInclude([
     '.',
     './include',
     '../../duck/libs/include'
-]+libpath
+])
 
-
-source = []
-source += Glob('src/*.cpp')
-source += Glob('src/filesystem/*.cpp')
-
-env.Library('libcxx', source,
-    LIBS=libs,
-    LIBPATH=libpath+env.get('LIBPATH'),
-    CPPPATH=include+env.get('CPPPATH'),
-    CXXFLAGS='$CXXFLAGS '+cxxflags,
-    CFLAGS='$CFLAGS '+cflags)
+env.Library('libcxx', [
+    Glob('src/*.cpp'),
+    Glob('src/filesystem/*.cpp')
+])

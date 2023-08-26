@@ -6,7 +6,9 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cliEnv')
+
+env=cliEnv
 
 cflags='-DBSD -D__YIYIYA__  -D__GNUC__ '
 
