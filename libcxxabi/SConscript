@@ -22,6 +22,6 @@ env.AddInclude([
     '../libcxx/include',
 ])
 
-env.Library('libcxxabi', [
+env.Library('cxxabi', [
     Glob('src/*.cpp'),
 ])

@@ -22,5 +22,4 @@ libswscale/x86/rgb2rgb.o: libswscale/x86/rgb2rgb.c \
  libswscale/swscale.h libswscale/swscale_internal.h libavutil/avassert.h \
  libavutil/common.h libavutil/intreadwrite.h libavutil/bswap.h \
  libavutil/x86/intreadwrite.h libavutil/pixdesc.h \
- libavutil/ppc/util_altivec.h libswscale/x86/rgb2rgb_template.c \
- libavutil/x86/asm.h
+ libavutil/ppc/util_altivec.h

@@ -24,6 +24,4 @@ libavcodec/x86/hpeldsp_init.o: libavcodec/x86/hpeldsp_init.c \
  libavcodec/version.h libavutil/version.h libavcodec/codec.h \
  libavcodec/codec_id.h libavcodec/codec_desc.h libavcodec/version.h \
  libavcodec/hpeldsp.h libavcodec/pixels.h libavcodec/x86/fpel.h \
- libavcodec/x86/hpeldsp.h libavcodec/x86/rnd_template.c \
- libavcodec/x86/inline_asm.h libavcodec/x86/constants.h \
- libavutil/x86/asm.h libavcodec/x86/hpeldsp_rnd_template.c
+ libavcodec/x86/hpeldsp.h

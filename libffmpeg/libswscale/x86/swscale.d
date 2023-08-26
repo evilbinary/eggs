@@ -21,5 +21,4 @@ libswscale/x86/swscale.o: libswscale/x86/swscale.c \
  libavutil/x86/bswap.h libavutil/x86/intreadwrite.h \
  libavutil/mem_internal.h libavutil/avassert.h libavutil/pixdesc.h \
  libavutil/ppc/util_altivec.h libavutil/x86/cpu.h \
- libavutil/cpu_internal.h libswscale/x86/swscale_template.c \
- libavutil/x86/asm.h
+ libavutil/cpu_internal.h

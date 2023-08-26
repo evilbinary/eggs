@@ -134,7 +134,6 @@ static const AVFilter * const filter_list[] = {
     &ff_vf_blackdetect,
     &ff_vf_blackframe,
     &ff_vf_blend,
-    &ff_vf_bm3d,
     &ff_vf_boxblur,
     &ff_vf_bwdif,
     &ff_vf_cas,

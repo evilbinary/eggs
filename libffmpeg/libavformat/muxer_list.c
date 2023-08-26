@@ -129,8 +129,6 @@ static const AVOutputFormat * const muxer_list[] = {
     &ff_rso_muxer,
     &ff_rtp_muxer,
     &ff_rtp_mpegts_muxer,
-    &ff_rtsp_muxer,
-    &ff_sap_muxer,
     &ff_sbc_muxer,
     &ff_scc_muxer,
     &ff_segafilm_muxer,

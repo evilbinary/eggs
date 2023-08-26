@@ -90,7 +90,7 @@ MAINTAINER_MODE_TRUE = #
 # -------------------------------------------------
 
 # The gcc driver likes to know the arguments it was configured with.
-TOPLEVEL_CONFIGURE_ARGUMENTS=./configure --prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib --target=i386-elf CFLAGS='-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS' --disable-nls
+TOPLEVEL_CONFIGURE_ARGUMENTS=./configure --prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib --target=i386-elf CFLAGS='-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS' --enable-posix --disable-nls
 
 tooldir = ${exec_prefix}/i386-elf
 build_tooldir = ${exec_prefix}/i386-elf
@@ -108,7 +108,7 @@ GCC_SHLIB_SUBDIR =
 BUILD_SUBDIR = build-x86_64-apple-darwin17.7.0
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the build system.
-BUILD_CONFIGARGS =  --cache-file=./config.cache '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-build-subdir="$(BUILD_SUBDIR)"
+BUILD_CONFIGARGS =  --cache-file=./config.cache '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-build-subdir="$(BUILD_SUBDIR)"
 
 # Linker flags to use on the host, for stage1 or when not
 # bootstrapping.
@@ -171,7 +171,7 @@ SUBDIRS =  etc
 TARGET_CONFIGDIRS = libgloss newlib
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the host system.
-HOST_CONFIGARGS =  --cache-file=./config.cache  --with-system-zlib --with-newlib '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking
+HOST_CONFIGARGS =  --cache-file=./config.cache  --with-system-zlib --with-newlib '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking
 # Host programs are put under this directory, which is . except if building
 # with srcdir=..
 HOST_SUBDIR = .
@@ -244,7 +244,7 @@ POSTSTAGE1_HOST_EXPORTS = \
 TARGET_SUBDIR = i386-elf
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the target.
-TARGET_CONFIGARGS = --cache-file=./config.cache --with-newlib --enable-multilib --with-cross-host=x86_64-apple-darwin17.7.0   '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-target-subdir="$(TARGET_SUBDIR)"
+TARGET_CONFIGARGS = --cache-file=./config.cache --with-newlib --enable-multilib --with-cross-host=x86_64-apple-darwin17.7.0   '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-target-subdir="$(TARGET_SUBDIR)"
 # This is the list of variables to export in the environment when
 # configuring subdirectories for the target system.
 BASE_TARGET_EXPORTS = \

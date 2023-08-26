@@ -24,7 +24,7 @@ env.AddInclude([
     '../../duck/libs/include'
 ])
 
-env.Library('libcxx', [
+env.Library('cxx', [
     Glob('src/*.cpp'),
     Glob('src/filesystem/*.cpp')
 ])

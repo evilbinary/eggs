@@ -36,7 +36,10 @@ typedef unsigned short uint16_t;
 typedef signed int int32_t;
 typedef unsigned int uint32_t;
 typedef unsigned int size_t;
+#ifdef uintptr_t
+#undef uintptr_t
 typedef unsigned long uintptr_t;
+#endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
 #define SDL_AUDIO_DRIVER_DUMMY	1
@@ -45,7 +48,7 @@ typedef unsigned long uintptr_t;
 #define SDL_CDROM_DISABLED	1
 
 /* Enable the stub joystick driver (src/joystick/dummy/\*.c) */
-#define SDL_JOYSTICK_DISABLED	1
+// #define SDL_JOYSTICK_DISABLED	1
 
 /* Enable the stub shared object loader (src/loadso/dummy/\*.c) */
 #define SDL_LOADSO_DISABLED	1

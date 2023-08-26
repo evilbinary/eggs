@@ -5,11 +5,14 @@
 # * 邮箱: rootdebug@163.c",om
 # ********************************************************************
 import os
+import sys
 import SCons
 
-Import('env')
+Import('cliEnv')
 
-cflags = ' -L../libmusl/lib '
+env = cliEnv
+
+cflags = ' '
 
 source = []
 
@@ -17,118 +20,125 @@ current = Dir('.').srcnode().path
 
 returns = []
 
-libpath = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#/', '')
-libs = ''
-
+include = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#', '')
+libs = ' '.join(map(lambda i: ' -l'+i, env['LIBS'])).replace('#', '')
+libpath = ' '.join(map(lambda i: ' -L'+i, env['LIBPATH'])).replace('#', '')
 ldflags = env['LINKFLAGS'] + \
     ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
 
+ldflags += ' '+libpath+' '+libs+' '
+
+cflags += include+' '
 cflags += env['CFLAGS']
 
+
 def patch_path(var):
-    return var.replace(
+    var = var.replace(
         'eggs/libmusl', '../libmusl')
+    var = var.replace('#../libmusl', '../libmusl')
+    return var
 
 
-if env.get('MYLIB'):
-    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
-    libpath += ' -I'+env.get('CC_LIB_PATH')
+params = [
+    '--cc='+env['CC'],
+    '--ar='+env['AR'],
+    '--ranlib='+env['RANLIB'],
+    '--enable-cross-compile',
+    '--arch='+env['ARCHTYPE'],
+    '--target-os=linux',
+    # '--cross-prefix='+env['CC_PREFIX'],
+    '--extra-cflags=%s  %s %s' % (
+        cflags, libpath, libs),
+    '--extra-ldflags=%s ' % (ldflags),
+    '--host-extralibs=',
+    '--enable-gpl',
+    '--enable-nonfree',
+    '--enable-static',
+    '--disable-programs',
+    '--disable-stripping',
+    '--disable-doc',
+    '--disable-pthreads',
+    '--disable-shared',
+    '--disable-htmlpages',
+    '--disable-manpages',
+    '--disable-podpages',
+    '--disable-txtpages',
+
+    # '--disable-encoders ',
+    # '--disable-decoders ',
+    # '--enable-decoder=aac',
+    # '--enable-decoder=aac_at',
+    # '--enable-decoder=h264',
+    # '--enable-decoder=h264_mediacodec',
+    # '--disable-demuxers ',
+    # '--enable-demuxer=aac',
+    # '--enable-demuxer=h264',
+    '--disable-vfp',
+    # '--disable-neon',
+    '--disable-inline-asm',
 
 
-def config_build(config=True):
-    params = [
-        '--cc='+env['CC'],
-        '--ar='+env['AR'],
-        '--ranlib='+env['RANLIB'],
-        '--enable-cross-compile',
-        '--arch='+env['ARCHTYPE'],
-        '--target-os=linux',
-        # '--cross-prefix='+env['CC_PREFIX'],
-        '--extra-cflags=%s  %s %s' % (
-            libpath, libs, cflags),
-        '--extra-ldflags=%s ' % (ldflags),
-        '--host-extralibs=',
-        '--enable-gpl',
-        '--enable-nonfree',
-        '--enable-static',
-        '--disable-programs',
-        '--disable-stripping',
-        '--disable-doc',
-        '--disable-pthreads',
-        '--disable-shared',
-        '--disable-htmlpages',
-        '--disable-manpages',
-        '--disable-podpages',
-        '--disable-txtpages',
+    '--disable-dct',
+    '--disable-asm',
+    '--disable-network',
 
-        # '--disable-encoders ',
-        # '--disable-decoders ',
-        # '--enable-decoder=aac',
-        # '--enable-decoder=aac_at',
-        # '--enable-decoder=h264',
-        # '--enable-decoder=h264_mediacodec',
-        # '--disable-demuxers ',
-        # '--enable-demuxer=aac',
-        # '--enable-demuxer=h264',
-        '--disable-vfp',
-        # '--disable-neon',
-        '--disable-inline-asm',
+    # '--disable-yasm',
+    # '--disable-yasm',
+    # '--disable-stripping',
+    #
+    # '--disable-encoders',
+    # '--disable-decoders',
+    # '--enable-decoder=aac',
+    # '--enable-decoder=aac_at',
+    # '--enable-decoder=h264',
+    # '--enable-decoder=h264_mediacodec',
+    # '--disable-demuxers ',
+    # '--enable-demuxer=aac',
+    # '--enable-demuxer=h264',
+]
+
+params = list(map(patch_path, params))
 
 
-        '--disable-dct',
-        '--disable-asm',
-        '--disable-network',
+configured = [
+    './ffbuild/config.mak',
+    'config.asm',
+]
 
-        # '--disable-yasm',
-        # '--disable-yasm',
-		# '--disable-stripping',
-		# 
-		# '--disable-encoders',
-		# '--disable-decoders',
-		# '--enable-decoder=aac',
-		# '--enable-decoder=aac_at',
-		# '--enable-decoder=h264',
-		# '--enable-decoder=h264_mediacodec',
-		# '--disable-demuxers ',
-		# '--enable-demuxer=aac',
-		# '--enable-demuxer=h264',
-    ]
+ffmpeg = env.AutoConfig(
+    Dir('.'),
+    AutoConfigParams=params,
+    AutoConfigTarget=configured,
+    AutoConfigSource=['configure',
+                      '../libmusl/libmusl.a',
 
-    if config:
-        params = list(map(patch_path, params))
-        configured = env.AutoConfig(Dir('.'),
-                                    AutoConfigParams=params,
-                                    AutoConfigTarget='config.mk',
-                                    AutoConfigSource='configure'
-                                    )
-        env.Command('./ffbuild/config.mak-'+env.get('ARCHTYPE'), configured,
-                    'cd %s && make clean && cp ./ffbuild/config.mak ./ffbuild/config.mak-%s' % (current, env.get('ARCHTYPE')))
-
-    else:
-        configured = './ffbuild/config.mak-'+env.get('ARCHTYPE'),
-
-    job_number = env.GetOption('num_jobs')
-    musl = env.Command('ffmpeg',
-                       configured,
-                       'cd %s && make -j%d' % (current,job_number))
-    env.Requires('ffmpeg','musl')
-    
-    returns.append(musl)
+                      ]
+)
 
 
-if os.path.exists('ffbuild/config.mak'):
-    print('configure is up-to-date')
-    if not os.path.exists('ffbuild/config.mak-'+env.get('ARCHTYPE')):
-        print('remove configure')
-        os.remove('ffbuild/config.mak')
-        config_build()
-    else:
-        config_build(False)
-else:
-    config_build()
 
+ffmpegMake = env.Make(
+    MakePath=Dir('.'),
+    source=configured + [
+        Glob('libavdevice/*.c'),
+        'Makefile',
+        'libavcodec/version.h',
+        'libavutil/version.h',
+    ],
+    target=[
+        'libavcodec.a',
+        'libavdevice.a',
+        'libavfilter.a',
+        'libavformat.a',
+        'libavresample.a',
+        'libavutil.a'
+    ],
+    MakeTargets=' all'
+)
 
-env.Clean('ffmpeg',['ffbuild/config.mak']+ Glob('./**/**.[o|a]') )
-
-
-Return('returns')
+env.Clean('ffmpeg',
+          ['ffbuild/config.mak',
+           Glob('./**/**.[o|a|d]'),
+           'config.h',
+           'config.asm'
+           ])
