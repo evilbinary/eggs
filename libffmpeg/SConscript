@@ -101,8 +101,7 @@ params = list(map(patch_path, params))
 
 
 configured = [
-    './ffbuild/config.mak',
-    'config.asm',
+    './ffbuild/config.mak'
 ]
 
 ffmpeg = env.AutoConfig(
@@ -120,10 +119,8 @@ ffmpeg = env.AutoConfig(
 ffmpegMake = env.Make(
     MakePath=Dir('.'),
     source=configured + [
-        Glob('libavdevice/*.c'),
-        'Makefile',
-        'libavcodec/version.h',
-        'libavutil/version.h',
+        # Glob('libavdevice/*.c'),
+        'Makefile'
     ],
     target=[
         'libavcodec.a',
@@ -132,8 +129,7 @@ ffmpegMake = env.Make(
         'libavformat.a',
         'libavresample.a',
         'libavutil.a'
-    ],
-    MakeTargets=' all'
+    ]
 )
 
 env.Clean('ffmpeg',

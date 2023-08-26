@@ -552,7 +552,7 @@ static void s_ee_write_char(wchar_t c) {
 #include <wchar.h>
 #include <locale.h>
 #if !defined(__linux__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
-#include <xlocale.h>
+// #include <xlocale.h>
 #endif
 
 #if defined(TIOCGWINSZ) && defined(SIGWINCH) && defined(EINTR)

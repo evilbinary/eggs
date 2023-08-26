@@ -14,7 +14,7 @@ cflags = ''
 
 if env['ARCHTYPE'] == 'arm':
     type = 'arm32le'
-    cflags = '-DARMV6 -DINLINES -DGC_MACROS -DARMV6 -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
+    cflags = '-DDISABLE_X11 -DFEATURE_EXPEDITOR -DFEATURE_ICONV -DARMV6 -DINLINES -DGC_MACROS -DARMV6 -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
 elif env['ARCHTYPE'] == 'x86':
     type = 'i3le'
     cflags = '-DI386 -DINLINES -DGC_MACROS  -DMB_LEN_MAX=8 -D_LARGEFILE64_SOURCE -DHAVE_HIDDEN'
@@ -61,6 +61,7 @@ include = [
     '../liblz4/lib',
     '../libzlib',
     '../include',
+    '../libncurses/include',
     'c',
     type,
     '../'+type
@@ -69,7 +70,8 @@ include = [
 libs = [
     'libzlib.a',
     'liblz4.a',
-    'libuuid.a'
+    'libuuid.a',
+    'libncurses.a'
 ]
 libpath = [
 

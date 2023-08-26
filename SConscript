@@ -31,6 +31,7 @@ if env.get('APP'):
             'libsdl', 'libsdl-ttf', 'libsdl-image',
             'libgaga',
             # 'libiconv'
+            'libncurses',
             ]
 
     SConscript(dirs=dirs)
