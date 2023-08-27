@@ -19,22 +19,28 @@ returns = []
 
 libc = None
 
-if env.get('APP'):
-    dirs = ['libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
-            'liblvgl', 'liblvgl-8.0.0', 'libuuid',
-            'liblvqrcode', 'liblz4', 'libfreetype',
-            'libwebp', 'libsdl2', 'libsdl2-ttf',
-            'libsdl2-image', 'liblua',
-            'libchez', 'libcmocka', 'libffmpeg',
-            # 'libstdc++'
-            'libcxx', 'libcxxabi',
-            'libsdl', 'libsdl-ttf', 'libsdl-image',
-            'libgaga',
-            # 'libiconv'
-            'libncurses',
-            ]
+build_dirs = []
 
-    SConscript(dirs=dirs)
+if env.get('CPP_APP') and len(env.get('CPP_APP')) > 0:
+    build_dirs += [
+        # 'libstdc++'
+        'libcxx', 'libcxxabi',
+    ]
+
+if env.get('APP'):
+    build_dirs = ['libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
+                  'liblvgl', 'liblvgl-8.0.0', 'libuuid',
+                  'liblvqrcode', 'liblz4', 'libfreetype',
+                  'libwebp', 'libsdl2', 'libsdl2-ttf',
+                  'libsdl2-image', 'liblua',
+                  'libchez', 'libcmocka', 'libffmpeg',
+                  'libsdl', 'libsdl-ttf', 'libsdl-image',
+                  'libgaga',
+                  # 'libiconv'
+                  'libncurses',
+                  ]
+
+    SConscript(dirs=build_dirs)
 
     if env.get('DEFAULT_LIBC') == 'libmusl':
         libc = SConscript(dirs=['libmusl'], exports='env')
