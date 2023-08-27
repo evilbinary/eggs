@@ -6,9 +6,9 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
+Import('libEnv')
 
-env=cliEnv
+env=libEnv
 
 libs=[
  

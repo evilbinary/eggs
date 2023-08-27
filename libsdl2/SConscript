@@ -6,9 +6,9 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
+Import('libEnv')
 
-env=cliEnv
+env=libEnv
 
 source=[]
 
@@ -63,4 +63,4 @@ source +=[
 
 env.Library('sdl2', source,
     CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__ -Ieggs/libgui/ -Ieggs/libjpeg -Ieggs/libsdl2 -Ieggs/libsdl2/include -I.',
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

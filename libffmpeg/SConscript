@@ -8,9 +8,9 @@ import os
 import sys
 import SCons
 
-Import('cliEnv')
+Import('libEnv')
 
-env = cliEnv
+env = libEnv
 
 cflags = ' '
 

@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env=cliEnv
+Import('libEnv')
+env=libEnv
 
 cflags=''
 
@@ -39,4 +39,4 @@ include = [
 env.Library('freetype', source,
     CPPPATH=env.get('CPPPATH')+include,
     CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__  '+cflags,
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

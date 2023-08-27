@@ -6,9 +6,9 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
+Import('libEnv')
 
-env=cliEnv
+env=libEnv
 
 cflags='-DBSD -D__YIYIYA__  -D__GNUC__ '
 
@@ -107,4 +107,4 @@ env.Library('sdl', source,
     CPPPATH=include+ env['CPPPATH'] ,
 
     CFLAGS= cflags+ '$CFLAGS $LIBCFLAGS  ',
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

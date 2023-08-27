@@ -6,9 +6,9 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
+Import('libEnv')
 
-env=cliEnv
+env=libEnv
 
 cflags='-DSDL_IMAGE_USE_COMMON_BACKEND \
 		-DLOAD_BMP -DLOAD_GIF -DLOAD_LBM -DLOAD_PCX -DLOAD_PNM \
@@ -44,4 +44,4 @@ include = [
 env.Library('sdl2-ttf', source,
     CPPPATH=env.get('CPPPATH')+include,
     CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__  '+cflags,
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

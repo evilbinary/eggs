@@ -8,9 +8,9 @@ import os
 import platform
 import copy
 
-Import('appEnv')
+Import('libEnv')
 
-env = appEnv
+env = libEnv
 
 current = Dir('.').srcnode().path
 
@@ -52,7 +52,5 @@ else:
     pass
 
 returns += libc
-
-Export('appEnv')
 
 Return('returns')

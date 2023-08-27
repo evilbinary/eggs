@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env=cliEnv
+Import('libEnv')
+env=libEnv
 
 cflags=' -Ieggs/libgui/ \
         -Ieggs/libjpeg/ \
@@ -49,4 +49,4 @@ include = [
 env.Library('sdl2-image', source,
     CPPPATH=env.get('CPPPATH')+include,
     CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__  '+cflags,
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

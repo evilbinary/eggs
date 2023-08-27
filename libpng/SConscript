@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env=cliEnv
+Import('libEnv')
+env=libEnv
 
 cflags= '-DPNG_DEBUG=1  $CFLAGS $LIBCFLAGS -Ieggs/libzlib/ -I. '
 

@@ -1,0 +1,85 @@
+# coding:utf-8
+# *******************************************************************
+# * Copyright 2021-2080 evilbinary
+# * 作者: evilbinary on 01/01/20
+# * 邮箱: rootdebug@163.c",om
+# ********************************************************************
+import os
+import SCons
+
+Import('libEnv')
+
+env = libEnv
+
+cflags = ' '
+
+source = []
+
+current = Dir('.').srcnode().path
+
+returns = []
+
+include = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#', '')
+libs = ' '.join(map(lambda i: ' -l'+i, env['LIBS'])).replace('#', '')
+libpath = ' '.join(map(lambda i: ' -L'+i, env['LIBPATH'])).replace('#', '')
+ldflags = env['LINKFLAGS'] + \
+    ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
+
+ldflags += ' '+libpath+' '+libs+' '
+
+cflags += include+' '
+cflags += env['CFLAGS']
+
+
+def patch_path(var):
+    var = var.replace(
+        'eggs/libmusl', '../libmusl')
+    var = var.replace('#../libmusl', '../libmusl')
+    return var
+
+
+
+if env.get('MYLIB'):
+    ldflags += ' '+env.get('CC_LIB_PATH') + env.get('MYLIB')+' '
+    libpath += ' -I'+env.get('CC_LIB_PATH')
+
+
+params = [
+    'CC='+env['CC'],
+    'AR='+env['AR'],
+    'RANLIB='+env['RANLIB'],
+    'CFLAGS=%s  %s %s' % (libpath, libs, cflags),
+    'LDFLAGS=%s ' % (ldflags),
+    '--host=arm-linux',
+    '--enable-cross-compile',
+]
+
+print(params)
+
+params = list(map(patch_path, params))
+configured = env.AutoConfig(Dir('.'),
+                            AutoConfigParams=params,
+                            AutoConfigTarget=[
+                                'config.h',
+                                'Makefile',
+                            ],
+                            AutoConfigSource='Makefile.in'
+                            )
+source = [
+    'config.h',
+    'Makefile'
+]
+
+source += Glob('src/*.c')
+source += Glob('srclib/*.c')
+source += Glob('lib/*.c')
+
+iconv = env.Make(source=source,
+                 target=['libiconv.a',
+                         ],
+                 MakePath=Dir('.'))
+
+env.Clean('iconv', ['config.h'] + Glob('./**/**.[o|a]'))
+
+
+Return('returns')

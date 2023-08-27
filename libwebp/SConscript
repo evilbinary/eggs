@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env=cliEnv
+Import('libEnv')
+env=libEnv
 
 cflags=' -Ieggs/libgui/ \
         -Ieggs/libjpeg \
@@ -38,4 +38,4 @@ source +=[
 
 env.Library('webp', source,
     CFLAGS='$CFLAGS $LIBCFLAGS -DBSD -D__YIYIYA__  '+cflags,
-    LINKFLAGS= '$LINKFLAGS $USER')
+    LINKFLAGS= '$LINKFLAGS $USERLD')

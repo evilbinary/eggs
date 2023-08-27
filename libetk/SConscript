@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('appEnv')
-env=appEnv
+Import('libEnv')
+env=libEnv
 
 
 source=[

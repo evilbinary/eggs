@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env = cliEnv.Clone()
+Import('libEnv')
+env = libEnv.Clone()
 
 
 libs=[

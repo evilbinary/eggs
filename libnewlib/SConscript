@@ -6,7 +6,8 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('libEnv')
+env=libEnv
 
 cflags = ''
 

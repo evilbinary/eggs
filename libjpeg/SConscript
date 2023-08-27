@@ -6,8 +6,8 @@
 # ********************************************************************
 import os
 
-Import('cliEnv')
-env=cliEnv
+Import('libEnv')
+env=libEnv
 
 source=Split('jcapimin.c jcapistd.c jccoefct.c jccolor.c jcdctmgr.c jchuff.c \
         jcinit.c jcmainct.c jcmarker.c jcmaster.c jcomapi.c jcparam.c \
