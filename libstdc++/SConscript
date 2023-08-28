@@ -21,7 +21,7 @@ libpath = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#/', '')
 libs = ''
 
 ldflags = env['LINKFLAGS'] + \
-    ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
+    ' '.join(map(lambda i: ' ../libmusl/lib/'+i, env['LIBC']))
 
 cflags += env['CFLAGS']
 

@@ -23,18 +23,22 @@ returns = []
 include = ' '.join(map(lambda i: ' -I'+i, env['CPPPATH'])).replace('#', '')
 libs = ' '.join(map(lambda i: ' -l'+i, env['LIBS'])).replace('#', '')
 libpath = ' '.join(map(lambda i: ' -L'+i, env['LIBPATH'])).replace('#', '')
-ldflags = env['LINKFLAGS'] + \
-    ' '.join(map(lambda i: '../libmusl/lib/'+i, env['LIBC']))
+ldflags = env['LINKFLAGS'] + ' '+' '.join(map(lambda i: ' ../libmusl/lib/'+i, env['LIBC']))
 
 ldflags += ' '+libpath+' '+libs+' '
 
 cflags += include+' '
 cflags += env['CFLAGS']
 
+# print('cflages==>>',cflags,'<<=====')
+# print('include==>>',include,'<<=====')
+# print('ldflags==>>',ldflags,'<<=====')
+# print('libs==>>',libs,'<<=====')
+
 
 def patch_path(var):
     var = var.replace(
-        'eggs/libmusl', '../libmusl')
+        'eggs', '..')
     var = var.replace('#../libmusl', '../libmusl')
     return var
 
@@ -47,8 +51,7 @@ params = [
     '--arch='+env['ARCHTYPE'],
     '--target-os=linux',
     # '--cross-prefix='+env['CC_PREFIX'],
-    '--extra-cflags=%s  %s %s' % (
-        cflags, libpath, libs),
+    '--extra-cflags=%s  %s %s' % (cflags, libpath, libs),
     '--extra-ldflags=%s ' % (ldflags),
     '--host-extralibs=',
     '--enable-gpl',
