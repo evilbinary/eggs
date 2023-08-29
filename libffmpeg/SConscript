@@ -37,8 +37,8 @@ cflags += env['CFLAGS']
 
 
 def patch_path(var):
-    var = var.replace(
-        'eggs', '..')
+    # var = var.replace(
+    #     'eggs', '..')
     var = var.replace('#../libmusl', '../libmusl')
     return var
 
