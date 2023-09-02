@@ -6,9 +6,9 @@
 # ********************************************************************
 import os
 
-Import('env')
+Import('cppEnv')
 
-env = env.Clone()
+env = cppEnv.Clone()
 
 env.UseLibC()
 env.AddCxxFlags(['-ffreestanding -fpic',
