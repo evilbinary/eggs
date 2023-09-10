@@ -2,7 +2,7 @@ target("sdl2-ttf")
     set_kind("static")
 
     add_packages("musl")
-    add_deps("zlib","freetype")
+    add_deps("zlib","freetype","sdl2")
 
     add_files(
         '*.c'
