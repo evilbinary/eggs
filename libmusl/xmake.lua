@@ -25,8 +25,6 @@ package("musl")
 
       
         cflags=package:build_getenv("cflags")
-        print('cflags=>',cflags)
-
         configs = {
             configure = "path/to/package/configure",
             'CROSS_COMPILE='..compile,
