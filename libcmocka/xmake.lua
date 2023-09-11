@@ -11,5 +11,6 @@ target("cmocka")
     
     add_includedirs(
         '.',
-        './include'
+        './include',
+        { public= true}
     )

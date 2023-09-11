@@ -14,6 +14,7 @@ package("musl")
         "obj/include/",
         "arch/generic/",
         "arch/generic/bits"
+        -- {public = true}
     )
 
     on_install(function (package)
@@ -25,6 +26,7 @@ package("musl")
 
       
         cflags=package:build_getenv("cflags")
+
         configs = {
             configure = "path/to/package/configure",
             'CROSS_COMPILE='..compile,

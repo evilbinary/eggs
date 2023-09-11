@@ -58,5 +58,6 @@ target("chez")
         'src',
         'include',
         build_type,
-        '../'..build_type
+        '../'..build_type,
+        {public = true}
     )

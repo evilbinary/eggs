@@ -10,5 +10,6 @@ target("lua")
     add_includedirs(
         '.',
         '../include',
+        './src',
         {public = true}
     )

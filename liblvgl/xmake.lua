@@ -17,7 +17,7 @@ target("lvgl")
         'src/draw/*.c',
         'src/draw/sw/*.c',
         'src/font/*.c',
-        'src/gpu/*.c',
+        -- 'src/gpu/*.c',
         'src/hal/*.c',
         'src/misc/*.c',
         'src/widgets/*.c',

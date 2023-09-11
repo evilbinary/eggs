@@ -43,5 +43,6 @@ target("etk")
     add_cflags('-DLIBYC')
     
     add_includedirs(
-        '.'
+        '.',
+        {public= true}
     )

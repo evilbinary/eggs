@@ -10,8 +10,6 @@ target("sdl")
         'src/audio/dummy/*.c',
         -- 'src/audio/aaudio/*.c',
         -- 'src/audio/openslES/*.c',
-        'src/atomic/SDL_atomic.c',
-        'src/atomic/SDL_spinlock.c',
         -- 'src/core/android/*.c',
         'src/cpuinfo/*.c',
         -- 'src/dynapi/*.c',
@@ -35,18 +33,14 @@ target("sdl")
         -- 'src/filesystem/android/*.c',
         -- 'src/sensor/*.c',
         -- 'src/sensor/android/*.c',
-        'src/render/*.c',
-        'src/render/*/*.c',
         'src/stdlib/*.c',
-        'src/libm/*.c',
         'src/thread/*.c',
         'src/thread/generic/*.c',
         -- 'src/thread/pthread/*.c',
         'src/timer/*.c',
         'src/timer/yiyiya/*.c',
         'src/video/*.c',
-        'src/video/yiyiya/*.c',
-        'src/video/yuv2rgb/*.c'
+        'src/video/yiyiya/*.c'
 
     )
     
