@@ -14,7 +14,6 @@ target("webp")
     
     add_includedirs(
     '.',
-    './include',
     './src',
     {public = true}
     )

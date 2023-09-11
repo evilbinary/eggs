@@ -11,9 +11,8 @@ target("cxx")
     add_includedirs(
     '.',
     './include',
-    '../../duck/libs/include',
+    -- '../../duck/libs/include',
     './include/experimental'
-    , {public = true}
     )
     add_cxxflags(
         '-ffreestanding -fpic',

@@ -23,5 +23,5 @@ target("zlib")
     
     add_includedirs(
     '.',
-    './include', {public = true}
+    {public = true}
     )

@@ -12,6 +12,5 @@ target("lvqrcode")
     add_cflags('-DLV_LVGL_H_INCLUDE_SIMPLE=1 ')
 
     add_includedirs(
-        '.',
-        'include'
+        '.'
     )

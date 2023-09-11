@@ -55,9 +55,6 @@ target("chez")
     add_includedirs(
         '.',
         '../include',
-        'src',
-        'include',
-        build_type,
-        '../'..build_type,
+        './'..build_type,
         {public = true}
     )

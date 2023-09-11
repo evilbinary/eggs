@@ -1,6 +1,3 @@
--- add_rules("mode.debug", "mode.release","arch")
--- add_repositories("local-repo build")
--- add_packages("libmusl")
 add_requires('musl')
 
 package("musl")
@@ -11,24 +8,17 @@ package("musl")
 
     add_includedirs(
         "include",
-        "obj/include/",
-        "arch/generic/",
-        "arch/generic/bits"
-        -- {public = true}
+        {public = true}
     )
+    add_cflags(' -Wno-error=pointer-sign -DSYSCALL_NO_TLS ',{public = true})
 
     on_install(function (package)
-
-
         toolchains=package:configs().toolchains
         compile=toolchains..'-'
-        -- compile=package:tool('cc')
 
-      
         cflags=package:build_getenv("cflags")
 
         configs = {
-            configure = "path/to/package/configure",
             'CROSS_COMPILE='..compile,
             'CFLAGS=-Wno-error=pointer-sign -DSYSCALL_NO_TLS '.. table.concat(cflags, " ") ,
             '--disable-optimize',

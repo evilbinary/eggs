@@ -17,7 +17,6 @@ target("sdl-image")
 
     add_includedirs(
     '.',
-    './include',
     '../libgui/',
      {public = true}
     )
