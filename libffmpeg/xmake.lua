@@ -1,4 +1,4 @@
-add_requires('ffmpeg')
+-- add_requires('ffmpeg')
 
 package("ffmpeg")
 
@@ -23,11 +23,9 @@ package("ffmpeg")
         cc= package:build_getenv("cc")
         ar= package:build_getenv("ar")
         ranlib= package:build_getenv("ranlib")
-
-        print('cc=>',cc)
-        print('ar=>',ar)
-        print('ranlib=>',ranlib)
-
+        arch= package:build_getenv("arch")
+        
+        print('-->arch',arch)
 
         configs = {
         '--cc='..cc,
