@@ -23,7 +23,7 @@ automake("c")
 
 configure(
         'CROSS_COMPILE='+compile,
-        'CFLAGS=-Wno-error=pointer-sign -DSYSCALL_NO_TLS'+ " ".join(cflags) ,
+        'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
         '--disable-optimize',
         '--enable-debug=yes',
         #'--enable-shared=yes',
