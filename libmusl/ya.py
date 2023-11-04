@@ -15,6 +15,8 @@ add_includedirs(
 )
 add_cflags('-Wno-error=pointer-sign','-DSYSCALL_NO_TLS',public = true)
 
+add_deps("gcc")
+
 toolchains=get_toolchain()
 compile=toolchains+'-'
 cflags=get_cflags()
