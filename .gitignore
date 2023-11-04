@@ -16,3 +16,5 @@ libmusl/config.mak
 libmusl/temp2.txt
 libmusl/temp.txt
 **/*.d
+
+**/**/__pycache__/**.pyc
