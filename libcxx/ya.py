@@ -9,6 +9,8 @@ set_kind("static")
 
 add_packages("musl")
 
+add_deps("cxxabi")
+
 add_files(
     'src/*.cpp',
     'src/filesystem/*.cpp'
