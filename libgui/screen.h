@@ -46,6 +46,8 @@ typedef struct screen_info {
   int height;
   int bpp;
   u32 *buffer;
+  u32 *pbuffer;
+  u32 buffer_length;
   struct screen_point_t cur;
   u8 *ASC;
   int fd;

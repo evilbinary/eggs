@@ -7,10 +7,17 @@
 
 #include "bmp.h"
 #include "event.h"
+#include "fcntl.h"
 #include "image.h"
 #include "stdarg.h"
 #include "syscall.h"
-#include "fcntl.h"
+
+#ifdef MIYOO
+#define DB_BUFFER 1
+#define NV12 1
+#endif
+
+// #define DB_BUFFER 1
 
 screen_info_t gscreen;
 
@@ -204,6 +211,55 @@ u8 SCREEN_ASCII[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+static inline uint32_t rgb2y(uint8_t *rgb) {
+  // return(((257 * rgb[0])/1000) + ((504 * rgb[1])/1000) + ((98 * rgb[2])/1000)
+  // + 16);
+  register uint32_t b = rgb[0];
+  register uint32_t g = rgb[1];
+  register uint32_t r = rgb[2];
+  return ((306 * r + 601 * g + 117 * b) >> 10);
+}
+
+static inline void rgb2uv(uint8_t *rgb, uint8_t *uv) {
+  uint32_t b = rgb[0];
+  uint32_t g = rgb[1];
+  uint32_t r = rgb[2];
+  uv[0] = ((446 * b - 150 * r - 296 * g) / 1024) + 0x7F;
+  uv[1] = ((630 * r - 527 * g - 102 * b) / 1024) + 0x7F;
+}
+
+int rgb2nv12(uint8_t *out, uint32_t *in, int w, int h) {
+  uint8_t *y = out;
+  uint8_t *uv = y + w * h;
+  uint32_t *rgb = (in + w * h);
+
+  for (int i = 0; i < h; i += 2) {
+    for (int j = 0; j < w; j += 2) {
+      rgb--;
+      *y = rgb2y((uint8_t *)rgb);
+      y++;
+
+      rgb2uv(rgb, uv);
+      uv += 2;
+
+      rgb--;
+      *y = rgb2y((uint8_t *)rgb);
+      y++;
+    }
+    for (int j = 0; j < w; j += 2) {
+      rgb--;
+      *y = rgb2y((uint8_t *)rgb);
+      y++;
+
+      rgb--;
+      *y = rgb2y((uint8_t *)rgb);
+      y++;
+    }
+  }
+
+  return 0;
+}
+
 inline void screen_put_pixel(u32 x, u32 y, u32 c) {
   i32 x_max = gscreen.width - 1;   // 每行像素数
   i32 y_max = gscreen.height - 1;  // 每列像素数
@@ -296,14 +352,14 @@ void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
   int t;
   int xerr = 0, yerr = 0, delta_x, delta_y, distance;
   int incx, incy, row, col;
-  delta_x = x2 - x1;  //计算坐标增量
+  delta_x = x2 - x1;  // 计算坐标增量
   delta_y = y2 - y1;
   row = x1;
   col = y1;
   if (delta_x > 0) {
-    incx = 1;  //设置单步方向
+    incx = 1;  // 设置单步方向
   } else if (delta_x == 0) {
-    incx = 0;  //垂直线
+    incx = 0;  // 垂直线
   } else {
     incx = -1;
     delta_x = -delta_x;
@@ -311,18 +367,18 @@ void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
   if (delta_y > 0) {
     incy = 1;
   } else if (delta_y == 0) {
-    incy = 0;  //水平线
+    incy = 0;  // 水平线
   } else {
     incy = -1;
     delta_y = -delta_y;
   }
   if (delta_x > delta_y) {
-    distance = delta_x;  //选取基本增量坐标轴
+    distance = delta_x;  // 选取基本增量坐标轴
   } else {
     distance = delta_y;
   }
-  for (t = 0; t <= distance + 1; t++) {  //画线输出
-    screen_put_pixel(row, col, color);   //画点
+  for (t = 0; t <= distance + 1; t++) {  // 画线输出
+    screen_put_pixel(row, col, color);   // 画点
     xerr += delta_x;
     yerr += delta_y;
     if (xerr > distance) {
@@ -387,7 +443,7 @@ void screen_draw_char(i32 x, i32 y, u16 ch) {
 
 void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
                                   u32 bgcolor) {
-  if (y < 0 || y >= (gscreen.height-16)) {
+  if (y < 0 || y >= (gscreen.height - 16)) {
     return 0;
   }
   u32 i, j;
@@ -557,15 +613,27 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
 
 void screen_init() {
   int fd = open("/dev/fb", O_RDWR);
-  printf("screen init fd:%d\n",fd);
+  printf("screen init fd:%d\n", fd);
   ioctl(fd, IOC_READ_FRAMBUFFER_INFO, &(gscreen.fb),
         sizeof(framebuffer_info_t));
+
   gscreen.buffer = gscreen.fb.frambuffer;
+  gscreen.pbuffer = gscreen.fb.frambuffer;
   gscreen.width = gscreen.fb.width;
   gscreen.height = gscreen.fb.height;
   gscreen.bpp = gscreen.fb.bpp;
   gscreen.fd = fd;
-  printf("screen init %dx%d bpp:%d fb count:%d\n",gscreen.width,gscreen.height,gscreen.fb.bpp,gscreen.fb.framebuffer_count);
+
+#ifdef DB_BUFFER
+  gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+  gscreen.buffer = malloc(gscreen.buffer_length);
+
+#endif
+
+  printf("screen init %dx%d bpp:%d fb count:%d len:%d buffer len:%d\n",
+         gscreen.width, gscreen.height, gscreen.fb.bpp,
+         gscreen.fb.framebuffer_count, gscreen.fb.framebuffer_length,
+         gscreen.buffer_length);
   event_init();
 }
 
@@ -579,8 +647,18 @@ void screen_flush() {
   u32 current_index = gscreen.fb.framebuffer_index;
   gscreen.fb.framebuffer_index =
       (++gscreen.fb.framebuffer_index) % gscreen.fb.framebuffer_count;
+
+#ifdef DB_BUFFER
+#ifdef NV12
+  rgb2nv12(gscreen.pbuffer, gscreen.buffer, gscreen.width, gscreen.height);
+#else
+  memcpy(gscreen.pbuffer, gscreen.buffer, gscreen.buffer_length);
+#endif
+
+#else
   gscreen.buffer = gscreen.fb.frambuffer + gscreen.width * gscreen.height *
                                                gscreen.fb.framebuffer_index;
+#endif
 
   ioctl(gscreen.fd, IOC_FLUSH_FRAMBUFFER, current_index);
 }
@@ -609,7 +687,7 @@ void do_screen_thread(void) {
     screen_fill_rect(10, 20, 30, 30, 0xff0000);
     screen_printf(200, 10, "hello,YiYiYa");
 
-    read(fd,&mouse_data,sizeof(mouse_data_t));
+    read(fd, &mouse_data, sizeof(mouse_data_t));
     // syscall3(SYS_READ, fd, &mouse_data, sizeof(mouse_data_t));
     screen_printf(10, 100, "%d %d", mouse_data.x, mouse_data.y);
     screen_fill_rect(mouse_data.x, gscreen.height - mouse_data.y, 4, 4,
