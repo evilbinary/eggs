@@ -39,6 +39,7 @@ typedef struct framebuffer_info {
   u32 inited;
   u32* write;
   u32* flip_buffer;
+  u32 format;
 } framebuffer_info_t;
 
 typedef struct screen_info {

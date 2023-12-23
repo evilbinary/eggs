@@ -17,7 +17,7 @@
 #define NV12 1
 #endif
 
-// #define DB_BUFFER 1
+#define DB_BUFFER 1
 
 screen_info_t gscreen;
 
@@ -625,7 +625,7 @@ void screen_init() {
   gscreen.fd = fd;
 
 #ifdef DB_BUFFER
-  gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+  gscreen.buffer_length = gscreen.width * gscreen.height * 8;
   gscreen.buffer = malloc(gscreen.buffer_length);
 
 #endif
@@ -649,12 +649,11 @@ void screen_flush() {
       (++gscreen.fb.framebuffer_index) % gscreen.fb.framebuffer_count;
 
 #ifdef DB_BUFFER
-#ifdef NV12
-  rgb2nv12(gscreen.pbuffer, gscreen.buffer, gscreen.width, gscreen.height);
-#else
-  memcpy(gscreen.pbuffer, gscreen.buffer, gscreen.buffer_length);
-#endif
-
+  if (gscreen.fb.format == 1) {
+    rgb2nv12(gscreen.pbuffer, gscreen.buffer, gscreen.width, gscreen.height);
+  } else {
+    memcpy(gscreen.pbuffer, gscreen.buffer, gscreen.buffer_length);
+  }
 #else
   gscreen.buffer = gscreen.fb.frambuffer + gscreen.width * gscreen.height *
                                                gscreen.fb.framebuffer_index;
