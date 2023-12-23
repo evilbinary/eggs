@@ -124,7 +124,11 @@ DUMMY_VideoInit(_THIS)
 
     /* Use a fake 32-bpp desktop mode */
     SDL_zero(mode);
-    mode.format = SDL_PIXELFORMAT_ARGB8888;
+    if(screen->fb.format==1){ //nv12
+        mode.format = SDL_PIXELFORMAT_NV12;
+    }else{
+        mode.format = SDL_PIXELFORMAT_ARGB8888;
+    }
     mode.w = screen->width;
     mode.h = screen->height;
     mode.refresh_rate = 0;
