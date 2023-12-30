@@ -13,11 +13,10 @@
 #include "syscall.h"
 
 #ifdef MIYOO
-#define DB_BUFFER 1
-#define NV12 1
+// #define DB_BUFFER 1
+// #define NV12 1
+#define ROTATE_180 1
 #endif
-
-#define DB_BUFFER 1
 
 screen_info_t gscreen;
 
@@ -221,14 +220,35 @@ static inline uint32_t rgb2y(uint8_t *rgb) {
 }
 
 static inline void rgb2uv(uint8_t *rgb, uint8_t *uv) {
-  uint32_t b = rgb[0];
-  uint32_t g = rgb[1];
-  uint32_t r = rgb[2];
+  register uint32_t b = rgb[0];
+  register uint32_t g = rgb[1];
+  register uint32_t r = rgb[2];
   uv[0] = ((446 * b - 150 * r - 296 * g) / 1024) + 0x7F;
   uv[1] = ((630 * r - 527 * g - 102 * b) / 1024) + 0x7F;
 }
 
-int rgb2nv12(uint8_t *out, uint32_t *in, int w, int h) {
+// int rgb2nv12(uint8_t *out, uint32_t *in, int w, int h) {
+//   uint8_t *y = out;
+//   uint8_t *uv = y + w * h;
+//   uint32_t *rgb = (in + w * h);
+
+//   for (int i = 0; i < w; i++) {
+//     for (int j = 0; j < h; j++) {
+//       // 内嵌 rgb2uv 函数
+//       uint32_t pixel = *rgb;
+//       uint32_t b = pixel & 0xFF;
+//       uint32_t g = (pixel >> 8) & 0xFF;
+//       uint32_t r = (pixel >> 16) & 0xFF;
+//       *y = (306 * r + 601 * g + 117 * b) >> 10;
+//       y++;
+//       rgb--;
+//     }
+//   }
+
+//   return 0;
+// }
+
+int rgb2nv12_a(uint8_t *out, uint32_t *in, int w, int h) {
   uint8_t *y = out;
   uint8_t *uv = y + w * h;
   uint32_t *rgb = (in + w * h);
@@ -263,6 +283,12 @@ int rgb2nv12(uint8_t *out, uint32_t *in, int w, int h) {
 inline void screen_put_pixel(u32 x, u32 y, u32 c) {
   i32 x_max = gscreen.width - 1;   // 每行像素数
   i32 y_max = gscreen.height - 1;  // 每列像素数
+
+#ifdef ROTATE_180
+  x = gscreen.width - 1 - x;
+  y = gscreen.height - 1 - y;
+#endif
+
   // 防止越界
   if (x >= x_max) {
     return;
@@ -278,6 +304,10 @@ void screen_draw_poi32(i32 x, i32 y, i32 color) {
   i32 x_max = gscreen.width - 1;   // 每行像素数
   i32 y_max = gscreen.height - 1;  // 每列像素数
 
+#ifdef ROTATE_180
+  x = gscreen.width - 1 - x;
+  y = gscreen.height - 1 - y;
+#endif
   // 防止越界
   if (x >= x_max) {
     return;
@@ -298,7 +328,10 @@ void screen_draw_poi32(i32 x, i32 y, i32 color) {
 i32 screen_get_poi32_color(i32 x, i32 y) {
   i32 x_max = gscreen.width - 1;   // 每行像素数
   i32 y_max = gscreen.height - 1;  // 每列像素数
-
+#ifdef ROTATE_180
+  x = gscreen.width - 1 - x;
+  y = gscreen.height - 1 - y;
+#endif
   // 防止越界
   if (x > x_max) {
     x = x_max;
@@ -404,6 +437,10 @@ void screen_fill_rect(i32 x, i32 y, i32 w, i32 h, u32 color) {
 
 void screen_put_ascii(i32 x, i32 y, u8 ch, i32 color) {
   register i32 i, j;
+#ifdef ROTATE_180
+  x = gscreen.width - 1 - x;
+  y = gscreen.height - 1 - y;
+#endif
   for (i = 0; i < CHAR_HEIGHT; i++)
     for (j = 0; j < ASC_WIDTH; j++)
       if ((*(gscreen.ASC + ch * ASC_WIDTH + i) >> (ASC_WIDTH - j - 1)) & 1)
@@ -500,6 +537,12 @@ void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
 void screen_draw_string_with_color(i32 x, i32 y, i8 *str, u32 frcolor,
                                    u32 bgcolor) {
   u16 code;
+
+#ifdef ROTATE_180
+  x = gscreen.width - 1 - x;
+  y = gscreen.height - 1 - y;
+#endif
+
   while ((*str != '\0')) {
     code = *str++;
     if (code > 0x80) code = (code << 8) + *str++;
