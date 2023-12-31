@@ -13,9 +13,9 @@
 #include "syscall.h"
 
 #ifdef MIYOO
-// #define DB_BUFFER 1
-// #define NV12 1
-#define ROTATE_180 1
+#define DB_BUFFER 1
+#define NV12 1
+// #define ROTATE_180 1
 #endif
 
 screen_info_t gscreen;
@@ -248,7 +248,7 @@ static inline void rgb2uv(uint8_t *rgb, uint8_t *uv) {
 //   return 0;
 // }
 
-int rgb2nv12_a(uint8_t *out, uint32_t *in, int w, int h) {
+int rgb2nv12(uint8_t *out, uint32_t *in, int w, int h) {
   uint8_t *y = out;
   uint8_t *uv = y + w * h;
   uint32_t *rgb = (in + w * h);

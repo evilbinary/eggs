@@ -10,7 +10,7 @@ event_t null_event;
 #include "algorithm/array_queue.h"
 
 aqueue_t queue;
-event_info_t event_info={0};
+event_info_t event_info = {0};
 static mouse_data_t current_mouse;
 static u32 button_press = 0;
 
@@ -42,36 +42,47 @@ int event_init() {
   if (event_info.is_init > 0) {
     return 0;
   }
+
   event_info.is_init = 1;
-  event_info.input_fd = open("/dev/stdin", 0);
+  event_info.input_fd = open("/dev/keyboard", 0);
+  if (event_info.input_fd < 0) {
+    printf("open input failed\n");
+  }else{
+    dup2(event_info.input_fd,0);
+  }
+
+
   event_info.mouse_fd = open("/dev/mouse", 0);
+  if (event_info.mouse_fd < 0) {
+    printf("open mouse failed\n");
+  }
   return 1;
 }
 
 u32 scan_code_to_key(u32 scan_code) {
-  int index=scan_code & 0x7f;
-  if(index>0x3a){
-    printf("scan code overflow %x\n",scan_code);
+  int index = scan_code & 0x7f;
+  if (index > 0x3a) {
+    printf("scan code overflow %x\n", scan_code);
     return 0;
   }
   return key_map[index][shf_p];
 }
 
 int event_read_mouse(mouse_data_t* mouse_data) {
-  if(event_info.mouse_fd<0) return 0;
-  int ret=read(event_info.mouse_fd, &event_info.mouse, sizeof(mouse_data_t));
-  if(ret<=0) return 0;
+  if (event_info.mouse_fd < 0) return 0;
+  int ret = read(event_info.mouse_fd, &event_info.mouse, sizeof(mouse_data_t));
+  if (ret <= 0) return 0;
   *mouse_data = event_info.mouse;
   return 1;
 }
 
 int event_read_key(u32* key) {
   int ret = read(event_info.input_fd, &event_info.scan_code, 1);
-  if(ret<=0) return 0;
+  if (ret <= 0) return 0;
   *key = scan_code_to_key(event_info.scan_code);
-  if(event_info.scan_code&0x80){
+  if (event_info.scan_code & 0x80) {
     return 1;
-  }else{
+  } else {
     return 2;
   }
   return ret;
@@ -113,11 +124,11 @@ int event_poll(event_t* event) {
   }
 
   u32 key;
-  u32 press=event_read_key(&key);
-  if ( press> 0) {
-    if(press==1){
+  u32 press = event_read_key(&key);
+  if (press > 0) {
+    if (press == 1) {
       e.type = KEY_DOWN;
-    }else if(press==2){
+    } else if (press == 2) {
       e.type = KEY_UP;
     }
     e.key = key;
