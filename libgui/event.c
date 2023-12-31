@@ -47,10 +47,9 @@ int event_init() {
   event_info.input_fd = open("/dev/keyboard", 0);
   if (event_info.input_fd < 0) {
     printf("open input failed\n");
-  }else{
-    dup2(event_info.input_fd,0);
+  } else {
+    dup2(event_info.input_fd, 0);
   }
-
 
   event_info.mouse_fd = open("/dev/mouse", 0);
   if (event_info.mouse_fd < 0) {
@@ -77,6 +76,9 @@ int event_read_mouse(mouse_data_t* mouse_data) {
 }
 
 int event_read_key(u32* key) {
+  if (event_info.input_fd < 0) {
+    return -1;
+  }
   int ret = read(event_info.input_fd, &event_info.scan_code, 1);
   if (ret <= 0) return 0;
   *key = scan_code_to_key(event_info.scan_code);
