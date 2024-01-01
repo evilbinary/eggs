@@ -678,6 +678,7 @@ void screen_init() {
          gscreen.fb.framebuffer_count, gscreen.fb.framebuffer_length,
          gscreen.buffer_length);
   event_init();
+  printf("event init end\n");
 }
 
 screen_info_t *screen_info() { return &gscreen; }

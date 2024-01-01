@@ -1,8 +1,8 @@
 #include "event.h"
 
+#include "joystick.h"
 #include "stdlib.h"
 #include "syscall.h"
-#include "joystick.h"
 
 event_t null_event;
 #define ARRAY_QUEUE_TYPE event_t
@@ -51,10 +51,11 @@ int event_init() {
   }
 
   event_info.is_init = 1;
-  event_info.input_fd=-1;
-  event_info.joystick_fd=-1;
-  event_info.mouse_fd=-1;
+  event_info.input_fd = -1;
+  event_info.joystick_fd = -1;
+  event_info.mouse_fd = -1;
 
+  printf("joystic init\n");
   event_info.joystick_fd = open("/dev/joystick", 0);
   if (event_info.joystick_fd < 0) {
     printf("open joystick failed\n");
@@ -69,11 +70,14 @@ int event_init() {
   } else {
     dup2(event_info.joystick_fd, 0);
   }
+  printf("joystic init end\n");
 
   event_info.mouse_fd = open("/dev/mouse", 0);
   if (event_info.mouse_fd < 0) {
     printf("open mouse failed\n");
   }
+  printf("mouse init end2\n");
+
   return 1;
 }
 
@@ -164,9 +168,9 @@ int event_poll(event_t* event) {
   u32 press = event_read_key(&key);
   if (press > 0) {
     if (press == 1) {
-      e.type = KEY_DOWN;
+      e.type = KEY_PRESS_DOWN;
     } else if (press == 2) {
-      e.type = KEY_UP;
+      e.type = KEY_PRESS_UP;
     }
     e.key = key;
     aqueue_push(&queue, e);
@@ -176,9 +180,9 @@ int event_poll(event_t* event) {
   press = event_read_joystick(&key);
   if (press > 0) {
     if (press == 1) {
-      e.type = KEY_DOWN;
+      e.type = KEY_PRESS_DOWN;
     } else if (press == 2) {
-      e.type = KEY_UP;
+      e.type = KEY_PRESS_UP;
     }
     e.key = key;
     aqueue_push(&queue, e);

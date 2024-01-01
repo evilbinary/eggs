@@ -54,7 +54,7 @@ typedef unsigned _Addr uintptr_t;
 #define SDL_CDROM_DISABLED	1
 
 /* Enable the stub joystick driver (src/joystick/dummy/\*.c) */
-// #define SDL_JOYSTICK_DISABLED	1
+#define SDL_JOYSTICK_DISABLED	1
 
 /* Enable the stub shared object loader (src/loadso/dummy/\*.c) */
 #define SDL_LOADSO_DISABLED	1
