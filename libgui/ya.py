@@ -22,6 +22,8 @@ add_includedirs(
     public = true
 )
 
+add_cflags("-O2")
+
 target("image")
 set_kind("static")
 
