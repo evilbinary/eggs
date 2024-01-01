@@ -36,7 +36,13 @@ static const char key_map[0x3a][2] = {
     /*2c*/ {'z', 'Z'},   {'x', 'X'}, {'c', 'C'},   {'v', 'V'},
     /*30*/ {'b', 'B'},   {'n', 'N'}, {'m', 'M'},   {',', '<'},
     /*34*/ {'.', '>'},   {'/', '?'}, {0x0, 0x0},   {'*', '*'},
-    /*38*/ {0x0, 0x0},   {' ', ' '}};
+    /*38*/ {0x0, 0x0},   {32, 32},   {0x0, 0x0},   {0x0, 0x0},
+    /*3c*/ {0x0, 0x0},   {0x0, 0x0}, {0x0, 0x0},   {0x0, 0x0},
+    /*40*/ {0x0, 0x0},   {0x0, 0x0}, {0x0, 0x0},   {0x0, 0x0},
+    /*44*/ {0x0, 0x0},   {0x0, 0x0}, {0x0, 0x0},   {0x0, 0x0},
+    /*48*/ {0x0, 0x0},   {0x0, 0x0}, {'-', '-'},   {0x0, 0x0},
+    /*4c*/ {0x0, 0x0},
+};
 
 int event_init() {
   if (event_info.is_init > 0) {
@@ -44,11 +50,23 @@ int event_init() {
   }
 
   event_info.is_init = 1;
-  event_info.input_fd = open("/dev/keyboard", 0);
-  if (event_info.input_fd < 0) {
-    printf("open input failed\n");
+  event_info.input_fd=-1;
+  event_info.joystick_fd=-1;
+  event_info.mouse_fd=-1;
+
+  event_info.joystick_fd = open("/dev/joystick", 0);
+  if (event_info.joystick_fd < 0) {
+    printf("open joystick failed\n");
+
+    event_info.input_fd = open("/dev/keyboard", 0);
+    if (event_info.input_fd < 0) {
+      printf("open input failed\n");
+    } else {
+      dup2(event_info.input_fd, 0);
+    }
+
   } else {
-    dup2(event_info.input_fd, 0);
+    dup2(event_info.joystick_fd, 0);
   }
 
   event_info.mouse_fd = open("/dev/mouse", 0);
@@ -83,6 +101,22 @@ int event_read_key(u32* key) {
   if (ret <= 0) return 0;
   *key = scan_code_to_key(event_info.scan_code);
   if (event_info.scan_code & 0x80) {
+    return 1;
+  } else {
+    return 2;
+  }
+  return ret;
+}
+
+int event_read_joystick(u32* key) {
+  if (event_info.joystick_fd < 0) {
+    return -1;
+  }
+  int ret = read(event_info.joystick_fd, &event_info.joystick_code, 1);
+  if (ret <= 0) return 0;
+
+  *key = event_info.joystick_code & 0x7f;
+  if (event_info.joystick_code & 0x80) {
     return 1;
   } else {
     return 2;
@@ -127,6 +161,18 @@ int event_poll(event_t* event) {
 
   u32 key;
   u32 press = event_read_key(&key);
+  if (press > 0) {
+    if (press == 1) {
+      e.type = KEY_DOWN;
+    } else if (press == 2) {
+      e.type = KEY_UP;
+    }
+    e.key = key;
+    aqueue_push(&queue, e);
+    count++;
+  }
+
+  press = event_read_joystick(&key);
   if (press > 0) {
     if (press == 1) {
       e.type = KEY_DOWN;
