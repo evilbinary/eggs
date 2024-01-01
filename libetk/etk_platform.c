@@ -61,11 +61,11 @@ Ret etk_platform_event_poll(EtkEvent *event) {
       event->u.mouse.y = e.mouse.y;
       break;
 
-    case KEY_DOWN:
+    case KEY_PRESS_DOWN:
       event->type = ETK_EVENT_KEY_DOWN;
       event->u.key.code = e.key;
       break;
-    case KEY_UP:
+    case KEY_PRESS_UP:
       event->type = ETK_EVENT_KEY_UP;
       event->u.key.code = e.key;
       break;
