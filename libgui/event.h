@@ -9,8 +9,8 @@
 #include "types.h"
 
 enum {
-  KEY_DOWN = 1,
-  KEY_UP,
+  KEY_PRESS_DOWN = 1,
+  KEY_PRESS_UP,
   MOUSE_MOTION,
   MOUSE_BUTTON_DOWN,
   MOUSE_BUTTON_UP,

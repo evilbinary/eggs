@@ -53,11 +53,11 @@ void DUMMY_PumpEvents(_THIS) {
       printf("up\n");
       break;
 
-    case KEY_DOWN:
+    case KEY_PRESS_DOWN:
       SDL_SendKeyboardKey(SDL_PRESSED, e.key);
 
       break;
-    case KEY_UP:
+    case KEY_PRESS_UP:
       SDL_SendKeyboardKey(SDL_RELEASED, e.key);
       break;
     default:
