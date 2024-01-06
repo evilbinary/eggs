@@ -4,6 +4,7 @@
 # * 作者: evilbinary on 01/01/20
 # * 邮箱: rootdebug@163.com
 # ********************************************************************
+arch_type=get_arch_type()
 
 default_libc=get_config('default_libc')
 
@@ -24,12 +25,16 @@ if has_config("app"):
         'liblvqrcode', 'liblz4', 'libfreetype',
         'libwebp', 'libsdl2', 'libsdl2-ttf',
         'libsdl2-image', 'liblua',
-        'libchez', 'libcmocka', 'libffmpeg',
+        'libcmocka', 'libffmpeg',
         'libsdl', 'libsdl-ttf', 'libsdl-image',
         'libgaga',
         # 'libiconv'
         'libncurses',
     ]
+
+    if arch_type in['armv7-a','x86']:
+        c_libs+=['libchez',]
+
     for v in c_libs:
         includes("./"+v+"/ya.py")
 
