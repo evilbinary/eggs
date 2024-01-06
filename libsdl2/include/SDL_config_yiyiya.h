@@ -52,7 +52,13 @@ typedef unsigned long uintptr_t;
 #endif /* Visual Studio 2008 */
 
 #ifdef __GNUC__
+#ifdef ARMV5
+
+#else
+#define HAVE_GCC_ATOMICS    1
 #define HAVE_GCC_SYNC_LOCK_TEST_AND_SET 1
+#endif
+
 #endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
@@ -96,7 +102,7 @@ typedef unsigned long uintptr_t;
 
 #include <stdarg.h>
 
-#define HAVE_GCC_ATOMICS    1
+
 
 #define STDC_HEADERS    1
 // #define HAVE_ALLOCA_H       1

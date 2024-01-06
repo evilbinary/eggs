@@ -46,7 +46,12 @@
 #  endif
 #elif defined(__GNUC__)
 #   if (__GNUC__ >= 5)
-#     define HAVE_ATOMIC_LOAD_N 1
+    #ifdef ARMV5
+
+    #else
+    #     define HAVE_ATOMIC_LOAD_N 1
+    #endif
+
 #   endif
 #endif
 

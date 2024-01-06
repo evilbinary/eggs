@@ -63,4 +63,12 @@ void client_run_one(client_t* client, client_fn fn);
 
 void client_run(client_t* client, client_fn fn);
 
+
+#if defined(ARMV7_A) || defined(X86)
+  #define lock_test_and_set __sync_lock_test_and_set
+#else
+  #define lock_test_and_set
+
+#endif
+
 #endif
