@@ -86,6 +86,8 @@ void client_run(client_t* client, client_fn fn) {
 
         // api->ret = fn(api->fn, api->args);
         // api->state = API_RETURN;
+      }else{
+        sleep(80);
       }
     }
   }
