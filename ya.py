@@ -30,6 +30,7 @@ if has_config("app"):
         'libgaga',
         # 'libiconv'
         'libncurses',
+        'libsdl-gfx'
     ]
 
     if arch_type in['armv7-a','x86']:
