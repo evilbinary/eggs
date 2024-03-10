@@ -14,7 +14,7 @@ void* client_call(client_t* client, void* fn, ...) {
     printf("call client is null\n");
     return NULL;
   }
-  printf("call client %s\n", client->name);
+  printf("call client %d %s\n", client->id, client->name);
   api_t* apis = client->apis;
   if (apis == NULL) {
     printf("api is null\n");
@@ -39,7 +39,8 @@ void* client_call(client_t* client, void* fn, ...) {
   memmove(api->args, arg, MAX_ARGS_BUF);
   // api->state = API_REDAY;
   lock_test_and_set(&api->state, API_REDAY);
-  printf("call client %s ready api state %d\n", client->name, api->state);
+  printf("call client %d %s ready api state %d\n", client->id, client->name,
+         api->state);
   int count = 0;
   while (api->state == API_REDAY) {
     count++;
@@ -49,10 +50,12 @@ void* client_call(client_t* client, void* fn, ...) {
       count = 0;
       return client_call(c, fn, arg);
     }
+    if (count % 100 == 0) {
+      usleep(500000);
+    }
   }
   printf("client %s state: %d\n", client->name, api->state);
   // api->state = API_FINISH;
-  
   lock_test_and_set(&api->state, API_FINISH);
   return api->ret;
 }
@@ -74,7 +77,7 @@ void client_run(client_t* client, client_fn fn) {
   }
   client->state = SYS_RUNNING;
   printf("client start %s\n", client->name);
-  while (1) {
+  while (client->state == SYS_RUNNING) {
     api_t* api = NULL;
     for (int i = 0; i < client->api_size; i++) {
       api = &client->apis[i];
@@ -86,8 +89,8 @@ void client_run(client_t* client, client_fn fn) {
 
         // api->ret = fn(api->fn, api->args);
         // api->state = API_RETURN;
-      }else{
-        sleep(80);
+      } else {
+        usleep(50000);
       }
     }
   }
@@ -108,10 +111,8 @@ void client_run_one(client_t* client, client_fn fn) {
     api = &client->apis[i];
     if (api->state == API_REDAY) {
       printf("client run %s state: %d\n", client->name, api->state);
-#if defined(ARMV7_A) || defined(X86)
       lock_test_and_set(&api->ret, fn(api->fn, api->args));
       lock_test_and_set(&api->state, API_RETURN);
-#endif
       // api->ret = fn(api->fn, api->args);
       // api->state = API_RETURN;
     }
@@ -184,7 +185,7 @@ client_t* client_id(int id) {
     free(client);
     return NULL;
   }
-  printf("get client %x id %d \n",client, client->id);
+  printf("get client %x id %d \n", client, client->id);
   return client;
 }
 
@@ -195,4 +196,3 @@ void clirent_un_regist(client_t* client) {
   int ret = close(client->fd);
   free(client);
 }
-
