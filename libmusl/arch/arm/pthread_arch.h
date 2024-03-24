@@ -18,12 +18,14 @@ static inline uintptr_t __get_tp()
 #else
 #define BLX "blx"
 #endif
-
+#define SYS_THREAD_SELF 514
 static inline uintptr_t __get_tp()
 {
 	extern hidden uintptr_t __a_gettp_ptr;
-	register uintptr_t tp __asm__("r0");
-	__asm__ ( BLX " %1" : "=r"(tp) : "r"(__a_gettp_ptr) : "cc", "lr" );
+	// register uintptr_t tp __asm__("r0");
+	// __asm__ ( BLX " %1" : "=r"(tp) : "r"(__a_gettp_ptr) : "cc", "lr" );
+	uintptr_t tp;
+	tp= __syscall(SYS_THREAD_SELF);
 	return tp;
 }
 

@@ -7,7 +7,7 @@
 target("chez")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 add_deps("ncurses","zlib","uuid","lz4")
 
 build_type = 'a6le'

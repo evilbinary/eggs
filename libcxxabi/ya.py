@@ -7,7 +7,7 @@
 target("cxxabi")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 
 add_files(
     'src/*.cpp'

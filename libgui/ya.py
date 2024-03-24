@@ -7,7 +7,7 @@
 target("gui")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 add_deps("jpeg","png","algorithm")
 
 add_files(
@@ -27,7 +27,7 @@ add_cflags("-O2")
 target("image")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 add_deps("jpeg","png","algorithm")
 
 add_files(

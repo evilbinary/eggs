@@ -7,7 +7,7 @@
 target("sdl-image")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 add_deps("sdl","webp")
 
 add_files(

@@ -7,7 +7,7 @@
 target("lz4")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 
 add_files(
     'lib/lz4.c',

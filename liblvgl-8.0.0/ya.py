@@ -1,7 +1,7 @@
 target("lvgl-8.0.0")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 add_deps("gui")
 
 add_files(

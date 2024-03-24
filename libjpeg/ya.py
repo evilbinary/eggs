@@ -7,7 +7,7 @@
 target("jpeg")
 set_kind("static")
 
-add_packages("musl")
+add_packages(get_config('default_libc'))
 
 add_files(
     'jcapimin.c', 'jcapistd.c', 'jccoefct.c', 'jccolor.c', 'jcdctmgr.c', 'jchuff.c',
