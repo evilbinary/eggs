@@ -18,14 +18,19 @@ add_cflags('-Wno-error=pointer-sign','-DSYSCALL_NO_TLS',public = true)
 add_deps("gcc")
 
 toolchains=get_toolchain()
-compile=toolchains+'-'
+corss_compile=toolchains+'-'
 cflags=get_cflags()
 
 automake("c")
 
 configure(
-        'CROSS_COMPILE='+compile,
+        'CC='+corss_compile+'gcc',
+        'CROSS_COMPILE='+corss_compile,
+        '--target='+toolchains,
+        '--host=arm',
         'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
+        '--disable-newlib-supplied-syscalls',
+        '--disable-nls',
         '--disable-optimize',
         '--enable-debug=yes',
         #'--enable-shared=yes',
