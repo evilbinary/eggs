@@ -21,18 +21,20 @@ toolchains=get_toolchain()
 corss_compile=toolchains+'-'
 cflags=get_cflags()
 
-automake("c")
+automake("newlib-c")
 
 configure(
         'CC='+corss_compile+'gcc',
         'CROSS_COMPILE='+corss_compile,
-        '--target='+toolchains,
+        # '--target='+toolchains,
         '--host=arm',
         'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
         '--disable-newlib-supplied-syscalls',
         '--disable-nls',
         '--disable-optimize',
         '--enable-debug=yes',
+        '--disable-thumb',
+        '--disable-multilib',
         #'--enable-shared=yes',
         '--disable-shared',
         '--enable-static=yes'

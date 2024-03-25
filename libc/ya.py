@@ -7,7 +7,6 @@
 target("c")
 set_kind("static")
 
-# add_packages(get_config('default_libc'))
 
 add_files(
     'string.c',
@@ -66,5 +65,6 @@ elif arch_type=='x86':
 
 add_includedirs(
     '.',
-    '../include'
+    '../include',
+    '../include/c'
 )
