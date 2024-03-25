@@ -33,6 +33,22 @@ if has_config("app"):
         'libsdl-gfx'
     ]
 
+    if default_libc=='c':
+        c_libs=[
+            'libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
+            'liblvgl', 'liblvgl-8.0.0', 'libuuid',
+            'liblvqrcode', 'liblz4', 'libfreetype',
+            'libwebp', 'libsdl2', 'libsdl2-ttf',
+            'libsdl2-image', 'liblua',
+            'libcmocka', 'libffmpeg',
+            'libsdl', 'libsdl-ttf', 'libsdl-image',
+            'libgaga',
+            # 'libiconv'
+            # 'libncurses',
+            'libsdl-gfx'
+        ]
+    
+
     if arch_type in['armv7-a','x86']:
         c_libs+=['libchez',]
 

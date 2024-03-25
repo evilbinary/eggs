@@ -42,6 +42,11 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned _Int64 uint64_t;
 
+typedef signed _Int64   intmax_t;
+
+typedef _Addr ssize_t;
+
+
 #ifndef _INTPTR_T
 #define _INTPTR_T
 typedef _Addr intptr_t;
@@ -56,5 +61,9 @@ typedef unsigned _Addr uintptr_t;
 #define _SIZE_T
 typedef unsigned size_t;
 #endif
+
+
+struct iovec { void *iov_base; size_t iov_len; };
+
 
 #endif

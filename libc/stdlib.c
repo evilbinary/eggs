@@ -308,14 +308,14 @@ int rand(void) {
   return seed >> 33;
 }
 
-char *getenv(const char *name) {
-  char *p = strchrnul(name, '=');
-  size_t l = p - name;
-  if (l && !name[l] && environ)
-    for (char **e = environ; *e; e++)
-      if (!strncmp(name, *e, l) && l[*e] == '=') return *e + l + 1;
-  return 0;
-}
+// char *getenv(const char *name) {
+//   char *p = strchrnul(name, '=');
+//   size_t l = p - name;
+//   if (l && !name[l] && environ)
+//     for (char **e = environ; *e; e++)
+//       if (!strncmp(name, *e, l) && l[*e] == '=') return *e + l + 1;
+//   return 0;
+// }
 
 int system(const char *cmd) { return execv(cmd, NULL); }
 

@@ -7,6 +7,7 @@
 target("c")
 set_kind("static")
 
+add_deps("gcc")
 
 add_files(
     'string.c',
@@ -47,7 +48,10 @@ add_files(
     'math/*.c',
     'environ/*.c',
     'sys/*.c',
-    'crt/*.c'
+    'crt/*.c',
+    'pthread.c',
+    'getline.c',
+    'strtok.c'
 )
 
 arch_type= get_arch_type()

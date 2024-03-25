@@ -313,3 +313,9 @@ int setuid(uid_t uid) { UNIMPL(); }
 int setgid(gid_t gid) { UNIMPL(); }
 
 int brk(void *end) { return ya_brk(end); }
+
+
+void *sbrk(intptr_t inc)
+{
+	return ya_sbrk(inc);
+}

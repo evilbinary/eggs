@@ -212,6 +212,9 @@ enum {
 };
 #endif
 
+typedef long syscall_arg_t;
+
+
 void* syscall0(u32 num);
 void* syscall1(u32 num, void* arg0);
 void* syscall2(u32 num, void* arg0, void* arg1);
