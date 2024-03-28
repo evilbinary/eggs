@@ -24,6 +24,24 @@ extern hidden const unsigned char
 
 extern hidden uintptr_t __a_barrier_ptr, __a_cas_ptr, __a_gettp_ptr;
 
+static inline int cpu_cmpxchg(volatile void* ptr, int old_value, int new_value) {
+//   volatile asm(
+// 	".word 0xf57ff05f\n" 
+// 	".word 0xe1923f9f\n" 
+// 	".word 0xe0530000\n" 
+// 	".word 0x01820f91\n" 
+// 	".word 0xf57ff05f\n" 
+// 	".word 0xe12fff1e\n"
+//   );
+	return 0;
+}
+
+static inline int barrier(){
+	 __asm__ __volatile__("" : : : "memory");
+	 return 1;
+}
+
+
 int __set_thread_area(void *p)
 {
 #if !__ARM_ARCH_7A__ && !__ARM_ARCH_7R__ && __ARM_ARCH < 7
@@ -40,12 +58,17 @@ int __set_thread_area(void *p)
 			break;
 		}
 	} else {
-		int ver = *(int *)0xffff0ffc;
-		__a_gettp_ptr = __a_gettp_kuser;
-		__a_cas_ptr = __a_cas_kuser;
-		__a_barrier_ptr = __a_barrier_kuser;
-		if (ver < 2) a_crash();
-		if (ver < 3) __a_barrier_ptr = __a_barrier_oldkuser;
+		// int ver = *(int *)0xffff0ffc;
+		// __a_gettp_ptr = __a_gettp_kuser;
+		// __a_cas_ptr = __a_cas_kuser;
+		// __a_barrier_ptr = __a_barrier_kuser;
+		// if (ver < 2) a_crash();
+		// if (ver < 3) __a_barrier_ptr = __a_barrier_oldkuser;
+
+		__a_gettp_ptr=(int)__get_tp;
+		__a_cas_ptr= (int)cpu_cmpxchg;
+		__a_barrier_ptr=(int)barrier;
+		
 	}
 #endif
 	return __syscall(0xf0005, p);
