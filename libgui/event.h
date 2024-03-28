@@ -42,6 +42,7 @@ typedef struct event_info {
   int joystick_fd;
   u32 scan_code;
   u32 joystick_code;
+  u32 key_map_type;
 }event_info_t;
 
 int event_init();
