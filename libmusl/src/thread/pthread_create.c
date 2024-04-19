@@ -368,8 +368,12 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	if (ret >= 0) {
 		new->next = self->next;
 		new->prev = self;
-		new->next->prev = new;
-		new->prev->next = new;
+		if(new->next!=NULL){
+			new->next->prev = new;
+		}
+		if(new->prev!=NULL){
+			new->prev->next = new;
+		}
 	} else {
 		if (!--libc.threads_minus_1) libc.need_locks = 0;
 	}
