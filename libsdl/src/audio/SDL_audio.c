@@ -45,6 +45,9 @@ static AudioBootStrap *bootstrap[] = {
 #if SDL_AUDIO_DRIVER_BSD
 	&BSD_AUDIO_bootstrap,
 #endif
+#if SDL_AUDIO_DRIVER_YIYIYA
+	&DSP_bootstrap,
+#endif
 #if SDL_AUDIO_DRIVER_OSS
 	&DSP_bootstrap,
 	&DMA_bootstrap,

@@ -228,7 +228,7 @@ bitmap_t* load_jpeg(const char* filename) {
   /* JSAMPLEs per row in output buffer */
   row_stride = cinfo.output_width * cinfo.output_components;
   printf("output_width:%d cinfo.output_height:%d\n",cinfo.output_width,cinfo.output_height);
-  printf("out_color_space:%d\n",cinfo.out_color_space);
+  printf("out_color_space:%d output_scanline:%d\n",cinfo.out_color_space,cinfo.output_scanline);
 
   /* Make a one-row-high sample array that will go away when done with image */
   buffer = (*cinfo.mem->alloc_sarray)((j_common_ptr)&cinfo, JPOOL_IMAGE,

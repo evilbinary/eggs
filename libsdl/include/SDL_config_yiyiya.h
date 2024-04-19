@@ -48,7 +48,8 @@ typedef unsigned _Addr uintptr_t;
 // #endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
-#define SDL_AUDIO_DRIVER_DUMMY	1
+// #define SDL_AUDIO_DRIVER_DUMMY	1
+#define SDL_AUDIO_DRIVER_YIYIYA 1
 
 /* Enable the stub cdrom driver (src/cdrom/dummy/\*.c) */
 #define SDL_CDROM_DISABLED	1
@@ -60,7 +61,11 @@ typedef unsigned _Addr uintptr_t;
 #define SDL_LOADSO_DISABLED	1
 
 /* Enable the stub thread support (src/thread/generic/\*.c) */
-#define SDL_THREADS_DISABLED	1
+// #define SDL_THREADS_DISABLED	1
+/* Enable various threading systems */
+#define SDL_THREAD_PTHREAD	1
+#define SDL_THREAD_PTHREAD_RECURSIVE_MUTEX	1
+
 
 /* Enable the stub timer support (src/timer/dummy/\*.c) */
 #define SDL_TIMERS_DISABLED	0

@@ -39,7 +39,8 @@ Uint32 SDL_GetTicks (void)
 
 void SDL_Delay (Uint32 ms)
 {
-	SDL_Unsupported();
+	
+	usleep(1000*ms);
 }
 
 #include "SDL_thread.h"
