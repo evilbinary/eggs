@@ -125,10 +125,9 @@ static void DSP_WaitAudio(_THIS)
 	if ( frame_ticks ) {
 		/* Use timer for general audio synchronization */
 		Sint32 ticks;
-		
-		ticks = ((Sint32)(next_frame - SDL_GetTicks()))-FUDGE_TICKS;
-
-		//printf("frame_ticks %f %d\n",frame_ticks,ticks);
+		Sint32 time=SDL_GetTicks();
+		ticks = ((Sint32)(next_frame -time))-FUDGE_TICKS;
+		// printf("frame_ticks %f next_frame %f get ticks %d ticks %d\n",frame_ticks,next_frame,time,ticks);
 		if ( ticks > 0 ) {
 			SDL_Delay(ticks);
 		}
