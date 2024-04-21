@@ -121,6 +121,8 @@ AudioBootStrap DSP_bootstrap = {
 /* This function waits until it is possible to write a full sound buffer */
 static void DSP_WaitAudio(_THIS)
 {
+	//printf("wait audio\n");
+	SDL_Delay(10);
 	/* Not needed at all since OSS handles waiting automagically */
 }
 
