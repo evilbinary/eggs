@@ -20,21 +20,48 @@
 */
 #include "SDL_config.h"
 
+#include <sys/time.h>
+
 #if defined(SDL_TIMER_DUMMY) || defined(SDL_TIMERS_DISABLED)
 
 #include "SDL_timer.h"
 #include "../SDL_timer_c.h"
 
+#ifdef HAVE_CLOCK_GETTIME
+static struct timespec start;
+#else
+static struct timeval start;
+#endif /* HAVE_CLOCK_GETTIME */
+
 static SDL_bool ticks_started = SDL_FALSE;
 
 void SDL_StartTicks(void)
 {
+	/* Set first ticks value */
+#if HAVE_CLOCK_GETTIME
+	clock_gettime(CLOCK_MONOTONIC,&start);
+#else
+	gettimeofday(&start, NULL);
+#endif
+
 }
 
 Uint32 SDL_GetTicks (void)
 {
-	SDL_Unsupported();
-	return 0;
+
+#if HAVE_CLOCK_GETTIME
+	Uint32 ticks;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC,&now);
+	ticks=(now.tv_sec-start.tv_sec)*1000+(now.tv_nsec-start.tv_nsec)/1000000;
+	return(ticks);
+#else
+	Uint32 ticks;
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	ticks=(now.tv_sec-start.tv_sec)*1000+(now.tv_usec-start.tv_usec)/1000;
+	return(ticks);
+#endif
 }
 
 void SDL_Delay (Uint32 ms)

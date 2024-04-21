@@ -121,8 +121,48 @@ AudioBootStrap DSP_bootstrap = {
 /* This function waits until it is possible to write a full sound buffer */
 static void DSP_WaitAudio(_THIS)
 {
-	//printf("wait audio\n");
-	SDL_Delay(10);
+/* See if we need to use timed audio synchronization */
+	if ( frame_ticks ) {
+		/* Use timer for general audio synchronization */
+		Sint32 ticks;
+		
+		ticks = ((Sint32)(next_frame - SDL_GetTicks()))-FUDGE_TICKS;
+
+		//printf("frame_ticks %f %d\n",frame_ticks,ticks);
+		if ( ticks > 0 ) {
+			SDL_Delay(ticks);
+		}
+	} else {
+		/* Use select() for audio synchronization */
+		fd_set fdset;
+		struct timeval timeout;
+
+		FD_ZERO(&fdset);
+		FD_SET(audio_fd, &fdset);
+		timeout.tv_sec = 10;
+		timeout.tv_usec = 0;
+#ifdef DEBUG_AUDIO
+		fprintf(stderr, "Waiting for audio to get ready\n");
+#endif
+		if ( select(audio_fd+1, NULL, &fdset, NULL, &timeout) <= 0 ) {
+			const char *message =
+			"Audio timeout - buggy audio driver? (disabled)";
+			/* In general we should never print to the screen,
+			   but in this case we have no other way of letting
+			   the user know what happened.
+			*/
+			fprintf(stderr, "SDL: %s\n", message);
+			this->enabled = 0;
+			/* Don't try to close - may hang */
+			audio_fd = -1;
+#ifdef DEBUG_AUDIO
+			fprintf(stderr, "Done disabling audio\n");
+#endif
+		}
+#ifdef DEBUG_AUDIO
+		fprintf(stderr, "Ready!\n");
+#endif
+	}
 	/* Not needed at all since OSS handles waiting automagically */
 }
 
@@ -137,6 +177,13 @@ static void DSP_PlayAudio(_THIS)
 #ifdef DEBUG_AUDIO
 	fprintf(stderr, "Wrote %d bytes of audio data\n", mixlen);
 #endif
+
+	/* If timer synchronization is enabled, set the next write frame */
+	if ( frame_ticks ) {
+		next_frame += frame_ticks;
+	}
+
+
 }
 
 static Uint8 *DSP_GetAudioBuf(_THIS)
@@ -172,6 +219,7 @@ static int DSP_OpenAudio(_THIS, SDL_AudioSpec *spec)
         spec->channels = 4;
     else if (spec->channels > 2)
         spec->channels = 2;
+
 
 	/* Open the audio device */
 	audio_fd = SDL_OpenAudioPath(audiodev, sizeof(audiodev), OPEN_FLAGS, 0);
@@ -331,6 +379,10 @@ static int DSP_OpenAudio(_THIS, SDL_AudioSpec *spec)
 
 	/* Get the parent process id (we're the parent of the audio thread) */
 	parent = getpid();
+
+	frame_ticks = (float)(spec->samples*1000) /
+									spec->freq;
+	next_frame = SDL_GetTicks()+frame_ticks;
 
 	/* We're ready to rock and roll. :-) */
 	return(0);
