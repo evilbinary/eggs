@@ -20,56 +20,50 @@
 */
 #include "../../SDL_internal.h"
 
-#if defined(SDL_TIMER_DUMMY) || defined(SDL_TIMERS_DISABLED)
+#ifndef SDL_dspaudio_h_
+#define SDL_dspaudio_h_
 
-#include "SDL_timer.h"
+#include "../SDL_sysaudio.h"
 
-static SDL_bool ticks_started = SDL_FALSE;
+/* Hidden "this" pointer for the audio functions */
+#define _THIS   SDL_AudioDevice *this
 
-void
-SDL_TicksInit(void)
+struct SDL_PrivateAudioData
 {
-    if (ticks_started) {
-        return;
-    }
-    ticks_started = SDL_TRUE;
-}
+    /* The file descriptor for the audio device */
+    int audio_fd;
 
-void
-SDL_TicksQuit(void)
-{
-    ticks_started = SDL_FALSE;
-}
+    /* Raw mixing buffer */
+    Uint8 *mixbuf;
+    int mixlen;
 
-Uint64
-SDL_GetTicks64(void)
-{
-    if (!ticks_started) {
-        SDL_TicksInit();
-    }
+        /* Support for audio timing using a timer, in addition to select() */
+	float frame_ticks;
+	float next_frame;
 
-    SDL_Unsupported();
-    return 0;
-}
+};
 
-Uint64
-SDL_GetPerformanceCounter(void)
-{
-    return SDL_GetTicks();
-}
+/* Old variable names */
+#define frame_ticks		(this->hidden->frame_ticks)
+#define next_frame		(this->hidden->next_frame)
 
-Uint64
-SDL_GetPerformanceFrequency(void)
-{
-    return 1000;
-}
+#define FUDGE_TICKS 10      /* The scheduler overhead ticks per frame */
 
-void
-SDL_Delay(Uint32 ms)
-{
-    usleep(ms);
-}
 
-#endif /* SDL_TIMER_DUMMY || SDL_TIMERS_DISABLED */
+#define AFMT_U16_LE 16
+#define AFMT_S16_LE 16
+#define AFMT_S16_BE 16
+#define AFMT_U8 8
 
+#define SNDCTL_DSP_SETFMT 11
+#define SNDCTL_DSP_GETFMTS 22
+#define SNDCTL_DSP_CHANNELS 33
+#define SNDCTL_DSP_SPEED 44
+#define SNDCTL_DSP_SETFRAGMENT 55
+#define SNDCTL_DSP_SETTRIGGER 66
+
+
+#define PCM_ENABLE_OUTPUT 1
+
+#endif /* SDL_dspaudio_h_ */
 /* vi: set ts=4 sw=4 expandtab: */

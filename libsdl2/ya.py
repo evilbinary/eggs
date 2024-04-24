@@ -13,7 +13,7 @@ add_deps("gui")
 add_files(
     'src/*.c',
     'src/audio/*.c',
-    'src/audio/dummy/*.c',
+    'src/audio/yiyiya/*.c',
     # 'src/audio/aaudio/*.c',
     # 'src/audio/openslES/*.c',
     'src/atomic/SDL_atomic.c',
@@ -46,10 +46,10 @@ add_files(
     'src/stdlib/*.c',
     'src/libm/*.c',
     'src/thread/*.c',
-    'src/thread/generic/*.c',
-    # 'src/thread/pthread/*.c',
+    # 'src/thread/generic/*.c',
+    'src/thread/pthread/*.c',
     'src/timer/*.c',
-    'src/timer/yiyiya/*.c',
+    'src/timer/unix/*.c',
     'src/video/*.c',
     'src/video/yiyiya/*.c',
     'src/video/yuv2rgb/*.c'

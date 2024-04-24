@@ -62,7 +62,8 @@ typedef unsigned long uintptr_t;
 #endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
-#define SDL_AUDIO_DRIVER_DUMMY  1
+// #define SDL_AUDIO_DRIVER_DUMMY  1
+#define SDL_AUDIO_DRIVER_YIYIYA 1
 
 /* Enable the stub joystick driver (src/joystick/dummy/\*.c) */
 #define SDL_JOYSTICK_DISABLED   1
@@ -81,10 +82,14 @@ typedef unsigned long uintptr_t;
 #define SDL_LOADSO_DISABLED 1
 
 /* Enable the stub thread support (src/thread/generic/\*.c) */
-#define SDL_THREADS_DISABLED    1
-
+// #define SDL_THREADS_DISABLED    1
+#define SDL_THREAD_PTHREAD 1
 /* Enable the stub timer support (src/timer/dummy/\*.c) */
-#define SDL_TIMERS_DISABLED 0
+// #define SDL_TIMER_YIYIYA
+#define SDL_TIMER_UNIX 1
+
+// #define SDL_TIMERS_DISABLED 0
+
 
 /* Enable the dummy video driver (src/video/dummy/\*.c) */
 #define SDL_VIDEO_DRIVER_DUMMY  1

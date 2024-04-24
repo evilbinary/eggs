@@ -335,6 +335,7 @@ SDL_CreateThreadWithStackSize(int (SDLCALL * fn) (void *),
     thread->userfunc = fn;
     thread->userdata = data;
     thread->stacksize = stacksize;
+    printf("==> userfun %x userdata %x\n",fn,data);
 
     /* Create the thread and go! */
 #ifdef SDL_PASSED_BEGINTHREAD_ENDTHREAD
