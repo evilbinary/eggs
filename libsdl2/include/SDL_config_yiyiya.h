@@ -107,28 +107,43 @@ typedef unsigned long uintptr_t;
 
 #include <stdarg.h>
 
+typedef signed char int8_t;
+typedef unsigned char uint8_t;
+typedef signed short int16_t;
+typedef unsigned short uint16_t;
+typedef signed int int32_t;
+typedef unsigned int uint32_t;
+typedef unsigned int size_t;
+#define _Addr int
+
+typedef unsigned _Addr uintptr_t;
 
 
 #define STDC_HEADERS    1
-// #define HAVE_ALLOCA_H       1
-// #define HAVE_CTYPE_H    1
-#define HAVE_INTTYPES_H 1
-#define HAVE_LIMITS_H   1
-#define HAVE_MATH_H 1
-// #define HAVE_SIGNAL_H 1
+#define HAVE_CTYPE_H    1
+
+#define HAVE_SIGNAL_H 1
 #define HAVE_STDINT_H   1
 #define HAVE_STDIO_H    1
 #define HAVE_STRING_H   1
 #define HAVE_SYS_TYPES_H    1
+#define HAVE_INTTYPES_H 1
+#define HAVE_LIMITS_H   1
+// #define HAVE_MATH_H 1
 
 /* C library functions */
 #include <malloc.h>
+// #define HAVE_ALLOCA_H       1
 // #define HAVE_DLOPEN 1
-#define HAVE_MALLOC 1
-#define HAVE_CALLOC 1
-#define HAVE_REALLOC    1
-#define HAVE_FREE   1
-#define HAVE_ALLOCA 1
+
+#define HAVE_MMAP 1
+
+// #define HAVE_MALLOC 1
+// #define HAVE_CALLOC 1
+// #define HAVE_REALLOC    1
+// #define HAVE_FREE   1
+// #define HAVE_ALLOCA 1
+
 #define HAVE_GETENV 1
 #define HAVE_SETENV 1
 #define HAVE_PUTENV 1
@@ -204,7 +219,7 @@ typedef unsigned long uintptr_t;
 #define HAVE_TANF   1
 #define HAVE_TRUNC    1
 #define HAVE_TRUNCF   1
-// #define HAVE_SIGACTION 1
+#define HAVE_SIGACTION 1
 #define HAVE_SETJMP 1
 #define HAVE_NANOSLEEP  1
 #define HAVE_SYSCONF    1
@@ -218,10 +233,10 @@ typedef unsigned long uintptr_t;
  
 
  /* Enable various threading systems */
-// #define SDL_THREAD_PTHREAD  1
+#define SDL_THREAD_PTHREAD  1
 
- 
-
+#define HAVE_GCC_ATOMICS    1
+#define HAVE_GCC_SYNC_LOCK_TEST_AND_SET 1
 
 
 

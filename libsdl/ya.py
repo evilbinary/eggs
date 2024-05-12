@@ -13,7 +13,7 @@ add_deps("gui")
 add_files(
     'src/*.c',
     'src/audio/*.c',
-    'src/audio/dummy/*.c',
+    # 'src/audio/dummy/*.c',
     'src/audio/yiyiya/*.c',
 
     # 'src/audio/openslES/*.c',

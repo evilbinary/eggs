@@ -28,7 +28,7 @@
 #define strong_alias(x, y)
 
 #if !defined(__HAIKU__) && !defined(__PSP__) /* already defined in a system header. */
-// typedef unsigned int u_int32_t;
+typedef unsigned int u_int32_t;
 #endif
 
 #define atan            SDL_uclibc_atan

@@ -52,10 +52,11 @@ add_files(
     'src/timer/unix/*.c',
     'src/video/*.c',
     'src/video/yiyiya/*.c',
-    'src/video/yuv2rgb/*.c'
+    'src/video/yuv2rgb/*.c',
+    'src/main/dummy/*.c'
 )
 
-add_cflags(' -D__YIYIYA__ ')
+add_cflags(' -D__YIYIYA__ -D__GNUC__')
 
 add_includedirs(
 '.',

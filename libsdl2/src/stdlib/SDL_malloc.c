@@ -520,9 +520,7 @@ DEFAULT_MMAP_THRESHOLD       default: 256K
 #endif /* DARWIN */
 
 #ifdef __YIYIYA__
-#define HAVE_MMAP 0
 #define HAVE_MORECORE 0
-#define LACKS_SYS_MMAN_H
 #endif  /* __OS2__ */
 
 
