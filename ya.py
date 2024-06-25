@@ -30,7 +30,9 @@ if has_config("app"):
         'libgaga',
         # 'libiconv'
         'libncurses',
-        'libsdl-gfx'
+        'libsdl-gfx',
+        'libquickjs'
+
     ]
 
     if default_libc=='c':
@@ -45,7 +47,8 @@ if has_config("app"):
             'libgaga',
             # 'libiconv'
             # 'libncurses',
-            'libsdl-gfx'
+            'libsdl-gfx',
+            'libquickjs'
         ]
     
 
