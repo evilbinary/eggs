@@ -123,12 +123,12 @@ void lv_port_indev_init(void) {
   // lv_img_set_src(mouse_cursor, LV_SYMBOL_HOME);
   // lv_indev_set_cursor(indev_mouse, mouse_cursor);
 
-    /*Set a cursor for the mouse*/
+  /*Set a cursor for the mouse*/
   LV_IMG_DECLARE(mouse_cursor_icon); /*Declare the image file.*/
-  lv_obj_t * cursor_obj = lv_img_create(lv_scr_act()); /*Create an image object for the cursor */
-  lv_img_set_src(cursor_obj, &mouse_cursor_icon);           /*Set the image source*/
-  lv_indev_set_cursor(indev_mouse, cursor_obj);  
-
+  lv_obj_t* cursor_obj =
+      lv_img_create(lv_scr_act()); /*Create an image object for the cursor */
+  lv_img_set_src(cursor_obj, &mouse_cursor_icon); /*Set the image source*/
+  lv_indev_set_cursor(indev_mouse, cursor_obj);
 
   /*------------------
    * Keypad
@@ -196,8 +196,7 @@ void lv_port_indev_init(void) {
  * -----------------*/
 
 /*Initialize your touchpad*/
-static void touchpad_init(void) { /*Your code comes here*/
-}
+static void touchpad_init(void) { /*Your code comes here*/ }
 
 /*Will be called by the library to read the touchpad*/
 static void touchpad_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
@@ -271,7 +270,7 @@ static bool mouse_is_pressed(void) {
   if (button == BUTTON_LEFT || button == BUTTON_RIGHT ||
       button == BUTTON_MIDDLE) {
     return true;
-  } 
+  }
   return false;
 }
 
@@ -288,18 +287,18 @@ static void mouse_get_xy(lv_coord_t* x, lv_coord_t* y) {
  * -----------------*/
 
 /*Initialize your keypad*/
-static void keypad_init(void) { /*Your code comes here*/
-}
+static void keypad_init(void) { /*Your code comes here*/ }
 
 /*Will be called by the library to read the mouse*/
 static void keypad_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
   static uint32_t last_key = 0;
   /*Get the current x and y coordinates*/
-  mouse_get_xy(&data->point.x, &data->point.y);
+ 
 
   /*Get whether the a key is pressed and save the pressed key*/
   uint32_t act_key = keypad_get_key();
   if (act_key != 0) {
+    mouse_get_xy(&data->point.x, &data->point.y);
     data->state = LV_INDEV_STATE_PR;
     /*Translate the keys to LVGL control characters according to your key
      * definitions*/
@@ -329,13 +328,53 @@ static void keypad_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
     data->state = LV_INDEV_STATE_REL;
   }
 
+  uint32_t key = 0;
+  uint32_t press = event_read_joystick(&key);
+  if (press >= 0) {
+    //printf("key %x press=%d\n",key,press);
+
+    if (key != 0) {
+      data->state = LV_INDEV_STATE_PR;
+      /*Translate the keys to LVGL control characters according to your key
+       * definitions*/
+      switch (key) {
+        case 0x18:
+          act_key = LV_KEY_NEXT;
+          data->point.y++;
+          break;
+        case 5:
+          act_key = LV_KEY_PREV;
+          data->point.y--;
+          break;
+        case 0x13:
+          act_key = LV_KEY_LEFT;
+          data->point.x--;
+          break;
+        case 4:
+          act_key = LV_KEY_RIGHT;
+          data->point.x++;
+          break;
+        case 0x6c:
+          act_key = LV_KEY_ENTER;
+          break;
+        case 0x6d:
+          act_key = LV_KEY_ENTER;
+          break;
+      }
+
+      last_key = act_key;
+    } else {
+      data->state = LV_INDEV_STATE_REL;
+    }
+  }
+
   data->key = last_key;
 }
 
 /*Get the currently being pressed key.  0 if no key is pressed*/
 static uint32_t keypad_get_key(void) {
   /*Your code comes here*/
-  u32 key;
+  u32 key = 0;
   u32 press = event_read_key(&key);
   if (press > 0) {
     return key;
@@ -349,8 +388,7 @@ static uint32_t keypad_get_key(void) {
  * -----------------*/
 
 /*Initialize your keypad*/
-static void encoder_init(void) { /*Your code comes here*/
-}
+static void encoder_init(void) { /*Your code comes here*/ }
 
 /*Will be called by the library to read the encoder*/
 static bool encoder_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {
@@ -371,8 +409,7 @@ static void encoder_handler(void) {
  * -----------------*/
 
 /*Initialize your buttons*/
-static void button_init(void) { /*Your code comes here*/
-}
+static void button_init(void) { /*Your code comes here*/ }
 
 /*Will be called by the library to read the button*/
 static void button_read(lv_indev_drv_t* indev_drv, lv_indev_data_t* data) {

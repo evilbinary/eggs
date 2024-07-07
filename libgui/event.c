@@ -90,13 +90,14 @@ int event_init() {
     if (event_info.input_fd < 0) {
       printf("open input failed\n");
     } else {
+      printf("open keyboard fd %d\n",event_info.input_fd);
       dup2(event_info.input_fd, 0);
     }
 
   } else {
+    printf("joystic init end fd %d\n",event_info.joystick_fd);
     dup2(event_info.joystick_fd, 0);
   }
-  printf("joystic init end\n");
 
   event_info.mouse_fd = open("/dev/mouse", 0);
   if (event_info.mouse_fd < 0) {
