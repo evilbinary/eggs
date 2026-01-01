@@ -8,13 +8,17 @@ target("sdl2-image")
 set_kind("static")
 
 add_packages(get_config('default_libc'))
-add_deps("sdl2")
+add_deps("sdl2","webp")
 
 add_files(
     '*.c'
 )
 
-add_cflags(' -D__YIYIYA__ ')
+add_cflags(' -D__YIYIYA__ -DSDL_IMAGE_USE_COMMON_BACKEND',
+    '-DLOAD_GIF -DLOAD_LBM -DLOAD_PCX -DLOAD_PNM',
+    '-DLOAD_SVG -DLOAD_TGA  -DLOAD_XPM -DLOAD_XV',
+    '-DLOAD_PNG',
+    '-DFAST_IS_JPEG -DLOAD_WEBP -DLOAD_BMP -DLOAD_XCF -DLOAD_JPG ')
 
 add_includedirs(
 '.',
