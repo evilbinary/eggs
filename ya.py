@@ -31,7 +31,9 @@ if has_config("app"):
         # 'libiconv'
         'libncurses',
         'libsdl-gfx',
-        'libquickjs'
+        'libquickjs',
+        'libyui',
+        'libcjson'
 
     ]
 
@@ -48,7 +50,9 @@ if has_config("app"):
             # 'libiconv'
             # 'libncurses',
             'libsdl-gfx',
-            'libquickjs'
+            'libquickjs',
+            'libyui',
+            'libcjson'
         ]
     
 
