@@ -1,0 +1,38 @@
+# coding:utf-8
+# *******************************************************************
+# * Copyright 2025-present evilbinary
+# * 作者: evilbinary on 01/20/2025
+# * 邮箱: rootntsd@gmail.com
+# ********************************************************************
+target("yui-stdlib-host")
+add_deps("mquickjs","cjson","yui")
+set_kind("binary")
+add_files('yui_stdlib_build.c',
+          '../mquickjs/mquickjs_build.c'
+          )
+add_cflags('-DHAa')
+def after_build_host(target):
+    # target.on_run(target)
+
+    targetfile = target.targetfile()
+    print('gen yui_stdlib.h by exec',target.name())
+    exe=get_prefix()+"./"+targetfile
+
+    os.shell(exe+' > lib/jsmodule/yui_stdlib.h')
+
+after_build(after_build_host)
+
+
+
+target("jsmodule")
+add_packages(get_config('default_libc'))
+add_deps("mquickjs","cjson","yui")
+add_cflags(' -DBUILD_NO_MAIN=1 -DHAS_JS_MODULE -DCONFIG_CLASS_YUI  -I. -I../mquickjs -g ')
+
+set_kind("static")
+add_files(
+    'js_module.c',
+    'yui_stdlib.c',
+) 
+
+add_includedirs('.', public=true)
