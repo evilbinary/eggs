@@ -2,7 +2,7 @@
 
 #include "mquickjs_priv.h"
 
-static const uint64_t __attribute((aligned(64))) js_stdlib_table[] = {
+static const uint64_t __attribute((aligned(64))) js_stdlib_table[0] = {
   /* atom_table */
   (JS_MTAG_STRING << 1) | (1 << JS_MTAG_BITS) | (1 << (JS_MTAG_BITS + 1)) | (0 << (JS_MTAG_BITS + 2)) | (4 << (JS_MTAG_BITS + 3)), /* "null" (offset=0) */
   0x000000006c6c756e,
