@@ -10,7 +10,7 @@ set_kind("binary")
 add_files('yui_stdlib_build.c',
           '../mquickjs/mquickjs_build.c'
           )
-add_cflags('-DHAa')
+add_cflags(' -Isrc/ ')
 def after_build_host(target):
     # target.on_run(target)
 
@@ -32,6 +32,7 @@ add_cflags(' -DBUILD_NO_MAIN=1 -DHAS_JS_MODULE -DCONFIG_CLASS_YUI  -I. -I../mqui
 set_kind("static")
 add_files(
     'js_module.c',
+    'js_common.c',
     'yui_stdlib.c',
 ) 
 

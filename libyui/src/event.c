@@ -167,15 +167,16 @@ void handle_key_event(Layer* layer, KeyEvent* event) {
         return;
     }
 
-    // 只有当图层是当前焦点图层或者没有焦点图层时，才处理键盘事件
-    // 这确保了键盘事件只传递给当前拥有焦点的图层
+    // 如果当前图层就是焦点图层且有键盘事件处理函数，则处理事件
     if (focused_layer == layer && layer->handle_key_event) {
         layer->handle_key_event(layer, event);
+        return;
     }
     
-    // 递归处理子图层的键盘事件（但只有焦点图层会实际处理事件）
+    // 递归处理子图层的键盘事件，寻找焦点图层
     for (int i = 0; i < layer->child_count; i++) {
         if (layer->children[i]) {
+            // 递归调用，不需要额外检查
             handle_key_event(layer->children[i], event);
         }
     }
@@ -191,29 +192,36 @@ void handle_mouse_event(Layer* layer, MouseEvent* event) {
     if (!layer || !event) {
         return;
     }
-    
+
     // 优先处理popup层的事件
     if (popup_manager_handle_mouse_event(event)) {
         return;
     }
-    
+
     Point mouse_pos = {event->x, event->y};
-    if (point_in_rect(mouse_pos, layer->rect)) {
-        // 处理hover和pressed状态
-        if (layer->state != LAYER_STATE_DISABLED) {
-            if (event->state == SDL_PRESSED) {
-                // 鼠标按下时设置为PRESSED状态
-                layer->state = LAYER_STATE_PRESSED;
-            } else {
-                // 鼠标悬停时设置为HOVER状态
-                if (layer->state != LAYER_STATE_FOCUSED) {
-                    layer->state = LAYER_STATE_HOVER;
-                }
+
+    // 先递归处理子图层的事件，让子图层优先响应
+    for (int i = 0; i < layer->child_count; i++) {
+        if (layer->children[i]) {
+            handle_mouse_event(layer->children[i], event);
+        }
+    }
+
+    // 如果子图层已经获取了焦点，父图层不再处理焦点逻辑
+    int child_has_focus = 0;
+    if (event->state == SDL_PRESSED && focused_layer) {
+        for (int i = 0; i < layer->child_count; i++) {
+            if (layer->children[i] == focused_layer) {
+                child_has_focus = 1;
+                break;
             }
         }
-        
-        // 处理焦点切换逻辑
-        if (layer->focusable && event->state == SDL_PRESSED) {
+    }
+
+    // 处理当前图层的焦点切换逻辑
+    if (point_in_rect(mouse_pos, layer->rect)) {
+        // 处理焦点切换逻辑（只有当没有子图层获取焦点时）
+        if (!child_has_focus && layer->focusable && event->state == SDL_PRESSED) {
             // 如果当前有焦点图层，将其状态设置为NORMAL
             if (focused_layer && focused_layer != layer) {
                 focused_layer->state = LAYER_STATE_NORMAL;
@@ -221,28 +229,32 @@ void handle_mouse_event(Layer* layer, MouseEvent* event) {
             // 设置新的焦点图层
             focused_layer = layer;
             layer->state = LAYER_STATE_FOCUSED;
+            // 注意：这里不返回，继续处理自定义事件处理函数
         }
 
-        if (event->state == SDL_PRESSED && layer->event && layer->event->click) {
-            layer->event->click(layer);
+        // 如果没有自定义的事件处理函数，使用默认的状态管理
+        // 注意：如果已经设置了FOCUSED状态，不要覆盖它
+        if (!layer->handle_mouse_event && layer->state != LAYER_STATE_FOCUSED && layer->state != LAYER_STATE_DISABLED) {
+            if (event->state == SDL_PRESSED) {
+                // 鼠标按下时设置为PRESSED状态
+                layer->state = LAYER_STATE_PRESSED;
+            } else {
+                // 鼠标悬停时设置为HOVER状态
+                layer->state = LAYER_STATE_HOVER;
+            }
         }
     } else {
         // 鼠标离开图层时，恢复为NORMAL状态（除非是DISABLED或FOCUSED状态）
-        if (layer->state != LAYER_STATE_DISABLED && layer->state != LAYER_STATE_FOCUSED) {
+        if (!layer->handle_mouse_event && layer->state != LAYER_STATE_DISABLED && layer->state != LAYER_STATE_FOCUSED) {
             layer->state = LAYER_STATE_NORMAL;
         }
     }
+
+    // 让各组件自己处理鼠标事件（包括点击）
     if (layer->handle_mouse_event) {
         layer->handle_mouse_event(layer, event);
     }
-    
-    // 递归处理子图层的事件
-    for (int i = 0; i < layer->child_count; i++) {
-        if (layer->children[i]) {
-            handle_mouse_event(layer->children[i], event);
-        }
-    }
-    
+
     // 递归处理子图层的事件
     if (layer->sub) {
         handle_mouse_event(layer->sub, event);

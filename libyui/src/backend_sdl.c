@@ -170,14 +170,16 @@ int backend_init(){
     
     // 设置渲染质量为最佳（抗锯齿）
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
+
+    // Windows：默认“点击激活窗口”会吞掉首次点击，导致控件第一次点不中（拿不到焦点）
+    // 开启 click-through 让首次点击也能送达应用侧
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     
     window = SDL_CreateWindow("YUI",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
                                         800, 600, SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN);
 
-    
-    // renderer = SDL_CreateRenderer(window, -1, 0);
     // 尝试创建渲染器，优先使用硬件加速和垂直同步
     Uint32 renderer_flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
     renderer = SDL_CreateRenderer(window, -1, renderer_flags);
@@ -234,7 +236,6 @@ int backend_init(){
         }
     }
     
-    
     // 启用透明度混合
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
@@ -242,24 +243,12 @@ int backend_init(){
 
     SDL_RenderSetScale(renderer, scale, scale);
     
-    // Select the color for drawing. It is set to red here.
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-
-    // Clear the entire screen to our selected color.
-    SDL_RenderClear(renderer);
-  
-    // Up until now everything was drawn behind the scenes.
-    // This will show the new, red contents of the window.
-    SDL_RenderPresent(renderer);
-
     // 初始化SDL_image库，支持多种图片格式
     int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP;
     if (!(IMG_Init(imgFlags) & imgFlags)) {
         printf("SDL_image initialization failed: %s\n", IMG_GetError());
         return -1;
     }
-
-
 
     // 检查SDL_image版本是否支持SVG（SDL_image 2.6.0及以上版本支持SVG）
     const char* imgVersion = IMG_Linked_Version() ? SDL_GetRevision() : "Unknown";
@@ -270,10 +259,9 @@ int backend_init(){
         printf("TTF initialization failed: %s\n", TTF_GetError());
         return -1;
     }
-
+    
     // 初始化字体缓存
     init_font_cache();
-    
     // 初始化触摸状态
     memset(&touchState, 0, sizeof(TouchState));
     
@@ -341,8 +329,17 @@ void handle_event(Layer* root, SDL_Event* event) {
     
     // 处理鼠标事件
     if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP || event->type == SDL_MOUSEMOTION) {
-        int mouse_x = event->motion.x;
-        int mouse_y = event->motion.y;
+        int mouse_x, mouse_y;
+
+        // 根据事件类型选择正确的结构体成员
+        if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) {
+            mouse_x = event->button.x;
+            mouse_y = event->button.y;
+        } else { // SDL_MOUSEMOTION
+            mouse_x = event->motion.x;
+            mouse_y = event->motion.y;
+        }
+
         SDL_Point mouse_pos = { mouse_x, mouse_y };
         int event_state;
         if (event->type == SDL_MOUSEBUTTONDOWN) {
@@ -354,17 +351,17 @@ void handle_event(Layer* root, SDL_Event* event) {
         } else {
             event_state = 0;
         }
-        
+
         MouseEvent mouse_event = {
             .x = mouse_x,
             .y = mouse_y,
             .button = event->button.button,
             .state = event_state
         };
-        
+
         // 调用事件系统处理滚动条拖动
         handle_scrollbar_drag_event(root, mouse_x, mouse_y, event->type);
-        
+
         if (SDL_PointInRect(&mouse_pos, &root->rect)) {
             handle_mouse_event(root, &mouse_event);
         }
@@ -800,6 +797,9 @@ int backend_query_texture(Texture * texture,
 Texture* backend_render_texture(DFont* font,const char* text,Color color){
     if (!font) {
         printf("error: backend_render_texture called with NULL font (text: '%s')\n", text ? text : "(null)");
+        return NULL;
+    }
+    if(strlen(text)==0){
         return NULL;
     }
     
@@ -1460,4 +1460,27 @@ void backend_register_update_callback(UpdateCallback callback) {
     }
 
     update_callbacks[update_callback_count++] = callback;
+}
+
+// 获取剪贴板文本
+char* backend_get_clipboard_text() {
+    char* clipboard_text = SDL_GetClipboardText();
+    if (!clipboard_text) {
+        printf("Failed to get clipboard text: %s\n", SDL_GetError());
+        return NULL;
+    }
+    
+    // 分配内存并复制剪贴板内容
+    size_t len = strlen(clipboard_text);
+    char* result = (char*)malloc(len + 1);
+    if (!result) {
+        printf("Failed to allocate memory for clipboard text\n");
+        SDL_free(clipboard_text);
+        return NULL;
+    }
+    
+    strcpy(result, clipboard_text);
+    SDL_free(clipboard_text);
+    
+    return result;
 }

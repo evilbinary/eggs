@@ -15,3 +15,9 @@ add_files(
 ) 
 
 add_cflags(' -UCONFIG_PRINTF_RNDN -D_GNU_SOURCE -DUSE_FILE32API  -I. -DCONFIG_BIGNUM')
+
+add_includedirs(
+    '.',
+    '../include',
+    public = true
+)

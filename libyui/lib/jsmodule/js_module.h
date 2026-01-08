@@ -2,18 +2,17 @@
 #define YUI_JS_MODULE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include "layer.h"
 // 前向声明 Layer 类型（避免依赖 ytype.h）
 typedef struct Layer Layer;
 typedef struct cJSON cJSON;
 
-#ifdef HAS_JS_MODULE
-#include "mquickjs.h"
-#endif
 
 // 初始化 JS 引擎
 int js_module_init(void);

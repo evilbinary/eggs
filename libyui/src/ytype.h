@@ -155,6 +155,7 @@ typedef struct LayoutManager {
     int spacing;
     int padding[4]; // top, right, bottom, left
     LayoutType align;
+    LayoutType justify;  // 主轴对齐方式（水平布局中的水平对齐，垂直布局中的垂直对齐）
     // 添加Grid布局特有属性
     int columns;  // Grid布局列数
 } LayoutManager;
@@ -320,8 +321,9 @@ typedef struct Layer {
     int content_width; // 内容宽度
     
     // 新增label和text字段
-    char label[MAX_TEXT];
-    char text[MAX_TEXT];
+    char* label;
+    char* text;
+    size_t text_size;  // text字段分配的内存大小
     
     // 添加图片模式字段
     ImageMode image_mode;

@@ -108,6 +108,113 @@ cJSON* parse_json(char* json_path) {
 
 
 // ====================== JSON解析函数 ======================
+static void layer_init_strings(Layer* layer) {
+  layer->label = NULL;
+  layer->text = NULL;
+  layer->text_size = 0;
+}
+
+static void layer_set_string(char** target, const char* value) {
+  if (!target) {
+    return;
+  }
+  if (*target) {
+    free(*target);
+    *target = NULL;
+  }
+  if (value) {
+    size_t len = strlen(value);
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) {
+      return;
+    }
+    memcpy(buf, value, len + 1);
+    *target = buf;
+  }
+}
+
+// 专门用于设置Layer的text字段，并更新text_size
+static void layer_set_text_with_size(Layer* layer, const char* value) {
+  if (!layer) {
+    return;
+  }
+  if (value) {
+    size_t len = strlen(value);
+    size_t required_size = len + 1; // 包括null终止符
+    
+    // 如果现有内存足够，直接使用
+    if (layer->text && layer->text_size >= required_size) {
+      memcpy(layer->text, value, required_size);
+      return;
+    }
+    
+    // 内存不足，需要重新分配
+    char* new_buf = (char*)realloc(layer->text, required_size);
+    if (!new_buf) {
+      // 分配失败，如果原来有内存则保持不变
+      return;
+    }
+    memcpy(new_buf, value, required_size);
+    layer->text = new_buf;
+    layer->text_size = required_size;
+  } else {
+    // 如果value为NULL，释放内存并重置
+    if (layer->text) {
+      free(layer->text);
+      layer->text = NULL;
+      layer->text_size = 0;
+    }
+  }
+}
+
+static void layer_copy_strings(Layer* dest, const Layer* src) {
+  if (!dest || !src) {
+    return;
+  }
+  if (src->label) {
+    layer_set_string(&dest->label, src->label);
+  }
+  if (src->text) {
+    layer_set_text_with_size(dest, src->text);
+  }
+}
+
+static void layer_free_strings(Layer* layer) {
+  if (!layer) {
+    return;
+  }
+  if (layer->label) {
+    free(layer->label);
+    layer->label = NULL;
+  }
+  if (layer->text) {
+    free(layer->text);
+    layer->text = NULL;
+  }
+}
+
+void layer_set_label(Layer* layer, const char* value) {
+  if (!layer) {
+    return;
+  }
+  layer_set_string(&layer->label, value);
+}
+
+void layer_set_text(Layer* layer, const char* value) {
+  if (!layer) {
+    return;
+  }
+  layer_set_text_with_size(layer, value);
+}
+
+const char* layer_get_label(const Layer* layer) {
+  return layer && layer->label ? layer->label : "";
+}
+
+const char* layer_get_text(const Layer* layer) {
+  return layer && layer->text ? layer->text : "";
+}
+
 Layer* parse_layer(cJSON* json_obj, Layer* parent) {
   if (json_obj == NULL) {
     return NULL;
@@ -115,6 +222,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
   Layer* layer = malloc(sizeof(Layer));
   memset(layer, 0, sizeof(Layer));
   layer->parent = parent;
+  layer_init_strings(layer);
 
   // 初始化焦点相关字段
   layer->state = LAYER_STATE_NORMAL;  // 默认处于正常状态
@@ -271,10 +379,10 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
 
   // 解析label和text属性
   if (cJSON_HasObjectItem(json_obj, "label")) {
-    strcpy(layer->label, cJSON_GetObjectItem(json_obj, "label")->valuestring);
+    layer_set_label(layer, cJSON_GetObjectItem(json_obj, "label")->valuestring);
   }
   if (cJSON_HasObjectItem(json_obj, "text")) {
-    strcpy(layer->text, cJSON_GetObjectItem(json_obj, "text")->valuestring);
+    layer_set_text(layer, cJSON_GetObjectItem(json_obj, "text")->valuestring);
   }
 
   // 解析数据绑定
@@ -401,7 +509,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
     }
     cJSON* layout_align = cJSON_GetObjectItem(layout, "align");
     if (layout_align) {
-      // child 行为
+      // 交叉轴对齐方式
       if (strcmp(layout_align->valuestring, "left") == 0) {
         layer->layout_manager->align = LAYOUT_ALIGN_LEFT;
       } else if (strcmp(layout_align->valuestring, "right") == 0) {
@@ -411,6 +519,26 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
       } else {
         layer->layout_manager->align = LAYOUT_ALIGN_LEFT;
       }
+    }
+
+    cJSON* layout_justify = cJSON_GetObjectItem(layout, "justifyContent");
+    if (layout_justify) {
+      // 主轴对齐方式
+      const char* justify_str = layout_justify->valuestring;
+      if (strcmp(justify_str, "center") == 0) {
+        layer->layout_manager->justify = LAYOUT_ALIGN_CENTER;
+      } else if (strcmp(justify_str, "left") == 0 || strcmp(justify_str, "flex-start") == 0) {
+        layer->layout_manager->justify = LAYOUT_ALIGN_LEFT;
+      } else if (strcmp(justify_str, "right") == 0 || strcmp(justify_str, "flex-end") == 0) {
+        layer->layout_manager->justify = LAYOUT_ALIGN_RIGHT;
+      } else if (strcmp(justify_str, "space-between") == 0) {
+        layer->layout_manager->justify = LAYOUT_ALIGN_CENTER;  // 暂时用 center 表示
+      } else {
+        layer->layout_manager->justify = LAYOUT_ALIGN_LEFT;  // 默认左对齐
+      }
+    } else {
+      // 默认左对齐
+      layer->layout_manager->justify = LAYOUT_ALIGN_LEFT;
     }
 
     if (cJSON_HasObjectItem(layout, "spacing")) {
@@ -869,6 +997,7 @@ void destroy_layer(Layer* layer) {
     // 注意：不销毁 font 和 assets，因为它们可能是共享的
     // 这些应该由全局资源管理器负责
 
+    layer_free_strings(layer);
     free(layer);
 }
 
@@ -893,4 +1022,42 @@ Layer* find_layer_by_id(Layer* root, const char* id) {
     }
 
     return NULL;
+}
+
+// 从 JSON 字符串解析并创建图层
+Layer* parse_layer_from_string(const char* json_str, Layer* parent) {
+    if (!json_str) {
+        printf("ERROR: json_str is NULL\n");
+        return NULL;
+    }
+
+    printf("DEBUG: Parsing layer from JSON string (length: %zu)\n", strlen(json_str));
+
+    // 移除 JSON 字符串中的注释
+    char* cleaned_json = remove_json_comments((char*)json_str);
+    if (!cleaned_json) {
+        printf("ERROR: Failed to remove JSON comments\n");
+        return NULL;
+    }
+
+    // 解析 JSON
+    cJSON* json_obj = cJSON_Parse(cleaned_json);
+    free(cleaned_json);
+
+    if (!json_obj) {
+        printf("ERROR: Failed to parse JSON string\n");
+        return NULL;
+    }
+
+    printf("DEBUG: JSON parsed successfully\n");
+
+    // 创建图层
+    Layer* layer = parse_layer(json_obj, parent);
+
+    // 删除 JSON 对象
+    cJSON_Delete(json_obj);
+
+    printf("DEBUG: Layer created successfully: %s\n", layer ? layer->id : "NULL");
+
+    return layer;
 }

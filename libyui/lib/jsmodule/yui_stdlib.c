@@ -22,18 +22,19 @@
 
 #include "layer.h"
 
-// YUI Layer 类型定义（最小化定义）
 #define MAX_TEXT 256
 #define MAX_PATH 1024
 
+// YUI Layer 类型定义（最小化定义）
 typedef struct Layer Layer;
-
 // 查找图层的函数指针类型
 typedef Layer* (*FindLayerFunc)(Layer* root, const char* id);
 
 // 外部变量和函数（从 js_module.c 和 layer.c 导入）
 extern Layer* g_layer_root;
 extern Layer* find_layer_by_id(Layer* root, const char* id);
+extern Layer* parse_layer_from_string(const char* json_str, Layer* parent);
+extern void destroy_layer(Layer* layer);
 
 // 颜色结构体定义
 
@@ -160,10 +161,9 @@ static JSValue js_set_text(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     if (layer_id && text && g_layer_root ) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            strcpy(layer->text, text);
+            layer_set_text(layer, text); // 修改为传递 layer 和 text
             printf("YUI: Set text for layer '%s': %s\n", layer_id, text);
             fflush(stdout);
-
         }
     }
 
@@ -181,7 +181,8 @@ static JSValue js_get_text(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     if (layer_id && g_layer_root ) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            return JS_NewString(ctx, layer->text);
+            const char* layer_text = layer_get_text(layer);
+            return JS_NewString(ctx, layer_text);
         }
     }
 
@@ -267,6 +268,78 @@ static JSValue js_yui_log(JSContext *ctx, JSValue *this_val, int argc, JSValue *
     return JS_UNDEFINED;
 }
 
+// 从 JSON 字符串动态渲染到指定图层
+static JSValue js_render_from_json(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "Expected 2 arguments: layer_id and json_string");
+    }
+
+    JSCStringBuf buf1, buf2;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf1);
+    const char* json_str = JS_ToCString(ctx, argv[1], &buf2);
+
+    if (!layer_id || !json_str) {
+        return JS_ThrowTypeError(ctx, "Invalid arguments");
+    }
+
+    printf("YUI: render_from_json called with layer_id='%s'\n", layer_id);
+
+    if (g_layer_root) {
+        // 查找目标图层
+        Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
+        if (!parent_layer) {
+            printf("YUI: ERROR - Layer '%s' not found\n", layer_id);
+            return JS_NewInt32(ctx, -1);
+        }
+
+        printf("YUI: Found parent layer '%s'\n", layer_id);
+
+        // 清除父图层的所有子图层
+        if (parent_layer->children) {
+            for (int i = 0; i < parent_layer->child_count; i++) {
+                if (parent_layer->children[i]) {
+                    destroy_layer(parent_layer->children[i]);
+                }
+            }
+            free(parent_layer->children);
+            parent_layer->children = NULL;
+        }
+        parent_layer->child_count = 0;
+
+        // 从 JSON 字符串创建新图层
+        Layer* new_layer = parse_layer_from_string(json_str, parent_layer);
+
+        if (new_layer) {
+            // 为子图层数组分配空间（初始分配1个，可以根据需要扩展）
+            parent_layer->children = malloc(sizeof(Layer*));
+            if (!parent_layer->children) {
+                printf("YUI: ERROR - Failed to allocate memory for children array\n");
+                destroy_layer(new_layer);
+                return JS_NewInt32(ctx, -2);
+            }
+
+            parent_layer->children[0] = new_layer;
+            parent_layer->child_count = 1;
+            layout_layer(parent_layer);
+             // 为新创建的图层加载字体
+            printf("JS(mqjs): Loading fonts for new layer\n");
+            load_all_fonts(new_layer);
+            printf("JS(mqjs): Fonts loaded successfully\n");
+
+            printf("YUI: Successfully rendered JSON to layer '%s', new layer id: '%s'\n",
+                   layer_id, new_layer->id);
+            return JS_NewInt32(ctx, 0);
+        } else {
+            printf("YUI: ERROR - Failed to parse JSON string\n");
+            return JS_NewInt32(ctx, -3);
+        }
+    }
+
+    printf("YUI: ERROR - g_layer_root is NULL\n");
+    return JS_NewInt32(ctx, -4);
+}
+
 
 
 extern JSValue js_setTimeout(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
@@ -318,6 +391,7 @@ static const JSPropDef js_yui[] = {
     JS_CFUNC_DEF("setBgColor", 1, js_set_bg_color ),
     JS_CFUNC_DEF("hide", 1, js_hide ),
     JS_CFUNC_DEF("show", 1, js_show ),
+    JS_CFUNC_DEF("renderFromJson", 2, js_render_from_json ),
     JS_CFUNC_DEF("call", 2, js_yui_call ),
     JS_PROP_END,
 };
@@ -368,8 +442,9 @@ JS_CLASS_DEF("YUI", 2, js_yui_constructor, JS_CLASS_YUI, js_yui, js_yui_proto, N
 static const JSClassDef js_yui2_class =
 JS_CLASS_DEF("Yui", 2, js_yui_constructor, JS_CLASS_YUI, js_yui, js_yui_proto, NULL, js_yui_finalizer);
 
-
+#ifdef CONFIG_CLASS_YUI
 #include "yui_stdlib.h"
+#endif
 
 
 

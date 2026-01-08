@@ -3512,7 +3512,7 @@ static void stdlib_init(JSContext *ctx, const JSValueArray *arr)
 {
     JSValue name, val;
     int i;
-
+    printf("arr size %d\n",arr->size);
     for(i = 0; i < arr->size; i += 2) {
         name = arr->arr[i];
         val = arr->arr[i + 1];

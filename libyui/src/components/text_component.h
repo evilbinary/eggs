@@ -9,7 +9,7 @@ typedef struct KeyEvent KeyEvent;
 // 多行文本组件结构体
 typedef struct {
     Layer* layer;          // 关联的图层
-    char text[MAX_TEXT * 4];   // 输入文本（支持更多内容）
+    // 注意：文本内容现在存储在 layer->text 中，不再使用固定大小的数组
     char placeholder[MAX_TEXT];  // 占位文本
     int cursor_pos;        // 光标位置
     int selection_start;   // 选择起始位置
@@ -25,6 +25,8 @@ typedef struct {
     int line_number_width; // 行号区域宽度
     Color line_number_color; // 行号颜色
     Color line_number_bg_color; // 行号背景颜色
+    Color selection_color; // 选中背景颜色
+    int is_selecting;       // 是否正在选择文本
 } TextComponent;
 
 // 函数声明
@@ -41,8 +43,13 @@ void text_component_set_show_line_numbers(TextComponent* component, int show_lin
 void text_component_set_line_number_width(TextComponent* component, int width);
 void text_component_set_line_number_color(TextComponent* component, Color color);
 void text_component_set_line_number_bg_color(TextComponent* component, Color color);
+void text_component_set_selection_color(TextComponent* component, Color color);
 void text_component_handle_key_event(Layer* layer, KeyEvent* event);
 void text_component_handle_mouse_event(Layer* layer, MouseEvent* event);
 void text_component_render(Layer* layer);
+int text_component_get_position_from_point(TextComponent* component, Point pt, Layer* layer);
 
+// 辅助函数声明
+int get_line_start(TextComponent* component, int pos);
+int get_line_end(TextComponent* component, int pos);
 #endif  // YUI_TEXT_COMPONENT_H
