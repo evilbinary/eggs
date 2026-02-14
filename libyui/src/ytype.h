@@ -106,7 +106,9 @@ typedef enum {
     LAYOUT_RIGHT,
     LAYOUT_ALIGN_CENTER,
     LAYOUT_ALIGN_LEFT,
-    LAYOUT_ALIGN_RIGHT
+    LAYOUT_ALIGN_RIGHT,
+    LAYOUT_ALIGN_SPACE_BETWEEN,  // space-between: 两端对齐，子组件之间间距相等
+    LAYOUT_ALIGN_SPACE_AROUND    // space-around: 每个子组件两侧间距相等
 } LayoutType;
 
 // 添加图片渲染模式枚举
@@ -146,8 +148,11 @@ typedef enum {
     CLOCK  // 添加CLOCK类型
 } LayerType;
 
-extern char *layer_type_name[];
-#define LAYER_TYPE_SIZE (sizeof(layer_type_name) / sizeof(layer_type_name[0]))  // 更新图层类型数量
+ 
+extern char* layer_type_name[];
+extern int layer_type_size ;
+
+
 typedef struct Layer Layer;
 
 typedef struct LayoutManager {
@@ -252,6 +257,18 @@ typedef struct MouseEvent {
     Uint32 timestamp;
 } MouseEvent;
 
+#define MAX_EVENT 512
+
+// 定义事件处理函数类型
+typedef void (*EventHandler)(void* data);
+
+
+typedef struct {
+    char name[50];          // 事件名称
+    EventHandler handler;   // 事件处理函数
+} EventEntry;
+
+
 typedef struct Event {
     char click_name[MAX_PATH];
     void (*click)(Layer*);  // 事件回调函数指针
@@ -287,6 +304,9 @@ typedef enum {
 #define SET_STATE(layer, st) (layer->state |= (st))
 #define CLEAR_STATE(layer, st) (layer->state &= ~(st))
 #define CLEAR_ALL_STATES(layer) (layer->state = LAYER_STATE_NORMAL)
+
+typedef  int (*register_event_fun_t)(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler);
+typedef  cJSON* (*get_property_fun_t)(Layer* layer, const char* property_name);
 
 typedef struct Layer {
     char id[50];
@@ -366,29 +386,34 @@ typedef struct Layer {
     void (*handle_mouse_event)(Layer* layer, MouseEvent* event);
     void (*handle_scroll_event)(Layer* layer, int scroll_delta);
     void (*handle_touch_event)(Layer* layer, TouchEvent* event);
+
+    //事件注册
+    register_event_fun_t register_event;
+    int (*unregister_event)(Layer* layer, const char* event_name);
     
+    //组件属性获取函数
+    get_property_fun_t get_property;
+
     // 毛玻璃效果相关属性
     int backdrop_filter;     // 是否启用毛玻璃效果
     int blur_radius;         // 模糊半径
     float saturation;         // 饱和度 (1.0为正常，>1.0为更饱和，<1.0为不饱和)
     float brightness;        // 亮度 (1.0为正常，>1.0为更亮，<1.0为更暗)
+    
+    // 增量更新支持：脏标记
+    unsigned int dirty_flags; // 标记哪些属性被修改
+
+    // inspect
+    int inspect_enabled;     // 是否启用Inspect调试模式
+    int inspect_mode;         // Inspect模式
+    int inspect_show_bounds; // 是否显示边界
+    int inspect_show_info;   // 是否显示信息
 
 } Layer;
-
 // 全局变量：当前拥有焦点的图层
 extern Layer* focused_layer;
 
 
-#define MAX_EVENT 512
-
-// 定义事件处理函数类型
-typedef void (*EventHandler)(void* data);
-
-
-typedef struct {
-    char name[50];          // 事件名称
-    EventHandler handler;   // 事件处理函数
-} EventEntry;
 
 #ifdef YUI_INPUT_COMPONENT
 #include "components/input_component.h"

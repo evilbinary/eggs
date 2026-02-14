@@ -1,7 +1,13 @@
 #include "layer.h"
+#include "layer_properties.h"
 #include "util.h"
 #include "animate.h"
+#include "theme_manager.h"
+#include "theme.h"
 
+
+
+Layer* focused_layer = NULL;
 
 // 更新图层类型名称数组，添加GRID、Text、Tab、Slider、Listbox和Menu
 char* layer_type_name[] = {"View",     "Button",   "Input",   "Label",
@@ -9,7 +15,12 @@ char* layer_type_name[] = {"View",     "Button",   "Input",   "Label",
                            "Checkbox", "Radiobox", "Text",    "Treeview",
                            "Tab",      "Slider",   "Select", "Scrollbar", "Menu", "Dialog", "Clock"};
 
-Layer* focused_layer = NULL;
+int layer_type_size = (sizeof(layer_type_name) / sizeof(layer_type_name[0]));  // 更新图层类型数量
+
+// 全局 Inspect 模式开关
+int yui_inspect_mode_enabled = 0;
+int yui_inspect_show_bounds = 1;
+int yui_inspect_show_info = 1;
 
 // 移除JSON字符串中的注释
 static char* remove_json_comments(char* json_str) {
@@ -215,18 +226,48 @@ const char* layer_get_text(const Layer* layer) {
   return layer && layer->text ? layer->text : "";
 }
 
-Layer* parse_layer(cJSON* json_obj, Layer* parent) {
+
+Layer* layer_create(Layer* root_layer, int x, int y, int width, int height) {
+  Layer* layer = malloc(sizeof(Layer));
+  memset(layer, 0, sizeof(Layer));
+  layer->parent = root_layer;
+  layer->rect.x = x;
+  layer->rect.y = y;
+  layer->rect.w = width;
+  layer->rect.h = height;
+  layer_init_strings(layer);
+  return layer;
+}
+
+Layer* layer_create_from_json(cJSON* json_obj, Layer* parent) {
+  Layer* layer = malloc(sizeof(Layer));
+  memset(layer, 0, sizeof(Layer));  // 初始化为0
+  layer->parent = parent;  // 设置父元素指针
+
+  layer=parse_layer_from_json(layer, json_obj, parent);
+
+  return layer;
+}
+
+Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
   if (json_obj == NULL) {
     return NULL;
   }
-  Layer* layer = malloc(sizeof(Layer));
-  memset(layer, 0, sizeof(Layer));
-  layer->parent = parent;
-  layer_init_strings(layer);
+  if(layer==NULL){
+    layer = malloc(sizeof(Layer));
+    memset(layer, 0, sizeof(Layer));
+    layer->parent = parent;
+    layer_init_strings(layer);
+  }
 
   // 初始化焦点相关字段
   layer->state = LAYER_STATE_NORMAL;  // 默认处于正常状态
   layer->focusable = 0;               // 默认不可获得焦点
+  
+  // 初始化inspect相关字段
+  layer->inspect_enabled = 0;         // 默认不启用inspect
+  layer->inspect_show_bounds = 1;     // 默认显示边界
+  layer->inspect_show_info = 1;       // 默认显示信息
 
   // 用于标记是否已经自定义处理了子图层（如SCROLLBAR类型）
   int has_custom_children = 0;
@@ -237,7 +278,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
   }
   if (cJSON_HasObjectItem(json_obj, "type")) {
     int i=0;
-    for (i = 0; i < LAYER_TYPE_SIZE; i++) {
+    for (i = 0; i < layer_type_size; i++) {
       // printf("cmp %s == %s\n", cJSON_GetObjectItem(json_obj,
       // "type")->valuestring,layer_type_name[i] );
       if (strcmp(cJSON_GetObjectItem(json_obj, "type")->valuestring,
@@ -246,7 +287,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
         break;
       }
     }
-    if(i>LAYER_TYPE_SIZE){
+    if(i>layer_type_size){
       layer->type=VIEW;
     }
   }else{
@@ -419,7 +460,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
   // 解析列表项模板
   cJSON* item_template = cJSON_GetObjectItem(json_obj, "itemTemplate");
   if (item_template) {
-    layer->item_template = parse_layer(item_template, parent);
+    layer->item_template = parse_layer_from_json(layer, item_template, parent);
   }
 
   // 解析滚动属性 - 作为 Layer 的直接属性
@@ -532,7 +573,9 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
       } else if (strcmp(justify_str, "right") == 0 || strcmp(justify_str, "flex-end") == 0) {
         layer->layout_manager->justify = LAYOUT_ALIGN_RIGHT;
       } else if (strcmp(justify_str, "space-between") == 0) {
-        layer->layout_manager->justify = LAYOUT_ALIGN_CENTER;  // 暂时用 center 表示
+        layer->layout_manager->justify = LAYOUT_ALIGN_SPACE_BETWEEN;
+      } else if (strcmp(justify_str, "space-around") == 0) {
+        layer->layout_manager->justify = LAYOUT_ALIGN_SPACE_AROUND;
       } else {
         layer->layout_manager->justify = LAYOUT_ALIGN_LEFT;  // 默认左对齐
       }
@@ -648,7 +691,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
     if (layer->type != IMAGE) {
       cJSON* sub = parse_json(source->valuestring);
       if (sub != NULL) {
-        layer->sub = parse_layer(sub, layer);
+        layer->sub = parse_layer_from_json(NULL,sub, layer);
       } else {
         printf("cannot load file %s\n", source->valuestring);
       }
@@ -850,7 +893,7 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
     layer->component = image_component_create(layer);
 
   } else if (layer->type == PROGRESS) {
-    layer->component = progress_component_create(layer);
+    layer->component = progress_component_create_from_json(layer, json_obj);
 
   } else if (layer->type == CHECKBOX) {
     layer->component = checkbox_component_create_from_json(layer, json_obj);
@@ -915,8 +958,16 @@ Layer* parse_layer(cJSON* json_obj, Layer* parent) {
         printf("Warning: child is null\n");
         continue;
       }
-      layer->children[i] = parse_layer(child, layer);
+      layer->children[i] = parse_layer_from_json(NULL,child, layer);
     }
+  }
+
+  // 应用主题样式（在解析完所有属性后，但在返回前）
+  // 主题样式会作为基础样式，可以被组件JSON中的style属性覆盖
+  Theme* current_theme = theme_manager_get_current();
+  if (current_theme) {
+    const char* type_name = layer_type_name[layer->type];
+    theme_apply_to_layer(current_theme, layer, layer->id, type_name);
   }
 
   return layer;
@@ -1052,7 +1103,7 @@ Layer* parse_layer_from_string(const char* json_str, Layer* parent) {
     printf("DEBUG: JSON parsed successfully\n");
 
     // 创建图层
-    Layer* layer = parse_layer(json_obj, parent);
+    Layer* layer = layer_create_from_json(json_obj, parent);
 
     // 删除 JSON 对象
     cJSON_Delete(json_obj);

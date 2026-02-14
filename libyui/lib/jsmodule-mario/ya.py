@@ -7,6 +7,7 @@
 
 target("jsmodule-mario")
 add_packages(get_config('default_libc'))
+
 add_deps("mario","cjson","yui")
 add_cflags(' -DBUILD_NO_MAIN=1  -I. -I../../lib/mario -g ')
 

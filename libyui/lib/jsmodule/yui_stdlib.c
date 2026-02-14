@@ -20,7 +20,9 @@
 #include "cutils.h"
 #include "mquickjs.h"
 
+#include "theme_manager.h"
 #include "layer.h"
+
 
 #define MAX_TEXT 256
 #define MAX_PATH 1024
@@ -49,7 +51,7 @@ static int hex_to_int(char c) {
 #define JS_CLASS_YUI (JS_CLASS_USER + 0)
 
 /* total number of classes */
-#define JS_CLASS_COUNT (JS_CLASS_USER + 1)
+#define JS_CLASS_COUNT (JS_CLASS_USER + 2)
 
 #define JS_CFUNCTION_rectangle_closure_test (JS_CFUNCTION_USER + 0)
 
@@ -183,6 +185,31 @@ static JSValue js_get_text(JSContext *ctx, JSValue *this_val, int argc, JSValue 
         if (layer) {
             const char* layer_text = layer_get_text(layer);
             return JS_NewString(ctx, layer_text);
+        }
+    }
+
+    return JS_UNDEFINED;
+}
+
+// 获取图层的属性值（通用）
+static JSValue js_get_property(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 2) return JS_UNDEFINED;
+
+    JSCStringBuf buf1, buf2;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf1);
+    const char* property_name = JS_ToCString(ctx, argv[1], &buf2);
+
+    if (layer_id && property_name) {
+        // 调用 js_common.c 中的函数
+        extern const char* js_module_get_property_value(const char* layer_id, const char* property_name);
+        const char* value = js_module_get_property_value(layer_id, property_name);
+        
+        if (value) {
+            JSValue result = JS_NewString(ctx, value);
+            // 释放返回的字符串
+            free((void*)value);
+            return result;
         }
     }
 
@@ -385,14 +412,26 @@ static const JSPropDef js_yui_proto[] = {
 };
 
 static const JSPropDef js_yui[] = {
-    JS_CFUNC_DEF("log", 1, js_log ),
+    JS_CFUNC_DEF("log", 1, js_yui_log ),
     JS_CFUNC_DEF("setText", 1, js_set_text ),
     JS_CFUNC_DEF("getText", 1, js_get_text ),
+    JS_CFUNC_DEF("getProperty", 2, js_get_property ),
     JS_CFUNC_DEF("setBgColor", 1, js_set_bg_color ),
     JS_CFUNC_DEF("hide", 1, js_hide ),
     JS_CFUNC_DEF("show", 1, js_show ),
     JS_CFUNC_DEF("renderFromJson", 2, js_render_from_json ),
     JS_CFUNC_DEF("call", 2, js_yui_call ),
+    JS_CFUNC_DEF("update", 1, js_yui_update ),
+    JS_CFUNC_DEF("themeLoad", 1, js_yui_themeLoad ),
+    JS_CFUNC_DEF("themeSetCurrent", 1, js_yui_themeSetCurrent ),
+    JS_CFUNC_DEF("themeUnload", 1, js_yui_themeUnload ),
+    JS_CFUNC_DEF("themeApplyToTree", 0, js_yui_themeApplyToTree ),
+    JS_CFUNC_DEF("inspect.enable", 0, js_yui_inspect_enable ),
+    JS_CFUNC_DEF("inspect.disable", 0, js_yui_inspect_disable ),
+    JS_CFUNC_DEF("inspect.setLayer", 2, js_yui_inspect_setLayer ),
+    JS_CFUNC_DEF("inspect.setShowBounds", 1, js_yui_inspect_setShowBounds ),
+    JS_CFUNC_DEF("inspect.setShowInfo", 1, js_yui_inspect_setShowInfo ),
+    JS_CFUNC_DEF("setEvent", 3, js_yui_set_event ),
     JS_PROP_END,
 };
 
@@ -435,16 +474,332 @@ static JSValue js_yui_test(JSContext *ctx, JSValue *this_val, int argc,
 return JS_NewCFunctionParams(ctx, JS_CFUNCTION_rectangle_closure_test, argv[0]);
 }
 
-
-static const JSClassDef js_yui_class =
-JS_CLASS_DEF("YUI", 2, js_yui_constructor, JS_CLASS_YUI, js_yui, js_yui_proto, NULL, js_yui_finalizer);
-
-static const JSClassDef js_yui2_class =
-JS_CLASS_DEF("Yui", 2, js_yui_constructor, JS_CLASS_YUI, js_yui, js_yui_proto, NULL, js_yui_finalizer);
-
-#ifdef CONFIG_CLASS_YUI
-#include "yui_stdlib.h"
+// JSON 增量更新 API
+#ifndef STDLIB_BUILD
+extern int yui_update(Layer* root, const char* update_json);
 #endif
 
+// YUI.update() - JSON 增量更新
+static JSValue js_yui_update(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+#ifdef STDLIB_BUILD
+    return JS_UNDEFINED;
+#else
+    if (argc < 1) {
+        printf("YUI.update: 需要至少一个参数\n");
+        return JS_NewInt32(ctx, -1);
+    }
 
+    JSCStringBuf buf;
+    const char* update_json = NULL;
+    int need_free = 0;
+    
+    // mquickjs 只支持字符串参数
+    // 如果 JS 代码需要传入对象，应该在 JS 层调用 JSON.stringify(obj)
+    if (JS_IsString(ctx, argv[0])) {
+        update_json = JS_ToCString(ctx, argv[0], &buf);
+    } else {
+        printf("YUI.update: 参数必须是 JSON 字符串。如果要传对象，请在 JS 代码中使用 JSON.stringify(obj)\n");
+        return JS_NewInt32(ctx, -1);
+    }
+
+    if (update_json && g_layer_root) {
+        int result = yui_update(g_layer_root, update_json);
+        return JS_NewInt32(ctx, result);
+    }
+
+    printf("YUI.update: 无效的参数或未初始化\n");
+    return JS_NewInt32(ctx, -1);
+#endif
+}
+
+// 主题加载函数 - JS 接口
+static JSValue js_yui_themeLoad(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    const char *theme_input = NULL;
+    JSCStringBuf buf;
+    
+    // 检查参数
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "themeLoad requires 1 argument: theme_path or theme_json");
+    }
+    
+    // 获取主题输入（可以是文件路径或JSON字符串）
+    theme_input = JS_ToCString(ctx, argv[0], &buf);
+    if (!theme_input) {
+        return JS_ThrowTypeError(ctx, "Invalid theme input");
+    }
+    
+    // 调用主题管理器的加载函数
+    ThemeManager* manager = theme_manager_get_instance();
+    Theme* theme = NULL;
+    
+    // 检查输入是文件路径还是JSON字符串
+    // 如果是JSON字符串，应该以 '{' 或 '[' 开头
+    size_t input_len = strlen(theme_input);
+    if (input_len > 0 && (theme_input[0] == '{' || theme_input[0] == '[')) {
+        // 是JSON字符串，从JSON加载
+        theme = theme_manager_load_theme_from_json(theme_input);
+    } else {
+        // 是文件路径，从文件加载
+        theme = theme_manager_load_theme(theme_input);
+    }
+    
+    if (theme) {
+        // 创建返回对象
+        JSValue result = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, result, "success", JS_NewBool(1));
+        JS_SetPropertyStr(ctx, result, "name", JS_NewString(ctx, theme->name));
+        JS_SetPropertyStr(ctx, result, "version", JS_NewString(ctx, theme->version));
+        return result;
+    } else {
+        // 创建返回对象
+        JSValue result = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, result, "success", JS_NewBool( 0));
+        JS_SetPropertyStr(ctx, result, "name", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, result, "version", JS_NewString(ctx, ""));
+        JS_SetPropertyStr(ctx, result, "error", JS_NewString(ctx, "Failed to load theme"));
+        return result;
+    }
+}
+
+// 设置当前主题函数 - JS 接口
+static JSValue js_yui_themeSetCurrent(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    const char *theme_name = NULL;
+    JSCStringBuf buf;
+    
+    // 检查参数
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "themeSetCurrent requires 1 argument: theme_name");
+    }
+    
+    // 获取主题名称
+    theme_name = JS_ToCString(ctx, argv[0], &buf);
+    if (!theme_name) {
+        return JS_ThrowTypeError(ctx, "Invalid theme name");
+    }
+    
+    // 调用主题管理器的设置函数
+    int result = theme_manager_set_current(theme_name);
+    
+    return JS_NewBool( result);
+}
+
+// 卸载主题函数 - JS 接口
+static JSValue js_yui_themeUnload(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    const char *theme_name = NULL;
+    JSCStringBuf buf;
+    
+    // 检查参数
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "themeUnload requires 1 argument: theme_name");
+    }
+    
+    // 获取主题名称
+    theme_name = JS_ToCString(ctx, argv[0], &buf);
+    if (!theme_name) {
+        return JS_ThrowTypeError(ctx, "Invalid theme name");
+    }
+    
+    // 调用主题管理器的卸载函数
+    theme_manager_unload_theme(theme_name);
+    
+    return JS_NewBool( 1);
+}
+
+// 应用主题到图层树函数 - JS 接口
+static JSValue js_yui_themeApplyToTree(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    // 调用主题管理器的应用函数
+    ThemeManager* manager = theme_manager_get_instance();
+    Theme* current = theme_manager_get_current();
+    
+    if (current && g_layer_root) {
+        theme_manager_apply_to_tree(g_layer_root);
+        return JS_NewBool( 1);
+    }
+    
+    return JS_NewBool( 0);
+}
+
+// Inspect 启用函数 - JS 接口
+static JSValue js_yui_inspect_enable(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    // 启用全局 inspect 模式
+    extern int yui_inspect_mode_enabled;
+    yui_inspect_mode_enabled = 1;
+    printf("YUI Inspect: Enabled global inspect mode\n");
+    return JS_NewBool( 1);
+}
+
+// Inspect 禁用函数 - JS 接口
+static JSValue js_yui_inspect_disable(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    // 禁用全局 inspect 模式
+    extern int yui_inspect_mode_enabled;
+    yui_inspect_mode_enabled = 0;
+    printf("YUI Inspect: Disabled global inspect mode\n");
+    return JS_NewBool( 1);
+}
+
+// Inspect 设置图层函数 - JS 接口
+static JSValue js_yui_inspect_setLayer(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "inspect_setLayer requires 2 arguments: layer_id and enabled");
+    }
+    
+    JSCStringBuf buf;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf);
+    
+    // mquickjs 不支持 JS_ToBool 和 JS_IsTruthy，直接检查值的类型
+    int enabled = 0;
+    if (JS_IsBool(argv[1])) {
+        // 对于布尔值，检查特殊值的实际值
+        enabled = JS_VALUE_GET_SPECIAL_VALUE(argv[1]) != 0;
+    } else if (JS_IsInt(argv[1])) {
+        enabled = JS_VALUE_GET_INT(argv[1]) != 0;
+#ifdef JS_USE_SHORT_FLOAT
+    } else if (JS_IsShortFloat(argv[1])) {
+        // 短浮点值，需要获取实际的双精度值
+        // 在 mquickjs 中，短浮点值存储为特殊值，需要转换为 double
+        // 简化处理：短浮点非零即为真
+        enabled = 1;
+#endif
+    } else {
+        // 其他类型（字符串、对象等），非空即为真
+        enabled = !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1]);
+    }
+    
+    if (layer_id && g_layer_root) {
+        Layer* layer = find_layer_by_id(g_layer_root, layer_id);
+        if (layer) {
+            layer->inspect_enabled = enabled;
+            printf("YUI Inspect: Set layer '%s' inspect enabled = %d\n", layer_id, enabled);
+            return JS_NewBool( 1);
+        } else {
+            printf("YUI Inspect: Layer '%s' not found\n", layer_id);
+            return JS_NewBool( 0);
+        }
+    }
+    
+    return JS_NewBool( 0);
+}
+
+// Inspect 设置显示边界函数 - JS 接口
+static JSValue js_yui_inspect_setShowBounds(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "inspect_setShowBounds requires 1 argument: show_bounds");
+    }
+    
+    // mquickjs 不支持 JS_ToBool 和 JS_IsTruthy，直接检查值的类型
+    int show_bounds = 0;
+    if (JS_IsBool(argv[0])) {
+        // 对于布尔值，检查特殊值的实际值
+        show_bounds = JS_VALUE_GET_SPECIAL_VALUE(argv[0]) != 0;
+    } else if (JS_IsInt(argv[0])) {
+        show_bounds = JS_VALUE_GET_INT(argv[0]) != 0;
+#ifdef JS_USE_SHORT_FLOAT
+    } else if (JS_IsShortFloat(argv[0])) {
+        // 短浮点值，需要获取实际的双精度值
+        // 在 mquickjs 中，短浮点值存储为特殊值，需要转换为 double
+        // 简化处理：短浮点非零即为真
+        show_bounds = 1;
+#endif
+    } else {
+        // 其他类型（字符串、对象等），非空即为真
+        show_bounds = !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0]);
+    }
+    
+    extern int yui_inspect_show_bounds;
+    yui_inspect_show_bounds = show_bounds;
+    printf("YUI Inspect: Set show bounds = %d\n", show_bounds);
+    return JS_NewBool( 1);
+}
+
+// Inspect 设置显示信息函数 - JS 接口
+static JSValue js_yui_inspect_setShowInfo(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "inspect_setShowInfo requires 1 argument: show_info");
+    }
+    
+    // mquickjs 不支持 JS_ToBool 和 JS_IsTruthy，直接检查值的类型
+    int show_info = 0;
+    if (JS_IsBool(argv[0])) {
+        // 对于布尔值，检查特殊值的实际值
+        show_info = JS_VALUE_GET_SPECIAL_VALUE(argv[0]) != 0;
+    } else if (JS_IsInt(argv[0])) {
+        show_info = JS_VALUE_GET_INT(argv[0]) != 0;
+#ifdef JS_USE_SHORT_FLOAT
+    } else if (JS_IsShortFloat(argv[0])) {
+        // 短浮点值，需要获取实际的双精度值
+        // 在 mquickjs 中，短浮点值存储为特殊值，需要转换为 double
+        // 简化处理：短浮点非零即为真
+        show_info = 1;
+#endif
+    } else {
+        // 其他类型（字符串、对象等），非空即为真
+        show_info = !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0]);
+    }
+    
+    extern int yui_inspect_show_info;
+    yui_inspect_show_info = show_info;
+    printf("YUI Inspect: Set show info = %d\n", show_info);
+    return JS_NewBool( 1);
+}
+
+extern int js_module_set_event(const char* layer_id, const char* event_name, const char* event_func_name);
+// YUI.setEvent() - 设置图层事件回调
+static JSValue js_yui_set_event(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 3) {
+        return JS_ThrowTypeError(ctx, "setEvent requires 3 arguments: layer_id, event_name, callback");
+    }
+    
+    JSCStringBuf buf1, buf2, buf3;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf1);
+    const char* event_name = JS_ToCString(ctx, argv[1], &buf2);
+    const char* func_name = JS_ToCString(ctx, argv[2], &buf3);
+    
+    if (!layer_id || !event_name || !func_name) {
+        return JS_ThrowTypeError(ctx, "Invalid arguments");
+    }
+    
+    // 调用公共实现
+    int result = js_module_set_event(layer_id, event_name, func_name);
+    
+    return JS_NewBool(result == 0 ? 1 : 0);
+}
+
+static const JSClassDef js_yui_class =
+JS_CLASS_DEF("YUI", 1, js_yui_constructor, JS_CLASS_YUI, js_yui, js_yui_proto, NULL, js_yui_finalizer);
+
+// 注册 YUI API 到 JS（导出函数，不使用 static）
+void js_module_register_yui_api(JSContext* ctx) {
+    if (!ctx) return;
+    
+    // 获取全局对象
+    JSValue global_obj = JS_GetGlobalObject(ctx);
+    
+    // YUI 对象应该已经通过 js_yuistdlib 数据结构自动创建
+    // 这里只需要确保它可用
+    
+    // 获取 YUI 对象（如果已经存在）
+    JSValue yui_obj = JS_GetPropertyStr(ctx, global_obj, "YUI");
+    
+    JS_SetLogFunc(ctx, js_log_func);
+
+    // 检查 YUI 对象是否存在
+    if (JS_IsUndefined(yui_obj) || JS_IsNull(yui_obj)) {
+        printf("JS(YUI): YUI object not found, will be created by js_yuistdlib\n");
+    } else {
+        printf("JS(YUI): YUI object exists, functions should be available\n");
+    }
+    
+    printf("JS(YUI): YUI API registration completed\n");
+}
 

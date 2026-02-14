@@ -370,8 +370,10 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("console", &js_console_obj),
     JS_PROP_CLASS_DEF("performance", &js_performance_obj),
     JS_CFUNC_DEF("print", 1, js_print),
-    JS_PROP_CLASS_DEF("Yui", &js_yui_class),
-    JS_PROP_CLASS_DEF("YUI", &js_yui2_class),
+    
+    JS_PROP_CLASS_DEF("YUI", &js_yui_class),
+    JS_PROP_CLASS_DEF("Socket", &js_socket_class),
+
 
     JS_CFUNC_DEF("gc", 0, js_gc),
     JS_CFUNC_DEF("load", 1, js_load),
@@ -391,7 +393,18 @@ static const JSPropDef js_c_function_decl[] = {
     JS_PROP_END,
 };
 
+
+
 #ifndef DBUILD_NO_MAIN
+#if defined(_WIN32)
+#include <windows.h>
+int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    extern int __argc;
+    extern char** __argv;
+    return main(__argc, __argv);
+}
+#endif
+
 int main(int argc, char **argv)
 {
     return build_atoms("js_yuistdlib", js_global_object, js_c_function_decl, argc, argv);

@@ -3,17 +3,47 @@
 #include "animate.h"
 #include <limits.h>
 
+extern int yui_inspect_mode_enabled;
+extern int yui_inspect_show_bounds;
+extern int yui_inspect_show_info;
 
 // ====================== 资源加载器 ======================
 void load_textures(Layer* root) {
     if (root->type==IMAGE&& strlen(root->source) > 0) {
-        // 修改为使用image支持多种格式
-        char path[MAX_PATH];
-        snprintf(path, sizeof(path), "%s/%s", root->assets->path, root->source);
+        // 检查是否为 data URI (base64)
+        if (strncmp(root->source, "data:image/", 11) == 0) {
+            // 查找 base64 标记
+            const char* base64_marker = "base64,";
+            char* base64_pos = strstr(root->source, base64_marker);
+            if (base64_pos) {
+                // 跳过 base64 标记
+                const char* base64_data = base64_pos + strlen(base64_marker);
+                size_t data_len = strlen(base64_data);
+                
+                printf("Loading image from base64 data URI, length: %zu\n", data_len);
+                root->texture = backend_load_texture_from_base64(base64_data, data_len);
+                
+                if (!root->texture) {
+                    printf("Failed to load texture from base64 data\n");
+                }
+            } else {
+                printf("Unsupported data URI format (not base64)\n");
+            }
+        } else {
+            // 修改为使用image支持多种格式
+            char path[MAX_PATH];
+            
+            // 检查是否为绝对路径（以 '/' 开头，Unix/Linux/macOS）
+            if (root->source[0] == '/') {
+                // 使用绝对路径
+                snprintf(path, sizeof(path), "%s", root->source);
+            } else {
+                // 使用相对路径，拼接 assets 路径
+                snprintf(path, sizeof(path), "%s/%s", root->assets->path, root->source);
+            }
 
-        root->texture=backend_load_texture(path);
-
-       
+            root->texture=backend_load_texture(path);
+        }
     }
 }
 
@@ -36,9 +66,15 @@ void load_all_fonts(Layer* layer) {
         // 构建字体路径
         char font_path[MAX_PATH];
         
-        if (layer->assets && layer->assets->path[0] != '\0') {
+        // 检查字体路径是否为绝对路径
+        if (layer->font->path[0] == '/') {
+            // 使用绝对路径
+            snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
+        } else if (layer->assets && layer->assets->path[0] != '\0') {
+            // 使用相对路径，拼接 assets 路径
             snprintf(font_path, sizeof(font_path), "%s/%s", layer->assets->path, layer->font->path);
         } else {
+            // 直接使用字体路径
             snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
         }
         
@@ -98,9 +134,16 @@ void load_font(Layer* root){
     
     // 加载默认字体 (需要在项目目录下提供字体文件)
     char font_path[MAX_PATH];
-    if(root->assets){
+    
+    // 检查字体路径是否为绝对路径
+    if (root->font->path[0] == '/') {
+        // 使用绝对路径
+        snprintf(font_path, sizeof(font_path), "%s", root->font->path);
+    } else if(root->assets){
+        // 使用相对路径，拼接 assets 路径
         snprintf(font_path, sizeof(font_path), "%s/%s", root->assets->path, root->font->path);
-    }else{
+    } else{
+        // 直接使用字体路径
         snprintf(font_path, sizeof(font_path), "%s", root->font->path);
     }
     if(root->font->size==0){
@@ -228,6 +271,115 @@ void render_layer(Layer* layer) {
     }
     
     render_clip_end(layer,&prev_clip);
+
+// Inspect 调试模式绘制
+if ((yui_inspect_mode_enabled || layer->inspect_enabled) && 
+    (layer->inspect_show_bounds || layer->inspect_show_info || yui_inspect_show_bounds || yui_inspect_show_info)) {
+    
+    // 显示边界框
+    if (yui_inspect_show_bounds && layer->inspect_show_bounds && layer->rect.w > 0 && layer->rect.h > 0) {
+        // 绘制边界矩形（半透明红色）
+        Color bounds_color = {255, 0, 0, 100}; // 半透明红色
+        backend_render_rect(&layer->rect, bounds_color);
+        
+        // 绘制四个角的标记点
+        int corner_size = 4;
+        Color corner_color = {255, 0, 0, 200}; // 不透明红色
+        
+        // 左上角
+        Rect corner1 = {layer->rect.x - corner_size/2, layer->rect.y - corner_size/2, corner_size, corner_size};
+        backend_render_fill_rect(&corner1, corner_color);
+        
+        // 右上角
+        Rect corner2 = {layer->rect.x + layer->rect.w - corner_size/2, layer->rect.y - corner_size/2, corner_size, corner_size};
+        backend_render_fill_rect(&corner2, corner_color);
+        
+        // 左下角
+        Rect corner3 = {layer->rect.x - corner_size/2, layer->rect.y + layer->rect.h - corner_size/2, corner_size, corner_size};
+        backend_render_fill_rect(&corner3, corner_color);
+        
+        // 右下角
+        Rect corner4 = {layer->rect.x + layer->rect.w - corner_size/2, layer->rect.y + layer->rect.h - corner_size/2, corner_size, corner_size};
+        backend_render_fill_rect(&corner4, corner_color);
+    }
+    
+    // 显示详细信息
+    if (yui_inspect_show_info && layer->inspect_show_info && strlen(layer->id) > 0) {
+        // 准备信息文本（多行）
+        char line1[128], line2[128], line3[128], line4[128];
+        snprintf(line1, sizeof(line1), "ID: %s", layer->id);
+        snprintf(line2, sizeof(line2), "Type: %s", 
+                 layer->type >= 0 && layer->type < layer_type_size ? layer_type_name[layer->type] : "Unknown");
+        snprintf(line3, sizeof(line3), "Pos: (%d,%d)", layer->rect.x, layer->rect.y);
+        snprintf(line4, sizeof(line4), "Size: (%d,%d)", layer->rect.w, layer->rect.h);
+        
+        // 渲染每一行以计算总尺寸
+        Color text_color = {255, 255, 255, 255};
+        Texture* tex1 = render_text(layer, line1, text_color);
+        Texture* tex2 = render_text(layer, line2, text_color);
+        Texture* tex3 = render_text(layer, line3, text_color);
+        Texture* tex4 = render_text(layer, line4, text_color);
+        
+        if (tex1 && tex2 && tex3 && tex4) {
+            int w1, h1, w2, h2, w3, h3, w4, h4;
+            backend_query_texture(tex1, NULL, NULL, &w1, &h1);
+            backend_query_texture(tex2, NULL, NULL, &w2, &h2);
+            backend_query_texture(tex3, NULL, NULL, &w3, &h3);
+            backend_query_texture(tex4, NULL, NULL, &w4, &h4);
+            
+            // 计算最大宽度和总高度
+            int max_width = w1 > w2 ? (w1 > w3 ? (w1 > w4 ? w1 : w4) : (w3 > w4 ? w3 : w4)) : (w2 > w3 ? (w2 > w4 ? w2 : w4) : (w3 > w4 ? w3 : w4));
+            int total_height = h1 + h2 + h3 + h4;
+            int line_spacing = 2; // 行间距
+            total_height += line_spacing * 3;
+            
+            // 添加边距
+            int padding = 10;
+            int info_width = max_width + padding * 2;
+            int info_height = total_height + padding * 2;
+            int info_x = layer->rect.x;
+            int info_y = layer->rect.y;
+            
+            // 确保信息显示在屏幕内（相对于整个窗口）
+            // 这里可以添加屏幕边界检查逻辑，如果需要的话
+            
+            // 绘制信息背景（半透明黑色）
+            Rect info_bg = {info_x, info_y, info_width, info_height};
+            Color bg_color = {0, 0, 0, 180}; // 半透明黑色
+            backend_render_fill_rect(&info_bg, bg_color);
+            
+            // 渲染每一行文本（缩放80%）
+            float scale = 0.8f; // 缩放比例
+            int current_y = info_y + padding;
+            Rect rect1 = {info_x + padding, current_y, (int)(w1 * scale), (int)(h1 * scale)};
+            backend_render_text_copy(tex1, NULL, &rect1);
+            current_y += (int)(h1 * scale) + line_spacing;
+            
+            Rect rect2 = {info_x + padding, current_y, (int)(w2 * scale), (int)(h2 * scale)};
+            backend_render_text_copy(tex2, NULL, &rect2);
+            current_y += (int)(h2 * scale) + line_spacing;
+            
+            Rect rect3 = {info_x + padding, current_y, (int)(w3 * scale), (int)(h3 * scale)};
+            backend_render_text_copy(tex3, NULL, &rect3);
+            current_y += (int)(h3 * scale) + line_spacing;
+            
+            Rect rect4 = {info_x + padding, current_y, (int)(w4 * scale), (int)(h4 * scale)};
+            backend_render_text_copy(tex4, NULL, &rect4);
+            
+            // 清理
+            backend_render_text_destroy(tex1);
+            backend_render_text_destroy(tex2);
+            backend_render_text_destroy(tex3);
+            backend_render_text_destroy(tex4);
+        } else {
+            // 清理已创建的纹理
+            if (tex1) backend_render_text_destroy(tex1);
+            if (tex2) backend_render_text_destroy(tex2);
+            if (tex3) backend_render_text_destroy(tex3);
+            if (tex4) backend_render_text_destroy(tex4);
+        }
+    }
+}
 
 #if DEBUG_VIEW
     Texture* text_texture = render_text(layer,layer->id, (Color){strlen(layer->id)*40%255, 0, 0, 255});

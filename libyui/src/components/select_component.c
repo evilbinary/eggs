@@ -57,12 +57,18 @@ SelectComponent* select_component_create(Layer* layer) {
     component->on_selection_changed = NULL;
     component->on_dropdown_expanded = NULL;
     
+    // 标准事件支持初始化
+    component->on_change = NULL;
+    component->change_name = NULL;
+    
     // 设置组件和渲染函数
     layer->component = component;
     layer->render = select_component_render;
     layer->handle_mouse_event = select_component_handle_mouse_event;
     layer->handle_key_event = select_component_handle_key_event;
     layer->handle_scroll_event = select_component_handle_scroll_event;
+    layer->register_event = select_component_register_event;
+    layer->get_property = select_component_get_property;
     
     // 设置滚动事件回调
     if (!layer->event) {
@@ -82,117 +88,146 @@ SelectComponent* select_component_create_from_json(Layer* layer, cJSON* json_obj
     if (!component) return NULL;
     
     // 解析 Select 特定属性
+    // 优先从 selectConfig 读取配置（向后兼容）
     cJSON* selectConfig = cJSON_GetObjectItem(json_obj, "selectConfig");
-    if (selectConfig) {
-        // 最大可见项目数
-        if (cJSON_HasObjectItem(selectConfig, "maxVisibleItems")) {
-            component->max_visible_items = cJSON_GetObjectItem(selectConfig, "maxVisibleItems")->valueint;
-        }
-        
-        // 项目高度
-        if (cJSON_HasObjectItem(selectConfig, "itemHeight")) {
-            component->item_height = cJSON_GetObjectItem(selectConfig, "itemHeight")->valueint;
-        }
-        
-        // 边框样式
-        if (cJSON_HasObjectItem(selectConfig, "borderWidth")) {
-            component->border_width = cJSON_GetObjectItem(selectConfig, "borderWidth")->valueint;
-        }
-        if (cJSON_HasObjectItem(selectConfig, "borderRadius")) {
-            component->border_radius = cJSON_GetObjectItem(selectConfig, "borderRadius")->valueint;
-        }
-        
-        // 字体大小
-        if (cJSON_HasObjectItem(selectConfig, "fontSize")) {
-            component->font_size = cJSON_GetObjectItem(selectConfig, "fontSize")->valueint;
-        }
-        
-        // 加载组件专用字体
-        if (layer->font && strlen(layer->font->path) > 0) {
-            char font_path[MAX_PATH];
-            snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
-            component->font = backend_load_font(font_path, component->font_size);
-        }
-        
-        // 解析选项数据
-        cJSON* items = cJSON_GetObjectItem(selectConfig, "items");
-        if (items && cJSON_IsArray(items)) {
-            for (int i = 0; i < cJSON_GetArraySize(items); i++) {
-                cJSON* item = cJSON_GetArrayItem(items, i);
-                if (cJSON_IsString(item)) {
-                    select_component_add_item(component, item->valuestring, NULL);
-                } else if (cJSON_IsObject(item)) {
-                    const char* text = "";
-                    int disabled = 0;
-                    
-                    if (cJSON_HasObjectItem(item, "text")) {
-                        text = cJSON_GetObjectItem(item, "text")->valuestring;
+    cJSON* config_source = selectConfig ? selectConfig : json_obj;
+    
+    // 最大可见项目数
+    if (cJSON_HasObjectItem(config_source, "maxVisibleItems")) {
+        component->max_visible_items = cJSON_GetObjectItem(config_source, "maxVisibleItems")->valueint;
+    }
+    
+    // 项目高度
+    if (cJSON_HasObjectItem(config_source, "itemHeight")) {
+        component->item_height = cJSON_GetObjectItem(config_source, "itemHeight")->valueint;
+    }
+    
+    // 边框样式
+    if (cJSON_HasObjectItem(config_source, "borderWidth")) {
+        component->border_width = cJSON_GetObjectItem(config_source, "borderWidth")->valueint;
+    }
+    if (cJSON_HasObjectItem(config_source, "borderRadius")) {
+        component->border_radius = cJSON_GetObjectItem(config_source, "borderRadius")->valueint;
+    }
+    
+    // 字体大小
+    if (cJSON_HasObjectItem(config_source, "fontSize")) {
+        component->font_size = cJSON_GetObjectItem(config_source, "fontSize")->valueint;
+    }
+    
+    // 加载组件专用字体
+    if (layer->font && strlen(layer->font->path) > 0) {
+        char font_path[MAX_PATH];
+        snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
+        component->font = backend_load_font(font_path, component->font_size);
+    }
+    
+    // 解析选项数据
+    cJSON* items = cJSON_GetObjectItem(config_source, "items");
+    if (items && cJSON_IsArray(items)) {
+        for (int i = 0; i < cJSON_GetArraySize(items); i++) {
+            cJSON* item = cJSON_GetArrayItem(items, i);
+            if (cJSON_IsString(item)) {
+                select_component_add_item(component, item->valuestring, NULL);
+            } else if (cJSON_IsObject(item)) {
+                const char* text = "";
+                const char* value = NULL;
+                int disabled = 0;
+                
+                // 支持 label 字段（显示文本）
+                if (cJSON_HasObjectItem(item, "label")) {
+                    text = cJSON_GetObjectItem(item, "label")->valuestring;
+                }
+                // 兼容旧的 text 字段
+                else if (cJSON_HasObjectItem(item, "text")) {
+                    text = cJSON_GetObjectItem(item, "text")->valuestring;
+                }
+                
+                // 支持 value 字段（存储值）
+                if (cJSON_HasObjectItem(item, "value")) {
+                    cJSON* value_obj = cJSON_GetObjectItem(item, "value");
+                    if (cJSON_IsString(value_obj)) {
+                        value = value_obj->valuestring;
+                    } else {
+                        // 将非字符串值转换为字符串存储
+                        char* value_str = cJSON_Print(value_obj);
+                        if (value_str) {
+                            // 移除引号
+                            int len = strlen(value_str);
+                            if (len > 1 && value_str[0] == '"' && value_str[len-1] == '"') {
+                                value_str[len-1] = '\0';
+                                value = value_str + 1;
+                            } else {
+                                value = value_str;
+                            }
+                        }
                     }
-                    if (cJSON_HasObjectItem(item, "disabled")) {
-                        disabled = cJSON_IsTrue(cJSON_GetObjectItem(item, "disabled"));
-                    }
-                    
-                    select_component_add_item(component, text, NULL);
-                    if (disabled) {
-                        select_component_set_item_disabled(component, component->item_count - 1, 1);
-                    }
+                }
+                
+                if (cJSON_HasObjectItem(item, "disabled")) {
+                    disabled = cJSON_IsTrue(cJSON_GetObjectItem(item, "disabled"));
+                }
+                
+                select_component_add_item(component, text, (void*)value);
+                if (disabled) {
+                    select_component_set_item_disabled(component, component->item_count - 1, 1);
                 }
             }
         }
-        
-        // 解析占位符
-        if (cJSON_HasObjectItem(selectConfig, "placeholder")) {
-            select_component_add_placeholder(component, cJSON_GetObjectItem(selectConfig, "placeholder")->valuestring);
+    }
+    
+    // 解析占位符
+    if (cJSON_HasObjectItem(config_source, "placeholder")) {
+        select_component_add_placeholder(component, cJSON_GetObjectItem(config_source, "placeholder")->valuestring);
+    }
+    
+    // 解析颜色配置
+    cJSON* colors = cJSON_GetObjectItem(config_source, "colors");
+    if (colors) {
+        if (cJSON_HasObjectItem(colors, "bgColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "bgColor")->valuestring, &component->bg_color);
         }
-        
-        // 解析颜色配置
-        cJSON* colors = cJSON_GetObjectItem(selectConfig, "colors");
-        if (colors) {
-            if (cJSON_HasObjectItem(colors, "bgColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "bgColor")->valuestring, &component->bg_color);
-            }
-            if (cJSON_HasObjectItem(colors, "textColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "textColor")->valuestring, &component->text_color);
+        if (cJSON_HasObjectItem(colors, "textColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "textColor")->valuestring, &component->text_color);
 
-            }
-            if (cJSON_HasObjectItem(colors, "borderColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "borderColor")->valuestring, &component->border_color);
-            }
-            if (cJSON_HasObjectItem(colors, "arrowColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "arrowColor")->valuestring, &component->arrow_color);
-            }
-            if (cJSON_HasObjectItem(colors, "dropdownBgColor")) {
-                char* color_str = (char*)cJSON_GetObjectItem(colors, "dropdownBgColor")->valuestring;
-                parse_color(color_str, &component->dropdown_bg_color);
-                printf("DEBUG: dropdownBgColor parsed: %s -> (%d,%d,%d,%d)\n", 
-                       color_str, component->dropdown_bg_color.r, component->dropdown_bg_color.g, 
-                       component->dropdown_bg_color.b, component->dropdown_bg_color.a);
-            }
-            if (cJSON_HasObjectItem(colors, "hoverBgColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "hoverBgColor")->valuestring, &component->hover_bg_color);
-            }
-            if (cJSON_HasObjectItem(colors, "selectedBgColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "selectedBgColor")->valuestring, &component->selected_bg_color);
-            }
-            if (cJSON_HasObjectItem(colors, "selectedTextColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "selectedTextColor")->valuestring, &component->selected_text_color);
-            }
-            if (cJSON_HasObjectItem(colors, "disabledTextColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "disabledTextColor")->valuestring, &component->disabled_text_color);
+        }
+        if (cJSON_HasObjectItem(colors, "borderColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "borderColor")->valuestring, &component->border_color);
+        }
+        if (cJSON_HasObjectItem(colors, "arrowColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "arrowColor")->valuestring, &component->arrow_color);
+        }
+        if (cJSON_HasObjectItem(colors, "dropdownBgColor")) {
+            char* color_str = (char*)cJSON_GetObjectItem(colors, "dropdownBgColor")->valuestring;
+            parse_color(color_str, &component->dropdown_bg_color);
+            printf("DEBUG: dropdownBgColor parsed: %s -> (%d,%d,%d,%d)\n", 
+                   color_str, component->dropdown_bg_color.r, component->dropdown_bg_color.g, 
+                   component->dropdown_bg_color.b, component->dropdown_bg_color.a);
+        }
+        if (cJSON_HasObjectItem(colors, "hoverBgColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "hoverBgColor")->valuestring, &component->hover_bg_color);
+        }
+        if (cJSON_HasObjectItem(colors, "selectedBgColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "selectedBgColor")->valuestring, &component->selected_bg_color);
+        }
+        if (cJSON_HasObjectItem(colors, "selectedTextColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "selectedTextColor")->valuestring, &component->selected_text_color);
+        }
+        if (cJSON_HasObjectItem(colors, "disabledTextColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "disabledTextColor")->valuestring, &component->disabled_text_color);
 
-            }
-            if (cJSON_HasObjectItem(colors, "scrollbarColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "scrollbarColor")->valuestring, &component->scrollbar_color);
-            }
-            if (cJSON_HasObjectItem(colors, "scrollbarBgColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "scrollbarBgColor")->valuestring, &component->scrollbar_bg_color);
-            }
-            if (cJSON_HasObjectItem(colors, "focusBorderColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "focusBorderColor")->valuestring, &component->focus_border_color);
-            }
-            if (cJSON_HasObjectItem(colors, "hoverBorderColor")) {
-                parse_color((char*)cJSON_GetObjectItem(colors, "hoverBorderColor")->valuestring, &component->hover_border_color);
-            }
+        }
+        if (cJSON_HasObjectItem(colors, "scrollbarColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "scrollbarColor")->valuestring, &component->scrollbar_color);
+        }
+        if (cJSON_HasObjectItem(colors, "scrollbarBgColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "scrollbarBgColor")->valuestring, &component->scrollbar_bg_color);
+        }
+        if (cJSON_HasObjectItem(colors, "focusBorderColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "focusBorderColor")->valuestring, &component->focus_border_color);
+        }
+        if (cJSON_HasObjectItem(colors, "hoverBorderColor")) {
+            parse_color((char*)cJSON_GetObjectItem(colors, "hoverBorderColor")->valuestring, &component->hover_border_color);
         }
     }
     
@@ -216,6 +251,22 @@ SelectComponent* select_component_create_from_json(Layer* layer, cJSON* json_obj
         component->font = backend_load_font(font_path, component->font_size);
     }
     
+    // 解析事件绑定
+    cJSON* events = cJSON_GetObjectItem(json_obj, "events");
+    if (events) {
+        // 解析onChange事件
+        if (cJSON_HasObjectItem(events, "onChange")) {
+            cJSON* on_change_obj = cJSON_GetObjectItem(events, "onChange");
+            if (cJSON_IsString(on_change_obj)) {
+                const char* event_name = on_change_obj->valuestring;
+                // 将事件名称存储在 change_name 中，稍后由事件系统处理
+                component->change_name = strdup(event_name);
+                EventHandler handler = find_event_by_name(event_name);
+                component->on_change = handler;
+            }
+        }
+    }
+
     return component;
 }
 
@@ -254,7 +305,8 @@ void select_component_add_item(SelectComponent* component, const char* text, voi
     // 添加新选项
     SelectItem* item = &component->items[component->item_count];
     item->text = strdup(text);
-    item->user_data = user_data;
+    // 复制 user_data（假设是字符串）
+    item->user_data = user_data ? strdup((const char*)user_data) : NULL;
     item->selected = 0;
     item->disabled = 0;
     
@@ -296,10 +348,14 @@ void select_component_add_placeholder(SelectComponent* component, const char* te
 void select_component_remove_item(SelectComponent* component, int index) {
     if (!component || index < 0 || index >= component->item_count) return;
     
-    // 释放选项文本
+    // 释放选项文本和 user_data
     if (component->items[index].text) {
         free(component->items[index].text);
         component->items[index].text = NULL;
+    }
+    if (component->items[index].user_data) {
+        free(component->items[index].user_data);
+        component->items[index].user_data = NULL;
     }
     
     // 移动后面的选项
@@ -326,12 +382,16 @@ void select_component_remove_item(SelectComponent* component, int index) {
 void select_component_clear_items(SelectComponent* component) {
     if (!component) return;
     
-    // 释放所有选项文本
+    // 释放所有选项文本和 user_data
     if (component->items) {
         for (int i = 0; i < component->item_count; i++) {
             if (component->items[i].text) {
                 free(component->items[i].text);
                 component->items[i].text = NULL;
+            }
+            if (component->items[i].user_data) {
+                free(component->items[i].user_data);
+                component->items[i].user_data = NULL;
             }
         }
         
@@ -364,7 +424,7 @@ void select_component_insert_item(SelectComponent* component, int index, const c
     // 插入新选项
     SelectItem* item = &component->items[index];
     item->text = strdup(text);
-    item->user_data = user_data;
+    item->user_data = user_data ? strdup((const char*)user_data) : NULL;
     item->selected = 0;
     item->disabled = 0;
     
@@ -408,6 +468,11 @@ void select_component_set_selected(SelectComponent* component, int index) {
     if (old_index != index && component->on_selection_changed) {
         component->on_selection_changed(index, component->user_data);
     }
+    
+    // 触发标准 onChange 事件
+    if (old_index != index) {
+        select_component_trigger_on_change(component);
+    }
 }
 
 // 获取选中项索引
@@ -422,6 +487,14 @@ const char* select_component_get_selected_text(SelectComponent* component) {
         return NULL;
     }
     return component->items[component->selected_index].text;
+}
+
+// 获取选中项值（从 user_data 中获取）
+const char* select_component_get_selected_value(SelectComponent* component) {
+    if (!component || component->selected_index < 0 || component->selected_index >= component->item_count) {
+        return NULL;
+    }
+    return (const char*)component->items[component->selected_index].user_data;
 }
 
 // 获取选中项用户数据
@@ -562,7 +635,6 @@ void select_component_expand(SelectComponent* component) {
             
             // 设置弹出层位置和大小
             component->dropdown_layer->rect.x = component->layer->rect.x;
-            component->dropdown_layer->rect.y = component->layer->rect.y + component->layer->rect.h;
             
             // 计算下拉菜单高度
             int dropdown_height = component->item_height * component->item_count;
@@ -571,6 +643,27 @@ void select_component_expand(SelectComponent* component) {
             }
             component->dropdown_layer->rect.w = component->layer->rect.w;
             component->dropdown_layer->rect.h = dropdown_height;
+            
+            // 智能判断展开方向：检查下方是否有足够空间
+            int window_width, window_height;
+            backend_get_windowsize(&window_width, &window_height);
+            
+            int space_below = window_height - (component->layer->rect.y + component->layer->rect.h);
+            int space_above = component->layer->rect.y;
+            
+            // 判断是否有足够空间向下展开
+            if (space_below >= dropdown_height || space_below >= space_above) {
+                // 向下展开
+                component->dropdown_open_upward = 0;
+                component->dropdown_layer->rect.y = component->layer->rect.y + component->layer->rect.h;
+                printf("DEBUG: Dropdown opening DOWNWARD - space_below=%d, dropdown_height=%d\n", space_below, dropdown_height);
+            } else {
+                // 向上展开
+                component->dropdown_open_upward = 1;
+                component->dropdown_layer->rect.y = component->layer->rect.y - dropdown_height;
+                printf("DEBUG: Dropdown opening UPWARD - space_below=%d, space_above=%d, dropdown_height=%d\n", 
+                       space_below, space_above, dropdown_height);
+            }
             
             // 设置渲染函数为独立的下拉渲染函数
             component->dropdown_layer->component = component;
@@ -618,7 +711,11 @@ void select_component_collapse(SelectComponent* component) {
     
     // 从弹出层管理器移除
     if (component->dropdown_layer) {
-        popup_manager_remove(component->dropdown_layer);
+        // 保存指针以便调用 popup_manager_remove
+        Layer* dropdown_layer = component->dropdown_layer;
+        component->dropdown_layer = NULL;  // 先设置为NULL，防止回调中再次使用
+        
+        popup_manager_remove(dropdown_layer);
         // 注意：dropdown_layer 会在 popup_manager_remove 中被释放，close_callback 会设置为 NULL
         printf("DEBUG: Removed select dropdown from popup manager\n");
     }
@@ -648,8 +745,17 @@ void select_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
         printf("DEBUG: Dragging scrollbar, mouse_y=%d, start_y=%d, start_scroll=%d\n", 
                event->y, component->drag_start_y, component->drag_start_scroll);
         
-        int dropdown_y = layer->rect.y + layer->rect.h;
+        int dropdown_y;
         int dropdown_height = component->item_height * component->item_count;
+        if (dropdown_height > component->max_visible_items * component->item_height) {
+            dropdown_height = component->max_visible_items * component->item_height;
+        }
+        
+        if (component->dropdown_open_upward) {
+            dropdown_y = layer->rect.y - dropdown_height;
+        } else {
+            dropdown_y = layer->rect.y + layer->rect.h;
+        }
         if (dropdown_height > component->max_visible_items * component->item_height) {
             dropdown_height = component->max_visible_items * component->item_height;
         }
@@ -681,8 +787,17 @@ void select_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
     bool in_dropdown_area = false;
     if (component->expanded) {
         int dropdown_x = layer->rect.x;
-        int dropdown_y = layer->rect.y + layer->rect.h;
+        int dropdown_y;
         int dropdown_height = component->item_height * component->item_count;
+        if (dropdown_height > component->max_visible_items * component->item_height) {
+            dropdown_height = component->max_visible_items * component->item_height;
+        }
+        
+        if (component->dropdown_open_upward) {
+            dropdown_y = layer->rect.y - dropdown_height;
+        } else {
+            dropdown_y = layer->rect.y + layer->rect.h;
+        }
         if (dropdown_height > component->max_visible_items * component->item_height) {
             dropdown_height = component->max_visible_items * component->item_height;
         }
@@ -711,8 +826,17 @@ void select_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
         // 检查是否点击在下拉菜单选项上
         else if (component->expanded) {
             int dropdown_x = layer->rect.x;
-            int dropdown_y = layer->rect.y + layer->rect.h;
+            int dropdown_y;
             int dropdown_height = component->item_height * component->item_count;
+            if (dropdown_height > component->max_visible_items * component->item_height) {
+                dropdown_height = component->max_visible_items * component->item_height;
+            }
+            
+            if (component->dropdown_open_upward) {
+                dropdown_y = layer->rect.y - dropdown_height;
+            } else {
+                dropdown_y = layer->rect.y + layer->rect.h;
+            }
             if (dropdown_height > component->max_visible_items * component->item_height) {
                 dropdown_height = component->max_visible_items * component->item_height;
             }
@@ -802,7 +926,18 @@ void select_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
         if (component->expanded) {
             // 更新悬停状态
             int dropdown_x = layer->rect.x;
-            int dropdown_y = layer->rect.y + layer->rect.h;
+            int dropdown_y;
+            int dropdown_height = component->item_height * component->item_count;
+            if (dropdown_height > component->max_visible_items * component->item_height) {
+                dropdown_height = component->max_visible_items * component->item_height;
+            }
+            
+            if (component->dropdown_open_upward) {
+                dropdown_y = layer->rect.y - dropdown_height;
+            } else {
+                dropdown_y = layer->rect.y + layer->rect.h;
+            }
+            
             int content_width = layer->rect.w;
             int has_scrollbar = component->item_count > component->max_visible_items;
             if (has_scrollbar) {
@@ -1052,7 +1187,22 @@ void select_component_render_dropdown_only(Layer* layer) {
 
     
     int dropdown_x = component->layer->rect.x;
-    int dropdown_y = component->layer->rect.y + component->layer->rect.h;
+    int dropdown_y;
+    
+    // 根据展开方向确定Y坐标
+    if (component->dropdown_open_upward) {
+        // 向上展开：计算高度并从select组件上方开始
+        int dropdown_height = component->item_height * component->item_count;
+        if (dropdown_height > component->max_visible_items * component->item_height) {
+            dropdown_height = component->max_visible_items * component->item_height;
+        }
+        dropdown_y = component->layer->rect.y - dropdown_height;
+        // printf("DEBUG: Rendering dropdown UPWARD at y=%d\n", dropdown_y);
+    } else {
+        // 向下展开：从select组件下方开始
+        dropdown_y = component->layer->rect.y + component->layer->rect.h;
+        // printf("DEBUG: Rendering dropdown DOWNWARD at y=%d\n", dropdown_y);
+    }
     
     // 计算下拉菜单高度
     int dropdown_height = component->item_height * component->item_count;
@@ -1193,16 +1343,23 @@ void select_component_handle_dropdown_mouse_event(Layer* layer, MouseEvent* even
     
     SelectComponent* component = (SelectComponent*)layer->component;
     
+    // 计算下拉菜单Y坐标（根据展开方向）
+    int dropdown_y;
+    int dropdown_height = component->item_height * component->item_count;
+    if (dropdown_height > component->max_visible_items * component->item_height) {
+        dropdown_height = component->max_visible_items * component->item_height;
+    }
+    
+    if (component->dropdown_open_upward) {
+        dropdown_y = component->layer->rect.y - dropdown_height;
+    } else {
+        dropdown_y = component->layer->rect.y + component->layer->rect.h;
+    }
+    
     // 如果正在拖拽，优先处理拖拽逻辑
     if (component->is_dragging && (event->state == SDL_MOUSEMOTION || event->state == SDL_PRESSED)) {
-        printf("DEBUG: Dragging scrollbar, mouse_y=%d, start_y=%d, start_scroll=%d\n", 
-               event->y, component->drag_start_y, component->drag_start_scroll);
-        
-        int dropdown_y = component->layer->rect.y + component->layer->rect.h;
-        int dropdown_height = component->item_height * component->item_count;
-        if (dropdown_height > component->max_visible_items * component->item_height) {
-            dropdown_height = component->max_visible_items * component->item_height;
-        }
+        // printf("DEBUG: Dragging scrollbar, mouse_y=%d, start_y=%d, start_scroll=%d\n", 
+        //       event->y, component->drag_start_y, component->drag_start_scroll);
         
         int total_items = component->item_count;
         int visible_items = component->max_visible_items;
@@ -1221,11 +1378,6 @@ void select_component_handle_dropdown_mouse_event(Layer* layer, MouseEvent* even
     }
     
     int dropdown_x = component->layer->rect.x;
-    int dropdown_y = component->layer->rect.y + component->layer->rect.h;
-    int dropdown_height = component->item_height * component->item_count;
-    if (dropdown_height > component->max_visible_items * component->item_height) {
-        dropdown_height = component->max_visible_items * component->item_height;
-    }
     
     // 计算内容区域（排除滚动条）
     int content_width = component->layer->rect.w;
@@ -1380,9 +1532,13 @@ void select_component_handle_dropdown_scroll_event(Layer* layer, int scroll_delt
 
 // 弹出层关闭回调
 void select_component_popup_close_callback(PopupLayer* popup) {
-    if (!popup || !popup->layer) return;
+    if (!popup) return;
     
-    SelectComponent* component = (SelectComponent*)popup->layer->component;
+    // 先保存layer指针，因为在popup_manager_remove中，popup会被释放
+    Layer* layer = popup->layer;
+    if (!layer) return;
+    
+    SelectComponent* component = (SelectComponent*)layer->component;
     if (component) {
         // 确保状态一致，但避免重复触发回调
         component->expanded = 0;
@@ -1390,9 +1546,92 @@ void select_component_popup_close_callback(PopupLayer* popup) {
         component->is_dragging = 0;
         component->just_expanded = 0;
         
-        // 注意：dropdown_layer 会在这里被 popup_manager 释放，我们只需要设置为 NULL
-        component->dropdown_layer = NULL;
+        // 注意：dropdown_layer 会在 popup_manager 中被释放，我们只需要设置为 NULL
+        // 注意：不要在这里再次设置为NULL，因为在collapse函数中已经设置过了
+        // component->dropdown_layer = NULL;
         
         // 注意：不在这里触发 on_dropdown_expanded 回调，因为它应该已经在 collapse 中被调用了
     }
+}
+
+// 设置 onChange 回调函数
+void select_component_set_on_change(SelectComponent* component, EventHandler callback, void* user_data) {
+    if (!component) {
+        return;
+    }
+    
+    component->on_change = callback;
+    component->change_name = (char*)user_data;
+}
+
+// 调用 onChange 回调函数
+void select_component_trigger_on_change(SelectComponent* component) {
+    if (!component) {
+        return;
+    }
+    
+    // 如果没有事件处理器但有事件名称，尝试查找事件处理器
+    if(component->on_change == NULL && component->change_name != NULL){
+        EventHandler handler = find_event_by_name(component->change_name);
+        component->on_change = handler;
+    }
+    
+    // 检查是否有可用的事件处理器
+    if (component->on_change) {
+        // 调用事件处理器
+        component->on_change(component->layer);
+    } else if (component->change_name) {
+        // 只有在指定了事件名称但找不到处理器时才打印警告
+        printf("select_component_trigger_on_change not found onchange event %s\n", component->change_name);
+        print_registered_events();
+    }
+    // 如果既没有处理器也没有事件名称，则静默处理
+}
+
+// 注册事件处理函数
+int select_component_register_event(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler){
+    if(strcmp(event_name,"change")==0 || strcmp(event_name,"onChange")==0){
+        SelectComponent* component = (SelectComponent*)layer->component;
+        component->on_change = event_handler;
+        component->change_name = strdup(event_func_name);
+        return 0;
+    }
+    return -1;
+}
+
+// 通用属性获取函数
+cJSON* select_component_get_property(Layer* layer, const char* property_name) {
+    if (!layer || !property_name || !layer->component) {
+        return NULL;
+    }
+    
+    SelectComponent* component = (SelectComponent*)layer->component;
+    
+    if (strcmp(property_name, "value") == 0) {
+        // 获取选中项的值
+        const char* value = select_component_get_selected_value(component);
+        if (value) {
+            return cJSON_CreateString(value);
+        }
+        return cJSON_CreateNull();
+    }
+    else if (strcmp(property_name, "text") == 0) {
+        // 获取选中项的文本
+        const char* text = select_component_get_selected_text(component);
+        if (text) {
+            return cJSON_CreateString(text);
+        }
+        return cJSON_CreateNull();
+    }
+    else if (strcmp(property_name, "selectedIndex") == 0) {
+        // 获取选中项的索引
+        return cJSON_CreateNumber(select_component_get_selected(component));
+    }
+    else if (strcmp(property_name, "itemCount") == 0) {
+        // 获取选项数量
+        return cJSON_CreateNumber(select_component_get_item_count(component));
+    }
+    
+    // 未知的属性，返回 NULL
+    return NULL;
 }

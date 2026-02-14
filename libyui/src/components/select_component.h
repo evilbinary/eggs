@@ -35,6 +35,7 @@ typedef struct {
     int drag_start_y;                 // 拖动开始Y坐标
     int drag_start_scroll;            // 拖动开始滚动位置
     int just_expanded;                // 刚刚展开标志
+    int dropdown_open_upward;         // 下拉菜单是否向上展开
     
     // 颜色配置
     Color bg_color;                   // 背景颜色
@@ -62,6 +63,10 @@ typedef struct {
     void* user_data;                  // 用户数据
     void (*on_selection_changed)(int index, void* user_data);     // 选择变化回调
     void (*on_dropdown_expanded)(int expanded, void* user_data);  // 展开状态变化回调
+        
+    // 标准事件支持
+    EventHandler on_change;           // onChange 事件处理器
+    char* change_name;                // onChange 事件名称
 } SelectComponent;
 
 // 函数声明
@@ -80,6 +85,7 @@ void select_component_insert_item(SelectComponent* component, int index, const c
 void select_component_set_selected(SelectComponent* component, int index);
 int select_component_get_selected(SelectComponent* component);
 const char* select_component_get_selected_text(SelectComponent* component);
+const char* select_component_get_selected_value(SelectComponent* component);
 void* select_component_get_selected_data(SelectComponent* component);
 void select_component_clear_selection(SelectComponent* component);
 
@@ -125,5 +131,13 @@ void select_component_handle_dropdown_mouse_event(Layer* layer, MouseEvent* even
 void select_component_handle_dropdown_key_event(Layer* layer, KeyEvent* event);
 void select_component_handle_dropdown_scroll_event(Layer* layer, int scroll_delta);
 void select_component_popup_close_callback(PopupLayer* popup);
+
+// 标准事件支持函数
+void select_component_trigger_on_change(SelectComponent* component);
+void select_component_set_on_change(SelectComponent* component, EventHandler callback, void* user_data);
+int select_component_register_event(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler);
+
+// 通用属性获取函数
+cJSON* select_component_get_property(Layer* layer, const char* property_name);
 
 #endif  // YUI_SELECT_COMPONENT_H

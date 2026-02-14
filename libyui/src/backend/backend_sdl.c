@@ -6,15 +6,22 @@
 #include <stdbool.h>  // 添加支持bool类型
 #include <math.h>     // 添加数学函数支持
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #define WINDOW_WIDTH 1000
 #define MAX_TOUCHES 10
 #define MAX_UPDATE_CALLBACKS 16
+#define MAX_TEXTURE_CACHE_ENTRIES 200
 
 // ====================== 全局渲染器 ======================
 SDL_Renderer* renderer = NULL;
 float scale=1.0;
 SDL_Window* window=NULL;
 DFont* default_font=NULL;
+Layer* g_ui_root = NULL;
+int g_running=0;
 
 // 主循环更新回调管理
 static UpdateCallback update_callbacks[MAX_UPDATE_CALLBACKS] = {NULL};
@@ -32,6 +39,151 @@ typedef struct {
 #define MAX_FONT_CACHE_ENTRIES 50
 FontCacheEntry font_cache[MAX_FONT_CACHE_ENTRIES] = {0};
 int font_cache_initialized = 0;
+
+// 纹理缓存结构
+typedef struct {
+    DFont* font;
+    char text[256];
+    Color color;
+    SDL_Texture* texture;
+    int width;
+    int height;
+    Uint32 last_used;
+} TextureCacheEntry;
+
+TextureCacheEntry texture_cache[MAX_TEXTURE_CACHE_ENTRIES] = {0};
+int texture_cache_initialized = 0;
+
+void handle_event(Layer* root, SDL_Event* event);
+
+#ifdef __EMSCRIPTEN__
+// Emscripten 主循环回调函数
+void backend_main_loop(void) {
+    if (!g_ui_root || !g_running) {
+        return;
+    }
+
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            g_running = 0;
+            emscripten_cancel_main_loop();
+            return;
+        }
+        handle_event(g_ui_root, &event);
+    }
+
+    // 调用所有注册的更新回调
+    for (int i = 0; i < update_callback_count; i++) {
+        if (update_callbacks[i]) {
+            update_callbacks[i]();
+        }
+    }
+
+    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+    SDL_RenderClear(renderer);
+
+    render_layer(g_ui_root);  // 执行渲染管线
+
+    // 渲染弹出层
+    popup_manager_render();
+
+    SDL_RenderPresent(renderer);
+}
+#endif
+
+// ====================== 纹理缓存管理 ======================
+void init_texture_cache() {
+    if (texture_cache_initialized) return;
+    
+    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+        texture_cache[i].font = NULL;
+        texture_cache[i].text[0] = '\0';
+        texture_cache[i].texture = NULL;
+        texture_cache[i].width = 0;
+        texture_cache[i].height = 0;
+        texture_cache[i].last_used = 0;
+    }
+    
+    texture_cache_initialized = 1;
+}
+
+void cleanup_texture_cache() {
+    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+        if (texture_cache[i].texture) {
+            SDL_DestroyTexture(texture_cache[i].texture);
+            texture_cache[i].texture = NULL;
+        }
+        texture_cache[i].font = NULL;
+        texture_cache[i].text[0] = '\0';
+        texture_cache[i].width = 0;
+        texture_cache[i].height = 0;
+    }
+}
+
+SDL_Texture* find_texture_in_cache(DFont* font, const char* text, Color color, int* width, int* height) {
+    if (!font || !text) return NULL;
+    
+    Uint32 current_time = SDL_GetTicks();
+    
+    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+        if (texture_cache[i].texture &&
+            texture_cache[i].font == font &&
+            texture_cache[i].color.r == color.r &&
+            texture_cache[i].color.g == color.g &&
+            texture_cache[i].color.b == color.b &&
+            texture_cache[i].color.a == color.a &&
+            strcmp(texture_cache[i].text, text) == 0) {
+            texture_cache[i].last_used = current_time;
+            if (width) *width = texture_cache[i].width;
+            if (height) *height = texture_cache[i].height;
+            return texture_cache[i].texture;
+        }
+    }
+    return NULL;
+}
+
+void add_texture_to_cache(DFont* font, const char* text, Color color, SDL_Texture* texture, int width, int height) {
+    if (!font || !text || !texture) return;
+    
+    Uint32 current_time = SDL_GetTicks();
+    int cache_index = -1;
+    Uint32 oldest_time = current_time;
+    
+    // 首先查找空闲位置
+    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+        if (!texture_cache[i].texture) {
+            cache_index = i;
+            break;
+        }
+    }
+    
+    // 如果没有空闲位置，查找最久未使用的位置
+    if (cache_index == -1) {
+        for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+            if (texture_cache[i].last_used < oldest_time) {
+                oldest_time = texture_cache[i].last_used;
+                cache_index = i;
+            }
+        }
+    }
+    
+    // 替换缓存项
+    if (cache_index != -1) {
+        if (texture_cache[cache_index].texture) {
+            SDL_DestroyTexture(texture_cache[cache_index].texture);
+        }
+        
+        texture_cache[cache_index].font = font;
+        strncpy(texture_cache[cache_index].text, text, sizeof(texture_cache[cache_index].text) - 1);
+        texture_cache[cache_index].text[sizeof(texture_cache[cache_index].text) - 1] = '\0';
+        texture_cache[cache_index].color = color;
+        texture_cache[cache_index].texture = texture;
+        texture_cache[cache_index].width = width;
+        texture_cache[cache_index].height = height;
+        texture_cache[cache_index].last_used = current_time;
+    }
+}
 
 // ====================== 字体缓存管理 ======================
 void init_font_cache() {
@@ -145,6 +297,9 @@ typedef struct {
 #define MAX_TOUCHES 10
 TouchState touchState = {0};
 
+
+void backend_main_loop();
+
 // 检查是否Retina显示屏并获取缩放因子
 float getDisplayScale(SDL_Window* window) {
     int renderW, renderH;
@@ -165,41 +320,58 @@ void cleanup_corner_texture_cache();
 int backend_init(){
     // 初始化SDL
     SDL_Init(SDL_INIT_VIDEO);
-    
 
-    
+
     // 设置渲染质量为最佳（抗锯齿）
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 
-    // Windows：默认“点击激活窗口”会吞掉首次点击，导致控件第一次点不中（拿不到焦点）
+    // Windows：默认"点击激活窗口"会吞掉首次点击，导致控件第一次点不中（拿不到焦点）
     // 开启 click-through 让首次点击也能送达应用侧
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+
+    // Windows: 强制使用 OpenGL 渲染器以避免 Direct3D 的颜色问题
+    #ifdef _WIN32
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    printf("Windows detected: Forcing OpenGL renderer to avoid Direct3D color issues\n");
+    #endif
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten: 禁用帧率控制，由主循环管理
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_ASYNCIFY, "0");
+#endif
+
+    // Emscripten 环境下，不需要 SDL_WINDOW_OPENGL 标志
+    Uint32 window_flags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
+#ifndef __EMSCRIPTEN__
+    window_flags |= SDL_WINDOW_OPENGL;
+#endif
     
     window = SDL_CreateWindow("YUI",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
-                                        800, 600, SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN);
+                                        800, 600, window_flags);
 
-    // 尝试创建渲染器，优先使用硬件加速和垂直同步
-    Uint32 renderer_flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
-    renderer = SDL_CreateRenderer(window, -1, renderer_flags);
+#ifdef __EMSCRIPTEN__
+    // Emscripten 环境下不使用 PRESENTVSYNC，因为主循环控制帧率
+    printf("Emscripten: Creating renderer without PRESENTVSYNC\n");
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+#else
+    // 桌面环境下尝试使用垂直同步
+    printf("Desktop: Creating renderer with PRESENTVSYNC\n");
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#endif
 
     if (!renderer) {
-        // 如果同时支持加速和垂直同步失败，尝试只使用硬件加速
-        printf("Warning: Failed to create renderer with ACCELERATED | PRESENTVSYNC: %s\n", SDL_GetError());
-        printf("Retrying with ACCELERATED only...\n");
+        // 如果创建失败，重试不带任何标志
+        printf("Warning: Failed to create renderer: %s\n", SDL_GetError());
+        printf("Retrying with software renderer...\n");
 
-        renderer_flags = SDL_RENDERER_ACCELERATED;
-        renderer = SDL_CreateRenderer(window, -1, renderer_flags);
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
 
-        if (!renderer) {
-            // 如果硬件加速也失败，使用软件渲染器
-            printf("Warning: Failed to create hardware accelerated renderer: %s\n", SDL_GetError());
-            printf("Falling back to software renderer...\n");
-
-            renderer_flags = SDL_RENDERER_SOFTWARE;
-            renderer = SDL_CreateRenderer(window, -1, renderer_flags);
-        }
+    // 如果成功创建渲染器，禁用交换间隔（仅对某些平台有效）
+    if (renderer) {
+        SDL_GL_SetSwapInterval(0);
     }
 
     if (!renderer) {
@@ -234,6 +406,14 @@ int backend_init(){
         } else {
             printf("  Vertical Sync: Disabled (not supported)\n");
         }
+        
+        // 打印支持的纹理格式
+        printf("  Supported texture formats (%d): ", renderer_info.num_texture_formats);
+        for (int i = 0; i < renderer_info.num_texture_formats; i++) {
+            Uint32 format = renderer_info.texture_formats[i];
+            printf("%s ", SDL_GetPixelFormatName(format));
+        }
+        printf("\n");
     }
     
     // 启用透明度混合
@@ -546,6 +726,17 @@ void backend_render_text_copy(Texture * texture,
 }
 
 void backend_render_text_destroy(Texture * texture){
+    // 检查纹理是否在缓存中，如果在缓存中则不销毁
+    if (!texture) return;
+    
+    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+        if (texture_cache[i].texture == texture) {
+            // 纹理在缓存中，不销毁
+            return;
+        }
+    }
+    
+    // 不在缓存中，正常销毁
     SDL_DestroyTexture(texture);
 }
 
@@ -564,6 +755,9 @@ void backend_quit(){
       
       // 清理字体缓存
       cleanup_font_cache();
+      
+      // 清理纹理缓存
+      cleanup_texture_cache();
       
       // 清理资源
     IMG_Quit();
@@ -595,7 +789,20 @@ void backend_run(Layer* ui_root){
     printf("=== Layer Information ===\n");
     print_layer_info(ui_root, 0);
     printf("========================\n");
-    
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten 环境下使用 emscripten 主循环
+    g_ui_root = ui_root;
+    g_running = 1;
+    printf("Emscripten: Starting main loop...\n");
+
+    // 设置主循环时序，避免渲染器创建时的冲突
+    emscripten_set_main_loop_timing(0, 60);
+
+    // 启动主循环
+    emscripten_set_main_loop(backend_main_loop, 0, 1);
+#else
+    // 桌面环境使用普通循环
     // 主循环
     SDL_Event event;
     int running = 1;
@@ -624,6 +831,8 @@ void backend_run(Layer* ui_root){
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
     }
+#endif
+
 }
 
 DFont* backend_load_font(char* font_path,int size){
@@ -635,16 +844,191 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
     if (!font_cache_initialized) {
         init_font_cache();
     }
-    
+
     // 先在缓存中查找字体
     TTF_Font* cached_font = find_font_in_cache(font_path, size, weight);
     if (cached_font) {
         return cached_font;
     }
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten 环境下，检查文件是否存在并打印文件系统信息
+    printf("=== Emscripten Font Debug ===\n");
+    printf("Requested font path: %s\n", font_path);
+
+    // 检查 TTF 是否已初始化
+    static int ttf_initialized = -1;
+    if (ttf_initialized == -1) {
+        // 检查 SDL_TTF 是否已初始化
+        ttf_initialized = TTF_WasInit();
+        printf("TTF_WasInit: %d\n", ttf_initialized);
+        
+        // 如果没有初始化，尝试初始化
+        if (ttf_initialized == 0) {
+            printf("SDL_TTF not initialized, attempting to initialize...\n");
+            if (TTF_Init() == -1) {
+                printf("TTF_Init failed: %s\n", TTF_GetError());
+            } else {
+                printf("TTF_Init succeeded\n");
+                ttf_initialized = TTF_WasInit();
+                printf("TTF_WasInit after init: %d\n", ttf_initialized);
+            }
+        }
+    }
     
+    if (ttf_initialized == 0) {
+        printf("Error: SDL_TTF not initialized!\n");
+        printf("=== End Debug ===\n");
+        return NULL;
+    }
+
+    // 检查文件是否存在
+    FILE* test_file = fopen(font_path, "rb");
+    if (test_file) {
+        printf("Font file EXISTS: %s\n", font_path);
+        fseek(test_file, 0, SEEK_END);
+        long file_size = ftell(test_file);
+        printf("Font file size: %ld bytes\n", file_size);
+        fclose(test_file);
+    } else {
+        printf("Font file NOT found: %s\n", font_path);
+    }
+
+    // 列出一些可能的位置并检查文件大小
+    const char* test_paths[] = {
+        "Roboto-Regular.ttf",
+        "assets/Roboto-Regular.ttf",
+        "app/assets/Roboto-Regular.ttf",
+        "app/assets/",
+        "app/assets/Roboto-Bold.ttf",
+        "app/assets/Roboto-Light.ttf",
+        NULL
+    };
+
+    for (int i = 0; test_paths[i]; i++) {
+        FILE* f = fopen(test_paths[i], "rb");
+        if (f) {
+            printf("Found path: %s\n", test_paths[i]);
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            printf("  Size: %ld bytes\n", sz);
+            fclose(f);
+        }
+    }
+    
+    // 显示 TTF 错误信息
+    printf("TTF Error: %s\n", TTF_GetError());
+    printf("=== End Debug ===\n");
+#endif
+
     char full_path[MAX_PATH];
     TTF_Font* default_font = NULL;
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten 环境下，需要读取文件内容到内存，然后使用 TTF_OpenFontRW
+    // 因为 SDL_TTF 无法直接访问预加载的虚拟文件系统
     
+    const char* font_filename = NULL;
+    
+    // 根据字体粗细选择字体文件路径
+    if (strcmp(weight, "bold") == 0) {
+        snprintf(full_path, sizeof(full_path), "%s", font_path);
+        if (strstr(font_path, "Bold") == NULL && strstr(font_path, "bold") == NULL) {
+            char* ext = strrchr(font_path, '.');
+            if (ext) {
+                int base_len = ext - font_path;
+                snprintf(full_path, sizeof(full_path), "%.*s-Bold%s", base_len, font_path, ext);
+            }
+        }
+        font_filename = full_path;
+    } else if (strcmp(weight, "light") == 0) {
+        snprintf(full_path, sizeof(full_path), "%s", font_path);
+        if (strstr(font_path, "Light") == NULL && strstr(font_path, "light") == NULL) {
+            char* ext = strrchr(font_path, '.');
+            if (ext) {
+                int base_len = ext - font_path;
+                snprintf(full_path, sizeof(full_path), "%.*s-Light%s", base_len, font_path, ext);
+            }
+        }
+        font_filename = full_path;
+    } else {
+        font_filename = font_path;
+    }
+    
+    // 尝试的字体路径列表
+    const char* font_paths_to_try[] = {
+        font_filename,
+        "app/assets/Roboto-Regular.ttf",
+        "app/assets/Roboto-Bold.ttf",
+        "app/assets/Roboto-Light.ttf",
+        NULL
+    };
+    
+    // 根据权重过滤路径
+    const char* actual_paths[10];
+    int path_count = 0;
+    
+    for (int i = 0; font_paths_to_try[i] && path_count < 10; i++) {
+        const char* path = font_paths_to_try[i];
+        int include = 0;
+        
+        if (strcmp(weight, "bold") == 0) {
+            include = (strstr(path, "Bold") != NULL || strstr(path, "bold") != NULL);
+        } else if (strcmp(weight, "light") == 0) {
+            include = (strstr(path, "Light") != NULL || strstr(path, "light") != NULL);
+        } else {
+            include = (strstr(path, "Regular") != NULL || path == font_filename);
+        }
+        
+        if (include) {
+            actual_paths[path_count++] = path;
+        }
+    }
+    
+    // 尝试加载字体
+    for (int i = 0; i < path_count && !default_font; i++) {
+        const char* path = actual_paths[i];
+        
+        // 读取文件内容到内存
+        FILE* f = fopen(path, "rb");
+        if (!f) continue;
+        
+        // 获取文件大小
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        
+        if (file_size > 0) {
+            // 分配内存并读取文件
+            unsigned char* font_data = (unsigned char*)malloc(file_size);
+            if (font_data) {
+                size_t bytes_read = fread(font_data, 1, file_size, f);
+                if (bytes_read == (size_t)file_size) {
+                    // 使用 SDL_RWFromConstMem,这个更安全
+                    SDL_RWops* rw = SDL_RWFromConstMem(font_data, (int)file_size);
+                    if (rw) {
+                        // 第二个参数为1,让 TTF_OpenFontRW 自动关闭 rw
+                        // 但这不会 free font_data,因为 SDL_RWFromConstMem 不拥有内存
+                        default_font = TTF_OpenFontRW(rw, 1, size*scale);
+                        if (default_font) {
+                            printf("Emscripten: Successfully loaded font from: %s (size: %ld bytes)\n",
+                                   path, file_size);
+                        }
+                    }
+                }
+                free(font_data);
+            }
+        }
+        fclose(f);
+    }
+    
+    if (!default_font) {
+        printf("Warning: Could not load font '%s' (weight: %s) in Emscripten environment\n", 
+               font_path, weight);
+        printf("  Error: %s\n", TTF_GetError());
+    }
+#else
+    // 非 Emscripten 环境，使用普通的 TTF_OpenFont
     // 根据字体粗细选择字体文件
     if (strcmp(weight, "bold") == 0) {
         // 尝试加载粗体字体
@@ -658,7 +1042,7 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
             }
         }
         default_font = TTF_OpenFont(full_path, size*scale);
-        
+
         // 如果粗体字体不存在，尝试其他粗体字体
         if (!default_font) {
             default_font = TTF_OpenFont("assets/Roboto-Bold.ttf", size*scale);
@@ -684,7 +1068,7 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
             }
         }
         default_font = TTF_OpenFont(full_path, size*scale);
-        
+
         if (!default_font) {
             default_font = TTF_OpenFont("assets/Roboto-Light.ttf", size*scale);
         }
@@ -701,11 +1085,13 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
         // normal或其他情况，使用普通字体
         default_font = TTF_OpenFont(font_path,size*scale);
     }
-    
-    // 如果指定的字体加载失败，尝试备用字体
+#endif
+
+    // 如果指定的字体加载失败，尝试备用字体 (仅在非 Emscripten 环境下)
     if (!default_font) {
+#ifndef __EMSCRIPTEN__
         printf("Warning: Could not load font '%s', trying fallback fonts\n", font_path);
-        // 尝试加载其他西文字体
+        // 非 Emscripten 环境下的备用字体
         default_font = TTF_OpenFont("arial.ttf",size*scale);
         if (!default_font) {
             default_font = TTF_OpenFont("Arial.ttf",size*scale);
@@ -716,6 +1102,10 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
         if (!default_font) {
             default_font = TTF_OpenFont("app/assets/Roboto-Regular.ttf",size*scale);
         }
+#else
+        // Emscripten 环境的备用字体已经在上面的 SDL_RWops 代码中处理了
+        printf("Warning: Could not load font '%s' (weight: %s) in Emscripten environment\n", font_path, weight);
+#endif
     }
     
     if (default_font) {
@@ -809,17 +1199,36 @@ Texture* backend_render_texture(DFont* font,const char* text,Color color){
         return NULL;
     }
     
-     SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
+    // 初始化纹理缓存
+    if (!texture_cache_initialized) {
+        init_texture_cache();
+    }
+    
+    // 尝试从缓存中查找
+    int cached_width, cached_height;
+    SDL_Texture* cached_texture = find_texture_in_cache(font, text, color, &cached_width, &cached_height);
+    if (cached_texture) {
+        return cached_texture;
+    }
+    
+    // 缓存未命中，创建新纹理
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
     if (!surface) {
         printf("error: TTF_RenderUTF8_Blended failed for text '%s': %s\n", text, TTF_GetError());
         return NULL;
     }
     
-    
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeBest);
 
     SDL_FreeSurface(surface);
+
+    // 将纹理添加到缓存
+    if (texture) {
+        int width, height;
+        SDL_QueryTexture(texture, NULL, NULL, &width, &height);
+        add_texture_to_cache(font, text, color, texture, width, height);
+    }
 
     return texture;
 }
@@ -985,10 +1394,24 @@ static SDL_Texture* get_corner_texture(SDL_Renderer* renderer, int radius, SDL_C
         }
     }
     
-    // 创建新的圆角纹理 - 使用RGBA格式
+    // 获取渲染器信息以确定像素格式
+    Uint32 pixel_format = SDL_PIXELFORMAT_RGBA8888;
+    SDL_RendererInfo renderer_info;
+    if (SDL_GetRendererInfo(renderer, &renderer_info) == 0 && renderer_info.num_texture_formats > 0) {
+        pixel_format = renderer_info.texture_formats[0];
+    }
+    
+    // printf("DEBUG: Creating corner texture with format %s\n", SDL_GetPixelFormatName(pixel_format));
+    
+    // 创建新的圆角纹理 - 使用渲染器支持的格式
     int size = radius + 2;
-    SDL_Surface* surface = SDL_CreateRGBSurface(0, size, size, 32, 0xFF000000, 0x00FF0000, 0x0000FF00, 0x000000FF);
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, size, size, 32, pixel_format);
     if (!surface) return NULL;
+    
+    // 获取表面格式信息
+    Uint32 rmask, gmask, bmask, amask;
+    int bpp;
+    SDL_PixelFormatEnumToMasks(pixel_format, &bpp, &rmask, &gmask, &bmask, &amask);
     
     // 绘制抗锯齿圆角到surface
     Uint32* pixels = (Uint32*)surface->pixels;
@@ -1012,8 +1435,16 @@ static SDL_Texture* get_corner_texture(SDL_Renderer* renderer, int radius, SDL_C
             
             if (alpha > 0.01f) {
                 Uint8 a = (Uint8)(alpha * color.a);
-                // SDL像素格式: 0xRRGGBBAA (RGBA格式，与Surface匹配)
-                pixels[y * pitch + x] = (color.r << 24) | (color.g << 16) | (color.b << 8) | a;
+                // 根据像素格式设置颜色值
+                Uint32 pixel = 0;
+                if (pixel_format == SDL_PIXELFORMAT_ARGB8888) {
+                    // ARGB格式: AARRGGBB
+                    pixel = (a << 24) | (color.r << 16) | (color.g << 8) | color.b;
+                } else {
+                    // 默认RGBA格式: RRGGBBAA
+                    pixel = (color.r << 24) | (color.g << 16) | (color.b << 8) | a;
+                }
+                pixels[y * pitch + x] = pixel;
             } else {
                 pixels[y * pitch + x] = 0; // 完全透明
             }
@@ -1224,6 +1655,89 @@ void backend_render_line(int x1, int y1, int x2, int y2, Color color) {
     }
 }
 
+// 绘制抗锯齿圆弧（逐像素渲染，无锯齿）
+// center_x, center_y: 圆心坐标
+// radius: 圆弧半径（到弧线中心的距离）
+// start_angle, end_angle: 起止角度（度数，0度在顶部，顺时针）
+// color: 颜色
+// line_width: 弧线宽度
+void backend_render_arc(int center_x, int center_y, int radius, float start_angle, float end_angle, Color color, int line_width) {
+    if (radius <= 0 || line_width <= 0) return;
+    
+    float half_w = line_width / 2.0f;
+    float r_inner = radius - half_w;
+    float r_outer = radius + half_w;
+    if (r_inner < 0) r_inner = 0;
+    
+    // 将角度转换为弧度（0度在顶部，顺时针）
+    float start_rad = (start_angle - 90.0f) * M_PI / 180.0f;
+    float end_rad = (end_angle - 90.0f) * M_PI / 180.0f;
+    
+    // 确保 end > start
+    while (end_rad < start_rad) {
+        end_rad += 2.0f * M_PI;
+    }
+    
+    // 遍历圆弧的边界框
+    int extent = (int)(r_outer + 2);
+    int min_x = center_x - extent;
+    int min_y = center_y - extent;
+    int max_x = center_x + extent;
+    int max_y = center_y + extent;
+    
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    
+    for (int py = min_y; py <= max_y; py++) {
+        for (int px = min_x; px <= max_x; px++) {
+            float dx = px - center_x + 0.5f;
+            float dy = py - center_y + 0.5f;
+            float dist = sqrtf(dx * dx + dy * dy);
+            
+            // 快速跳过：距离太远或太近
+            if (dist < r_inner - 1.0f || dist > r_outer + 1.0f) continue;
+            
+            // 检查角度是否在弧线范围内
+            float angle = atan2f(dy, dx);
+            
+            // 归一化角度到 [start_rad, start_rad + 2π) 范围
+            while (angle < start_rad) angle += 2.0f * M_PI;
+            while (angle > start_rad + 2.0f * M_PI) angle -= 2.0f * M_PI;
+            
+            // 角度边缘的抗锯齿（约1像素的平滑过渡）
+            float angle_aa = 1.0f;
+            float pixel_angle = 1.0f / (dist > 0 ? dist : 1.0f); // 1像素对应的角度
+            
+            if (angle < start_rad + pixel_angle) {
+                angle_aa = (angle - start_rad) / pixel_angle;
+            } else if (angle > end_rad - pixel_angle) {
+                angle_aa = (end_rad - angle) / pixel_angle;
+            } else if (angle > end_rad) {
+                continue; // 完全超出角度范围
+            }
+            if (angle_aa <= 0.0f) continue;
+            if (angle_aa > 1.0f) angle_aa = 1.0f;
+            
+            // 径向抗锯齿：根据像素到弧线内外边缘的距离计算alpha
+            float radial_aa = 1.0f;
+            if (dist < r_inner) {
+                radial_aa = 1.0f - (r_inner - dist); // 内边缘平滑
+            } else if (dist > r_outer) {
+                radial_aa = 1.0f - (dist - r_outer); // 外边缘平滑
+            }
+            if (radial_aa <= 0.0f) continue;
+            if (radial_aa > 1.0f) radial_aa = 1.0f;
+            
+            // 组合alpha
+            float final_alpha = angle_aa * radial_aa;
+            Uint8 a = (Uint8)(final_alpha * color.a);
+            if (a == 0) continue;
+            
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, a);
+            SDL_RenderDrawPoint(renderer, px, py);
+        }
+    }
+}
+
 // 毛玻璃效果缓存管理函数
 void init_blur_cache() {
     if (blur_cache_initialized) return;
@@ -1253,7 +1767,7 @@ void cleanup_blur_cache() {
 
 // 查找匹配的缓存条目
 int find_matching_cache_entry(Rect* rect, int blur_radius, float saturation, float brightness) {
-    printf("Searching for matching cache entry...\n");
+    //printf("Searching for matching cache entry...\n");
     for (int i = 0; i < MAX_BLUR_CACHE_ENTRIES; i++) {
         if (blur_cache[i].in_use &&
             blur_cache[i].x == rect->x &&
@@ -1263,7 +1777,7 @@ int find_matching_cache_entry(Rect* rect, int blur_radius, float saturation, flo
             blur_cache[i].blur_radius == blur_radius &&
             blur_cache[i].saturation == saturation &&
             blur_cache[i].brightness == brightness) {
-            printf("Found matching cache entry at index %d\n", i);
+            //printf("Found matching cache entry at index %d\n", i);
             return i;
         }
     }
@@ -1328,9 +1842,18 @@ void backend_render_backdrop_filter(Rect* rect, int blur_radius, float saturatio
     if (blur_radius > 20) blur_radius = 20;
     
     // 创建一个临时纹理来捕获当前屏幕内容
+    // 使用渲染器支持的像素格式（Windows Direct3D需要ARGB8888）
+    Uint32 pixel_format = SDL_PIXELFORMAT_RGBA8888;
+    SDL_RendererInfo renderer_info;
+    if (SDL_GetRendererInfo(renderer, &renderer_info) == 0 && renderer_info.num_texture_formats > 0) {
+        // 使用第一个支持的纹理格式（通常是ARGB8888或RGBA8888）
+        pixel_format = renderer_info.texture_formats[0];
+        printf("DEBUG: Using pixel format %s for blur texture\n", SDL_GetPixelFormatName(pixel_format));
+    }
+    
     SDL_Texture* temp_texture = SDL_CreateTexture(
         renderer, 
-        SDL_PIXELFORMAT_RGBA8888, 
+        pixel_format, 
         SDL_TEXTUREACCESS_TARGET, 
         rect->w, 
         rect->h
@@ -1359,7 +1882,7 @@ void backend_render_backdrop_filter(Rect* rect, int blur_radius, float saturatio
     // 创建模糊纹理（只创建一次）
     SDL_Texture* blur_texture = SDL_CreateTexture(
         renderer, 
-        SDL_PIXELFORMAT_RGBA8888, 
+        pixel_format, 
         SDL_TEXTUREACCESS_TARGET, 
         rect->w, 
         rect->h
@@ -1418,7 +1941,7 @@ void backend_render_backdrop_filter(Rect* rect, int blur_radius, float saturatio
         // 创建一个新的纹理作为缓存副本
         blur_cache[cache_index].texture = SDL_CreateTexture(
             renderer, 
-            SDL_PIXELFORMAT_RGBA8888, 
+            pixel_format, 
             SDL_TEXTUREACCESS_TARGET, 
             rect->w, 
             rect->h
@@ -1463,6 +1986,96 @@ void backend_register_update_callback(UpdateCallback callback) {
 }
 
 // 获取剪贴板文本
+// Base64 解码表
+static const unsigned char base64_decode_table[256] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255, 62,255,255,255, 63,
+     52, 53, 54, 55, 56, 57, 58, 59, 60, 61,255,255,255,255,255,255,
+    255,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
+     15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,255,255,255,255,255,
+    255, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+     41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,255,255,255,255,255
+};
+
+// Base64 解码函数
+static size_t base64_decode(const char* input, unsigned char** output) {
+    if (!input || !output) return 0;
+    
+    size_t input_len = strlen(input);
+    if (input_len == 0) return 0;
+    
+    // 计算输出缓冲区大小
+    size_t output_len = (input_len / 4) * 3;
+    if (input_len > 0 && input[input_len - 1] == '=') output_len--;
+    if (input_len > 1 && input[input_len - 2] == '=') output_len--;
+    
+    // 分配输出缓冲区
+    *output = (unsigned char*)malloc(output_len);
+    if (!*output) return 0;
+    
+    size_t i, j;
+    for (i = 0, j = 0; i < input_len; i += 4) {
+        // 获取4个字符的base64值
+        unsigned char a = base64_decode_table[(unsigned char)input[i]];
+        unsigned char b = base64_decode_table[(unsigned char)input[i + 1]];
+        unsigned char c = base64_decode_table[(unsigned char)input[i + 2]];
+        unsigned char d = base64_decode_table[(unsigned char)input[i + 3]];
+        
+        // 解码为3个字节
+        (*output)[j++] = (a << 2) | (b >> 4);
+        if (j < output_len) (*output)[j++] = (b << 4) | (c >> 2);
+        if (j < output_len) (*output)[j++] = (c << 6) | d;
+    }
+    
+    return output_len;
+}
+
+// 从 base64 数据加载纹理
+Texture* backend_load_texture_from_base64(const char* base64_data, size_t data_len) {
+    if (!base64_data || data_len == 0) {
+        printf("Invalid base64 data\n");
+        return NULL;
+    }
+    
+    // 解码 base64 数据
+    unsigned char* decoded_data = NULL;
+    size_t decoded_len = base64_decode(base64_data, &decoded_data);
+    
+    if (decoded_len == 0 || !decoded_data) {
+        printf("Failed to decode base64 data\n");
+        return NULL;
+    }
+    
+    // 使用 SDL_RWops 从内存加载图片
+    SDL_RWops* rw = SDL_RWFromMem(decoded_data, decoded_len);
+    if (!rw) {
+        printf("Failed to create SDL_RWops: %s\n", SDL_GetError());
+        free(decoded_data);
+        return NULL;
+    }
+    
+    // 加载图片
+    SDL_Surface* surface = IMG_Load_RW(rw, 1);  // 1 表示自动释放 rw
+    free(decoded_data);  // 解码后的数据已经被复制到 surface，可以释放
+    
+    if (!surface) {
+        printf("Failed to load image from base64 data: %s\n", IMG_GetError());
+        return NULL;
+    }
+    
+    // 创建纹理
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    
+    if (!texture) {
+        printf("Failed to create texture from base64 data: %s\n", SDL_GetError());
+        return NULL;
+    }
+    
+    return (Texture*)texture;
+}
+
 char* backend_get_clipboard_text() {
     char* clipboard_text = SDL_GetClipboardText();
     if (!clipboard_text) {

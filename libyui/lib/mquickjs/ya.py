@@ -23,3 +23,5 @@ add_includedirs(
     '../include',
     public = true
 )
+add_includedirs('./mquickjs/')
+add_cflags(' -Wall -DNO_MAIN -g -MMD -D_GNU_SOURCE -fno-math-errno -fno-trapping-math ')

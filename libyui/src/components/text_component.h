@@ -27,6 +27,10 @@ typedef struct {
     Color line_number_bg_color; // 行号背景颜色
     Color selection_color; // 选中背景颜色
     int is_selecting;       // 是否正在选择文本
+    EventHandler on_change; // onChange 回调函数
+    char* change_name;        // 用户数据
+    int cached_line_height; // 缓存的行高（用于性能优化）
+    int line_height_valid;   // 行高缓存是否有效
 } TextComponent;
 
 // 函数声明
@@ -44,12 +48,20 @@ void text_component_set_line_number_width(TextComponent* component, int width);
 void text_component_set_line_number_color(TextComponent* component, Color color);
 void text_component_set_line_number_bg_color(TextComponent* component, Color color);
 void text_component_set_selection_color(TextComponent* component, Color color);
+void text_component_set_on_change(TextComponent* component, EventHandler callback, void* user_data);
 void text_component_handle_key_event(Layer* layer, KeyEvent* event);
 void text_component_handle_mouse_event(Layer* layer, MouseEvent* event);
 void text_component_render(Layer* layer);
 int text_component_get_position_from_point(TextComponent* component, Point pt, Layer* layer);
+void text_component_register_event(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler);
+void text_component_trigger_on_change(TextComponent* component);
+void text_component_update_scroll_for_cursor(TextComponent* component);
 
+// 通用属性获取函数
+cJSON* text_component_get_property(Layer* layer, const char* property_name);
 // 辅助函数声明
 int get_line_start(TextComponent* component, int pos);
 int get_line_end(TextComponent* component, int pos);
+int text_component_calculate_content_height(TextComponent* component);
+void text_component_update_content_height(TextComponent* component);
 #endif  // YUI_TEXT_COMPONENT_H
