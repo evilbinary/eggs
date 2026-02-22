@@ -24,6 +24,7 @@ cflags=get_cflags()
 automake("c")
 
 configure(
+        '--target='+compile,
         'CROSS_COMPILE='+compile,
         'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
         '--disable-optimize',
