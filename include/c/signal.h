@@ -57,6 +57,7 @@ extern "C" {
 #define SIGVTALRM		26
 #define SIGXCPU			27
 #define SIGXFSZ			28
+#define SIGWINCH		29
 
 
 #ifndef _HAVE_SIGSET_T
