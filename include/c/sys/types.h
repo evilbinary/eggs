@@ -237,7 +237,18 @@ typedef	unsigned int		u_uint32_t;
 
 typedef unsigned short sa_family_t;
 
+/* fd_set for select() */
+#ifndef FD_SETSIZE
+#define FD_SETSIZE    64
+#endif
 
+#ifndef fd_set_defined
+#define fd_set_defined
+typedef struct {
+  int fd_bitlen;
+  long fd_bits[FD_SETSIZE];
+} fd_set;
+#endif
 
 #endif
 
