@@ -318,9 +318,11 @@ void draw_rounded_rect(SDL_Renderer* renderer, int x, int y, int w, int h, int r
 void cleanup_corner_texture_cache();
 
 int backend_init(){
-    // 初始化SDL
-    SDL_Init(SDL_INIT_VIDEO);
-
+    // 初始化SDL - 与main.c保持一致
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL_Init(SDL_INIT_VIDEO) failed: %s\n", SDL_GetError());
+        return -1;
+    }
 
     // 设置渲染质量为最佳（抗锯齿）
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
@@ -340,44 +342,27 @@ int backend_init(){
     SDL_SetHint(SDL_HINT_EMSCRIPTEN_ASYNCIFY, "0");
 #endif
 
-    // Emscripten 环境下，不需要 SDL_WINDOW_OPENGL 标志
-    Uint32 window_flags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
-#ifndef __EMSCRIPTEN__
-    window_flags |= SDL_WINDOW_OPENGL;
-#endif
+    // 与main.c保持一致，使用简单的flags
+    Uint32 window_flags = 0;
     
     window = SDL_CreateWindow("YUI",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
                                         800, 600, window_flags);
-
-#ifdef __EMSCRIPTEN__
-    // Emscripten 环境下不使用 PRESENTVSYNC，因为主循环控制帧率
-    printf("Emscripten: Creating renderer without PRESENTVSYNC\n");
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-#else
-    // 桌面环境下尝试使用垂直同步
-    printf("Desktop: Creating renderer with PRESENTVSYNC\n");
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-#endif
-
-    if (!renderer) {
-        // 如果创建失败，重试不带任何标志
-        printf("Warning: Failed to create renderer: %s\n", SDL_GetError());
-        printf("Retrying with software renderer...\n");
-
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
-
-    // 如果成功创建渲染器，禁用交换间隔（仅对某些平台有效）
-    if (renderer) {
-        SDL_GL_SetSwapInterval(0);
-    }
-
-    if (!renderer) {
-        printf("Error: Failed to create any renderer: %s\n", SDL_GetError());
+    
+    if (!window) {
+        printf("Failed to create window: %s\n", SDL_GetError());
         return -1;
     }
+
+    // 创建渲染器 - 与main.c保持一致，使用简单的flags
+    renderer = SDL_CreateRenderer(window, -1, 0);
+
+    if (!renderer) {
+        printf("Warning: Failed to create renderer: %s\n", SDL_GetError());
+        return -1;
+    }
+    
 
     // 检查渲染器信息
     SDL_RendererInfo renderer_info;

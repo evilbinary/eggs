@@ -29,22 +29,22 @@
 # -------------------------------
 
 
-build_alias=x86_64-apple-darwin17.7.0
+build_alias=i386-apple-darwin19.6.0
 build_vendor=apple
-build_os=darwin17.7.0
-build=x86_64-apple-darwin17.7.0
-host_alias=x86_64-apple-darwin17.7.0
-host_vendor=apple
-host_os=darwin17.7.0
-host=x86_64-apple-darwin17.7.0
-target_alias=i386-elf
-target_vendor=pc
-target_os=elf
-target=i386-pc-elf
+build_os=darwin19.6.0
+build=i386-apple-darwin19.6.0
+host_alias=arm
+host_vendor=unknown
+host_os=none
+host=arm-unknown-none
+target_alias=arm
+target_vendor=unknown
+target_os=none
+target=arm-unknown-none
 
-program_transform_name = s&^&i386-elf-&
+program_transform_name = s,y,y,
 
-prefix = /Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib
+prefix = /Users/evil/dev/c/YiYiYa/build/versatilepb/armv5/debug/newlib
 exec_prefix = ${prefix}
 
 srcdir = .
@@ -75,7 +75,7 @@ man7dir = $(mandir)/man7
 man8dir = $(mandir)/man8
 man9dir = $(mandir)/man9
 
-INSTALL = /opt/local/bin//ginstall -c
+INSTALL = /usr/local/bin//ginstall -c
 INSTALL_PROGRAM = ${INSTALL}
 INSTALL_SCRIPT = ${INSTALL}
 INSTALL_DATA = ${INSTALL} -m 644
@@ -90,14 +90,14 @@ MAINTAINER_MODE_TRUE = #
 # -------------------------------------------------
 
 # The gcc driver likes to know the arguments it was configured with.
-TOPLEVEL_CONFIGURE_ARGUMENTS=./configure --prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib --target=i386-elf CFLAGS='-g -Wno-error=pointer-sign -DSYSCALL_NO_TLS' --enable-posix --disable-nls
+TOPLEVEL_CONFIGURE_ARGUMENTS=./configure CC=arm-none-eabi-gcc CROSS_COMPILE=arm-none-eabi- --host=arm CFLAGS='-DSYSCALL_NO_TLS -Wno-error=pointer-sign -DSYSCALL_NO_TLS -march=armv5te -mfloat-abi=soft -nostdlib -nostdinc -DVERSATILEPB -DARMV5 -DARM -DDEVFS_MODULE -DSERIAL_MODULE -DI2C_MODULE -DSPI_MODULE -DLOADER_MODULE -DPOSIX_MODULE -DTEST_MODULE -DFAT_MODULE -DGPU_MODULE -DMOUSE_MODULE -DSDHCI_MODULE -DRTC_MODULE -DGPIO_MODULE -DPTY_MODULE -DIPC_MODULE -DMUSL_MODULE -DGAGA_MODULE -DDEBUG_MODULE -DKEYBOARD_MODULE -DLOG_MODULE' --disable-newlib-supplied-syscalls --disable-nls --disable-optimize --enable-debug=yes --disable-thumb --disable-multilib --disable-shared --enable-static=yes --prefix=/Users/evil/dev/c/YiYiYa/build/versatilepb/armv5/debug/newlib
 
-tooldir = ${exec_prefix}/i386-elf
-build_tooldir = ${exec_prefix}/i386-elf
+tooldir = ${exec_prefix}/arm
+build_tooldir = ${exec_prefix}/arm
 
 # This is the name of the environment variable used for the path to
 # the libraries.
-RPATH_ENVVAR = DYLD_LIBRARY_PATH
+RPATH_ENVVAR = LD_LIBRARY_PATH
 
 # On targets where RPATH_ENVVAR is PATH, a subdirectory of the GCC build path
 # is used instead of the directory itself to avoid including built
@@ -105,10 +105,10 @@ RPATH_ENVVAR = DYLD_LIBRARY_PATH
 GCC_SHLIB_SUBDIR = 
 
 # Build programs are put under this directory.
-BUILD_SUBDIR = build-x86_64-apple-darwin17.7.0
+BUILD_SUBDIR = build-i386-apple-darwin19.6.0
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the build system.
-BUILD_CONFIGARGS =  --cache-file=./config.cache '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-build-subdir="$(BUILD_SUBDIR)"
+BUILD_CONFIGARGS =  --cache-file=./config.cache '--disable-newlib-supplied-syscalls' '--disable-nls' '--disable-optimize' '--enable-debug=yes' '--disable-thumb' '--disable-multilib' '--disable-shared' '--enable-static=yes' '--prefix=/Users/evil/dev/c/YiYiYa/build/versatilepb/armv5/debug/newlib' --program-transform-name='s,y,y,' --disable-option-checking --with-build-subdir="$(BUILD_SUBDIR)"
 
 # Linker flags to use on the host, for stage1 or when not
 # bootstrapping.
@@ -168,10 +168,10 @@ EXTRA_BUILD_FLAGS = \
 
 # This is the list of directories to built for the host system.
 SUBDIRS =  etc
-TARGET_CONFIGDIRS = libgloss newlib
+TARGET_CONFIGDIRS = 
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the host system.
-HOST_CONFIGARGS =  --cache-file=./config.cache  --with-system-zlib --with-newlib '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking
+HOST_CONFIGARGS =  --cache-file=./config.cache  --with-system-zlib '--disable-newlib-supplied-syscalls' '--disable-nls' '--disable-optimize' '--enable-debug=yes' '--disable-thumb' '--disable-multilib' '--disable-shared' '--enable-static=yes' '--prefix=/Users/evil/dev/c/YiYiYa/build/versatilepb/armv5/debug/newlib' --program-transform-name='s,y,y,' --disable-option-checking
 # Host programs are put under this directory, which is . except if building
 # with srcdir=..
 HOST_SUBDIR = .
@@ -241,10 +241,10 @@ POSTSTAGE1_HOST_EXPORTS = \
 	HOST_LIBS="$(POSTSTAGE1_LIBS)"; export HOST_LIBS;
 
 # Target libraries are put under this directory:
-TARGET_SUBDIR = i386-elf
+TARGET_SUBDIR = arm
 # This is set by the configure script to the arguments to use when configuring
 # directories built for the target.
-TARGET_CONFIGARGS = --cache-file=./config.cache --with-newlib --enable-multilib --with-cross-host=x86_64-apple-darwin17.7.0   '--prefix=/Users/evil/dev/c/YiYiYa/eggs/libnewlib/lib' '--enable-posix' '--disable-nls' --program-transform-name='s&^&i386-elf-&' --disable-option-checking --with-target-subdir="$(TARGET_SUBDIR)"
+TARGET_CONFIGARGS = --cache-file=./config.cache   '--disable-newlib-supplied-syscalls' '--disable-nls' '--disable-optimize' '--enable-debug=yes' '--disable-thumb' '--disable-multilib' '--disable-shared' '--enable-static=yes' '--prefix=/Users/evil/dev/c/YiYiYa/build/versatilepb/armv5/debug/newlib' --program-transform-name='s,y,y,' --disable-option-checking --with-target-subdir="$(TARGET_SUBDIR)"
 # This is the list of variables to export in the environment when
 # configuring subdirectories for the target system.
 BASE_TARGET_EXPORTS = \
@@ -314,22 +314,22 @@ PWD_COMMAND = $${PWDCMD-pwd}
 
 # compilers to use to create programs which must be run in the build
 # environment.
-AR_FOR_BUILD = $(AR)
-AS_FOR_BUILD = $(AS)
-CC_FOR_BUILD = $(CC)
-CFLAGS_FOR_BUILD = -g -Wno-error=pointer-sign -DSYSCALL_NO_TLS
-CXXFLAGS_FOR_BUILD = -g -O2
-CXX_FOR_BUILD = $(CXX)
-DLLTOOL_FOR_BUILD = $(DLLTOOL)
-GCJ_FOR_BUILD = $(GCJ)
-GFORTRAN_FOR_BUILD = $(GFORTRAN)
-GOC_FOR_BUILD = $(GOC)
+AR_FOR_BUILD = ar
+AS_FOR_BUILD = as
+CC_FOR_BUILD = gcc
+CFLAGS_FOR_BUILD = 
+CXXFLAGS_FOR_BUILD = 
+CXX_FOR_BUILD = g++
+DLLTOOL_FOR_BUILD = dlltool
+GCJ_FOR_BUILD = gcj
+GFORTRAN_FOR_BUILD = gfortran
+GOC_FOR_BUILD = gccgo
 LDFLAGS_FOR_BUILD = 
-LD_FOR_BUILD = $(LD)
-NM_FOR_BUILD = $(NM)
-RANLIB_FOR_BUILD = $(RANLIB)
-WINDMC_FOR_BUILD = $(WINDMC)
-WINDRES_FOR_BUILD = $(WINDRES)
+LD_FOR_BUILD = ld
+NM_FOR_BUILD = nm
+RANLIB_FOR_BUILD = ranlib
+WINDMC_FOR_BUILD = windmc
+WINDRES_FOR_BUILD = windres
 
 # Special variables passed down in EXTRA_GCC_FLAGS.  They are defined
 # here so that they can be overridden by Makefile fragments.
@@ -343,7 +343,7 @@ BOOT_LDFLAGS=
 BOOT_ADAFLAGS= -gnatpg
 
 AWK = gawk
-SED = /opt/local/bin//sed
+SED = /usr/local/bin//gsed
 BISON = bison
 YACC = bison -y
 FLEX = flex
@@ -365,27 +365,27 @@ MAKEINFOFLAGS = --split-size=5000000
 # Programs producing files for the HOST machine
 # ---------------------------------------------
 
-AS = as
-AR = ar 
+AS = arm-as
+AR = arm-ar 
 AR_FLAGS = rc
-CC = gcc
+CC = arm-none-eabi-gcc
 CXX = g++
-DLLTOOL = dlltool
-LD = /Library/Developer/CommandLineTools/usr/bin/ld
-LIPO = lipo
-NM = nm
-OBJCOPY = objcopy
-OBJDUMP = objdump
-RANLIB = ranlib 
-READELF = readelf
-STRIP = strip
-WINDRES = windres
-WINDMC = windmc
+DLLTOOL = arm-dlltool
+LD = /opt/local/lib/gcc/arm-none-eabi/8.3.0/../../../../arm-none-eabi/bin/ld
+LIPO = arm-lipo
+NM = arm-nm
+OBJCOPY = arm-objcopy
+OBJDUMP = arm-objdump
+RANLIB = true 
+READELF = arm-readelf
+STRIP = true
+WINDRES = arm-windres
+WINDMC = arm-windmc
 
 GNATBIND = no
 GNATMAKE = no
 
-CFLAGS = -g -Wno-error=pointer-sign -DSYSCALL_NO_TLS
+CFLAGS = -DSYSCALL_NO_TLS -Wno-error=pointer-sign -DSYSCALL_NO_TLS -march=armv5te -mfloat-abi=soft -nostdlib -nostdinc -DVERSATILEPB -DARMV5 -DARM -DDEVFS_MODULE -DSERIAL_MODULE -DI2C_MODULE -DSPI_MODULE -DLOADER_MODULE -DPOSIX_MODULE -DTEST_MODULE -DFAT_MODULE -DGPU_MODULE -DMOUSE_MODULE -DSDHCI_MODULE -DRTC_MODULE -DGPIO_MODULE -DPTY_MODULE -DIPC_MODULE -DMUSL_MODULE -DGAGA_MODULE -DDEBUG_MODULE -DKEYBOARD_MODULE -DLOG_MODULE
 LDFLAGS = 
 LIBCFLAGS = $(CFLAGS)
 CXXFLAGS = -g -O2
@@ -489,38 +489,38 @@ do-compare3 = $(do-compare)
 # Programs producing files for the TARGET machine
 # -----------------------------------------------
 
-AR_FOR_TARGET=i386-elf-ar
-AS_FOR_TARGET=i386-elf-as
-CC_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-gcc
+AR_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/ar
+AS_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/as
+CC_FOR_TARGET=$(STAGE_CC_WRAPPER) cc
 
 # If GCC_FOR_TARGET is not overriden on the command line, then this
 # variable is passed down to the gcc Makefile, where it is used to
 # build libgcc2.a.  We define it here so that it can itself be
 # overridden on the command line.
-GCC_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-gcc
-CXX_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-c++
-RAW_CXX_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-c++
-GCJ_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-gcj
-GFORTRAN_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-gfortran
-GOC_FOR_TARGET=$(STAGE_CC_WRAPPER) i386-elf-gccgo
-DLLTOOL_FOR_TARGET=i386-elf-dlltool
-LD_FOR_TARGET=i386-elf-ld
+GCC_FOR_TARGET=$(STAGE_CC_WRAPPER) cc
+CXX_FOR_TARGET=$(STAGE_CC_WRAPPER) c++
+RAW_CXX_FOR_TARGET=$(STAGE_CC_WRAPPER) c++
+GCJ_FOR_TARGET=$(STAGE_CC_WRAPPER) gcj
+GFORTRAN_FOR_TARGET=$(STAGE_CC_WRAPPER) gfortran
+GOC_FOR_TARGET=$(STAGE_CC_WRAPPER) gccgo
+DLLTOOL_FOR_TARGET=dlltool
+LD_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/ld
 
-LIPO_FOR_TARGET=i386-elf-lipo
-NM_FOR_TARGET=i386-elf-nm
-OBJDUMP_FOR_TARGET=i386-elf-objdump
-OBJCOPY_FOR_TARGET=i386-elf-objcopy
-RANLIB_FOR_TARGET=i386-elf-ranlib
-READELF_FOR_TARGET=i386-elf-readelf
-STRIP_FOR_TARGET=i386-elf-strip
-WINDRES_FOR_TARGET=i386-elf-windres
-WINDMC_FOR_TARGET=i386-elf-windmc
+LIPO_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/lipo
+NM_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/nm
+OBJDUMP_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/objdump
+OBJCOPY_FOR_TARGET=objcopy
+RANLIB_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/ranlib
+READELF_FOR_TARGET=readelf
+STRIP_FOR_TARGET=/Library/Developer/CommandLineTools/usr/bin/strip
+WINDRES_FOR_TARGET=windres
+WINDMC_FOR_TARGET=windmc
 
 COMPILER_AS_FOR_TARGET=$(AS_FOR_TARGET)
 COMPILER_LD_FOR_TARGET=$(LD_FOR_TARGET)
 COMPILER_NM_FOR_TARGET=$(NM_FOR_TARGET)
 
-CFLAGS_FOR_TARGET = -g -O2
+CFLAGS_FOR_TARGET = -g -O2 -DSYSCALL_NO_TLS -Wno-error=pointer-sign -DSYSCALL_NO_TLS -march=armv5te -mfloat-abi=soft -nostdlib -nostdinc -DVERSATILEPB -DARMV5 -DARM -DDEVFS_MODULE -DSERIAL_MODULE -DI2C_MODULE -DSPI_MODULE -DLOADER_MODULE -DPOSIX_MODULE -DTEST_MODULE -DFAT_MODULE -DGPU_MODULE -DMOUSE_MODULE -DSDHCI_MODULE -DRTC_MODULE -DGPIO_MODULE -DPTY_MODULE -DIPC_MODULE -DMUSL_MODULE -DGAGA_MODULE -DDEBUG_MODULE -DKEYBOARD_MODULE -DLOG_MODULE
 CXXFLAGS_FOR_TARGET = -g -O2
 
 LIBCFLAGS_FOR_TARGET = $(CFLAGS_FOR_TARGET)
@@ -528,7 +528,7 @@ LIBCXXFLAGS_FOR_TARGET = $(CXXFLAGS_FOR_TARGET) -fno-implicit-templates
 LDFLAGS_FOR_TARGET = 
 GOCFLAGS_FOR_TARGET = -O2 -g
 
-FLAGS_FOR_TARGET =  -B$$r/$(TARGET_SUBDIR)/newlib/ -isystem $$r/$(TARGET_SUBDIR)/newlib/targ-include -isystem $$s/newlib/libc/include -B$$r/$(TARGET_SUBDIR)/libgloss/i386 -L$$r/$(TARGET_SUBDIR)/libgloss/libnosys -L$$s/libgloss/i386
+FLAGS_FOR_TARGET = 
 SYSROOT_CFLAGS_FOR_TARGET = 
 DEBUG_PREFIX_CFLAGS_FOR_TARGET = 
 
@@ -543,35 +543,6 @@ XGCC_FLAGS_FOR_TARGET = $(FLAGS_FOR_TARGET) $(SYSROOT_CFLAGS_FOR_TARGET) $(DEBUG
 all:
 
 #### host and target specific makefile fragments come in here.
-# The -mdynamic-no-pic ensures that the compiler executable is built without
-# position-independent-code -- the usual default on Darwin. This fix speeds
-# compiles by 3-5%.  Don't add it if the compiler doesn't also support
-# -mno-dynamic-no-pic to undo it.
-DARWIN_MDYNAMIC_NO_PIC := \
-`case ${host} in i?86-*-darwin* | powerpc-*-darwin*) \
-   $(CC) -S -xc /dev/null -o /dev/null -mno-dynamic-no-pic 2>/dev/null \
-   && echo -mdynamic-no-pic ;; esac`
-DARWIN_GCC_MDYNAMIC_NO_PIC := \
-`case ${host} in i?86-*-darwin* | powerpc-*-darwin*) \
-   $(CC) -S -xc /dev/null -o /dev/null -mno-dynamic-no-pic 2>/dev/null \
-   || echo -mdynamic-no-pic ;; esac`
-
-# ld on Darwin versions >= 10.7 defaults to PIE executables. Disable this for
-# gcc components, since it is incompatible with our pch implementation.
-DARWIN_NO_PIE := `case ${host} in *-*-darwin[1][1-9]*) echo -Wl,-no_pie ;; esac;`
-
-BOOT_CFLAGS += $(DARWIN_MDYNAMIC_NO_PIC)
-BOOT_LDFLAGS += $(DARWIN_NO_PIE)
-
-# Similarly, for cross-compilation.
-STAGE1_CFLAGS += $(DARWIN_MDYNAMIC_NO_PIC)
-STAGE1_LDFLAGS += $(DARWIN_NO_PIE)
-
-# Without -mno-dynamic-no-pic support, add -mdynamic-no-pic just to later
-# stages when we know it is built with gcc.
-STAGE2_CFLAGS += $(DARWIN_GCC_MDYNAMIC_NO_PIC)
-STAGE3_CFLAGS += $(DARWIN_GCC_MDYNAMIC_NO_PIC)
-STAGE4_CFLAGS += $(DARWIN_GCC_MDYNAMIC_NO_PIC)
 ###
 
 # This is the list of directories that may be needed in RPATH_ENVVAR
@@ -8471,42 +8442,6 @@ maybe-maintainer-clean-target-libssp:
 
 .PHONY: configure-target-newlib maybe-configure-target-newlib
 maybe-configure-target-newlib:
-maybe-configure-target-newlib: configure-target-newlib
-configure-target-newlib: 
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	echo "Checking multilib configuration for newlib..."; \
-	$(SHELL) $(srcdir)/mkinstalldirs $(TARGET_SUBDIR)/newlib; \
-	$(CC_FOR_TARGET) --print-multi-lib > $(TARGET_SUBDIR)/newlib/multilib.tmp 2> /dev/null; \
-	if test -r $(TARGET_SUBDIR)/newlib/multilib.out; then \
-	  if cmp -s $(TARGET_SUBDIR)/newlib/multilib.tmp $(TARGET_SUBDIR)/newlib/multilib.out; then \
-	    rm -f $(TARGET_SUBDIR)/newlib/multilib.tmp; \
-	  else \
-	    rm -f $(TARGET_SUBDIR)/newlib/Makefile; \
-	    mv $(TARGET_SUBDIR)/newlib/multilib.tmp $(TARGET_SUBDIR)/newlib/multilib.out; \
-	  fi; \
-	else \
-	  mv $(TARGET_SUBDIR)/newlib/multilib.tmp $(TARGET_SUBDIR)/newlib/multilib.out; \
-	fi; \
-	test ! -f $(TARGET_SUBDIR)/newlib/Makefile || exit 0; \
-	$(SHELL) $(srcdir)/mkinstalldirs $(TARGET_SUBDIR)/newlib; \
-	$(NORMAL_TARGET_EXPORTS)  \
-	echo Configuring in $(TARGET_SUBDIR)/newlib; \
-	cd "$(TARGET_SUBDIR)/newlib" || exit 1; \
-	case $(srcdir) in \
-	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
-	  *) topdir=`echo $(TARGET_SUBDIR)/newlib/ | \
-		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
-	esac; \
-	module_srcdir=newlib; \
-	rm -f no-such-file || : ; \
-	CONFIG_SITE=no-such-file $(SHELL) \
-	  $$s/$$module_srcdir/configure \
-	  --srcdir=$${topdir}/$$module_srcdir \
-	  $(TARGET_CONFIGARGS) --build=${build_alias} --host=${target_alias} \
-	  --target=${target_alias}  \
-	  || exit 1
 
 
 
@@ -8514,16 +8449,6 @@ configure-target-newlib:
 
 .PHONY: all-target-newlib maybe-all-target-newlib
 maybe-all-target-newlib:
-TARGET-target-newlib=all
-maybe-all-target-newlib: all-target-newlib
-all-target-newlib: configure-target-newlib
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS)  \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) $(EXTRA_TARGET_FLAGS)   \
-		$(TARGET-target-newlib))
 
 
 
@@ -8531,355 +8456,53 @@ all-target-newlib: configure-target-newlib
 
 .PHONY: check-target-newlib maybe-check-target-newlib
 maybe-check-target-newlib:
-maybe-check-target-newlib: check-target-newlib
-
-check-target-newlib:
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(TARGET_FLAGS_TO_PASS)   check)
-
 
 .PHONY: install-target-newlib maybe-install-target-newlib
 maybe-install-target-newlib:
-maybe-install-target-newlib: install-target-newlib
-
-install-target-newlib: installdirs
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(TARGET_FLAGS_TO_PASS)  install)
-
 
 .PHONY: install-strip-target-newlib maybe-install-strip-target-newlib
 maybe-install-strip-target-newlib:
-maybe-install-strip-target-newlib: install-strip-target-newlib
-
-install-strip-target-newlib: installdirs
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(TARGET_FLAGS_TO_PASS)  install-strip)
-
 
 # Other targets (info, dvi, pdf, etc.)
 
 .PHONY: maybe-info-target-newlib info-target-newlib
 maybe-info-target-newlib:
-maybe-info-target-newlib: info-target-newlib
-
-info-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing info in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           info) \
-	  || exit 1
-
 
 .PHONY: maybe-dvi-target-newlib dvi-target-newlib
 maybe-dvi-target-newlib:
-maybe-dvi-target-newlib: dvi-target-newlib
-
-dvi-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing dvi in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           dvi) \
-	  || exit 1
-
 
 .PHONY: maybe-pdf-target-newlib pdf-target-newlib
 maybe-pdf-target-newlib:
-maybe-pdf-target-newlib: pdf-target-newlib
-
-pdf-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing pdf in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           pdf) \
-	  || exit 1
-
 
 .PHONY: maybe-html-target-newlib html-target-newlib
 maybe-html-target-newlib:
-maybe-html-target-newlib: html-target-newlib
-
-html-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing html in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           html) \
-	  || exit 1
-
 
 .PHONY: maybe-TAGS-target-newlib TAGS-target-newlib
 maybe-TAGS-target-newlib:
-maybe-TAGS-target-newlib: TAGS-target-newlib
-
-TAGS-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing TAGS in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           TAGS) \
-	  || exit 1
-
 
 .PHONY: maybe-install-info-target-newlib install-info-target-newlib
 maybe-install-info-target-newlib:
-maybe-install-info-target-newlib: install-info-target-newlib
-
-install-info-target-newlib: \
-    configure-target-newlib \
-    info-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-info in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-info) \
-	  || exit 1
-
 
 .PHONY: maybe-install-pdf-target-newlib install-pdf-target-newlib
 maybe-install-pdf-target-newlib:
-maybe-install-pdf-target-newlib: install-pdf-target-newlib
-
-install-pdf-target-newlib: \
-    configure-target-newlib \
-    pdf-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-pdf in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-pdf) \
-	  || exit 1
-
 
 .PHONY: maybe-install-html-target-newlib install-html-target-newlib
 maybe-install-html-target-newlib:
-maybe-install-html-target-newlib: install-html-target-newlib
-
-install-html-target-newlib: \
-    configure-target-newlib \
-    html-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-html in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-html) \
-	  || exit 1
-
 
 .PHONY: maybe-installcheck-target-newlib installcheck-target-newlib
 maybe-installcheck-target-newlib:
-maybe-installcheck-target-newlib: installcheck-target-newlib
-
-installcheck-target-newlib: \
-    configure-target-newlib 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing installcheck in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           installcheck) \
-	  || exit 1
-
 
 .PHONY: maybe-mostlyclean-target-newlib mostlyclean-target-newlib
 maybe-mostlyclean-target-newlib:
-maybe-mostlyclean-target-newlib: mostlyclean-target-newlib
-
-mostlyclean-target-newlib: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing mostlyclean in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           mostlyclean) \
-	  || exit 1
-
 
 .PHONY: maybe-clean-target-newlib clean-target-newlib
 maybe-clean-target-newlib:
-maybe-clean-target-newlib: clean-target-newlib
-
-clean-target-newlib: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing clean in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           clean) \
-	  || exit 1
-
 
 .PHONY: maybe-distclean-target-newlib distclean-target-newlib
 maybe-distclean-target-newlib:
-maybe-distclean-target-newlib: distclean-target-newlib
-
-distclean-target-newlib: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing distclean in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           distclean) \
-	  || exit 1
-
 
 .PHONY: maybe-maintainer-clean-target-newlib maintainer-clean-target-newlib
 maybe-maintainer-clean-target-newlib:
-maybe-maintainer-clean-target-newlib: maintainer-clean-target-newlib
-
-maintainer-clean-target-newlib: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/newlib/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing maintainer-clean in $(TARGET_SUBDIR)/newlib"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/newlib && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           maintainer-clean) \
-	  || exit 1
-
 
 
 
@@ -9507,42 +9130,6 @@ maybe-maintainer-clean-target-winsup:
 
 .PHONY: configure-target-libgloss maybe-configure-target-libgloss
 maybe-configure-target-libgloss:
-maybe-configure-target-libgloss: configure-target-libgloss
-configure-target-libgloss: 
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	echo "Checking multilib configuration for libgloss..."; \
-	$(SHELL) $(srcdir)/mkinstalldirs $(TARGET_SUBDIR)/libgloss; \
-	$(CC_FOR_TARGET) --print-multi-lib > $(TARGET_SUBDIR)/libgloss/multilib.tmp 2> /dev/null; \
-	if test -r $(TARGET_SUBDIR)/libgloss/multilib.out; then \
-	  if cmp -s $(TARGET_SUBDIR)/libgloss/multilib.tmp $(TARGET_SUBDIR)/libgloss/multilib.out; then \
-	    rm -f $(TARGET_SUBDIR)/libgloss/multilib.tmp; \
-	  else \
-	    rm -f $(TARGET_SUBDIR)/libgloss/Makefile; \
-	    mv $(TARGET_SUBDIR)/libgloss/multilib.tmp $(TARGET_SUBDIR)/libgloss/multilib.out; \
-	  fi; \
-	else \
-	  mv $(TARGET_SUBDIR)/libgloss/multilib.tmp $(TARGET_SUBDIR)/libgloss/multilib.out; \
-	fi; \
-	test ! -f $(TARGET_SUBDIR)/libgloss/Makefile || exit 0; \
-	$(SHELL) $(srcdir)/mkinstalldirs $(TARGET_SUBDIR)/libgloss; \
-	$(NORMAL_TARGET_EXPORTS)  \
-	echo Configuring in $(TARGET_SUBDIR)/libgloss; \
-	cd "$(TARGET_SUBDIR)/libgloss" || exit 1; \
-	case $(srcdir) in \
-	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
-	  *) topdir=`echo $(TARGET_SUBDIR)/libgloss/ | \
-		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
-	esac; \
-	module_srcdir=libgloss; \
-	rm -f no-such-file || : ; \
-	CONFIG_SITE=no-such-file $(SHELL) \
-	  $$s/$$module_srcdir/configure \
-	  --srcdir=$${topdir}/$$module_srcdir \
-	  $(TARGET_CONFIGARGS) --build=${build_alias} --host=${target_alias} \
-	  --target=${target_alias}  \
-	  || exit 1
 
 
 
@@ -9550,16 +9137,6 @@ configure-target-libgloss:
 
 .PHONY: all-target-libgloss maybe-all-target-libgloss
 maybe-all-target-libgloss:
-TARGET-target-libgloss=all
-maybe-all-target-libgloss: all-target-libgloss
-all-target-libgloss: configure-target-libgloss
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS)  \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) $(EXTRA_TARGET_FLAGS)   \
-		$(TARGET-target-libgloss))
 
 
 
@@ -9567,350 +9144,53 @@ all-target-libgloss: configure-target-libgloss
 
 .PHONY: check-target-libgloss maybe-check-target-libgloss
 maybe-check-target-libgloss:
-maybe-check-target-libgloss: check-target-libgloss
-
-# Dummy target for uncheckable module.
-check-target-libgloss:
-
 
 .PHONY: install-target-libgloss maybe-install-target-libgloss
 maybe-install-target-libgloss:
-maybe-install-target-libgloss: install-target-libgloss
-
-install-target-libgloss: installdirs
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(TARGET_FLAGS_TO_PASS)  install)
-
 
 .PHONY: install-strip-target-libgloss maybe-install-strip-target-libgloss
 maybe-install-strip-target-libgloss:
-maybe-install-strip-target-libgloss: install-strip-target-libgloss
-
-install-strip-target-libgloss: installdirs
-	@: $(MAKE); $(unstage)
-	@r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(TARGET_FLAGS_TO_PASS)  install-strip)
-
 
 # Other targets (info, dvi, pdf, etc.)
 
 .PHONY: maybe-info-target-libgloss info-target-libgloss
 maybe-info-target-libgloss:
-maybe-info-target-libgloss: info-target-libgloss
-
-info-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing info in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           info) \
-	  || exit 1
-
 
 .PHONY: maybe-dvi-target-libgloss dvi-target-libgloss
 maybe-dvi-target-libgloss:
-maybe-dvi-target-libgloss: dvi-target-libgloss
-
-dvi-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing dvi in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           dvi) \
-	  || exit 1
-
 
 .PHONY: maybe-pdf-target-libgloss pdf-target-libgloss
 maybe-pdf-target-libgloss:
-maybe-pdf-target-libgloss: pdf-target-libgloss
-
-pdf-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing pdf in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           pdf) \
-	  || exit 1
-
 
 .PHONY: maybe-html-target-libgloss html-target-libgloss
 maybe-html-target-libgloss:
-maybe-html-target-libgloss: html-target-libgloss
-
-html-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing html in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           html) \
-	  || exit 1
-
 
 .PHONY: maybe-TAGS-target-libgloss TAGS-target-libgloss
 maybe-TAGS-target-libgloss:
-maybe-TAGS-target-libgloss: TAGS-target-libgloss
-
-TAGS-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing TAGS in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           TAGS) \
-	  || exit 1
-
 
 .PHONY: maybe-install-info-target-libgloss install-info-target-libgloss
 maybe-install-info-target-libgloss:
-maybe-install-info-target-libgloss: install-info-target-libgloss
-
-install-info-target-libgloss: \
-    configure-target-libgloss \
-    info-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-info in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-info) \
-	  || exit 1
-
 
 .PHONY: maybe-install-pdf-target-libgloss install-pdf-target-libgloss
 maybe-install-pdf-target-libgloss:
-maybe-install-pdf-target-libgloss: install-pdf-target-libgloss
-
-install-pdf-target-libgloss: \
-    configure-target-libgloss \
-    pdf-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-pdf in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-pdf) \
-	  || exit 1
-
 
 .PHONY: maybe-install-html-target-libgloss install-html-target-libgloss
 maybe-install-html-target-libgloss:
-maybe-install-html-target-libgloss: install-html-target-libgloss
-
-install-html-target-libgloss: \
-    configure-target-libgloss \
-    html-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing install-html in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           install-html) \
-	  || exit 1
-
 
 .PHONY: maybe-installcheck-target-libgloss installcheck-target-libgloss
 maybe-installcheck-target-libgloss:
-maybe-installcheck-target-libgloss: installcheck-target-libgloss
-
-installcheck-target-libgloss: \
-    configure-target-libgloss 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing installcheck in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           installcheck) \
-	  || exit 1
-
 
 .PHONY: maybe-mostlyclean-target-libgloss mostlyclean-target-libgloss
 maybe-mostlyclean-target-libgloss:
-maybe-mostlyclean-target-libgloss: mostlyclean-target-libgloss
-
-mostlyclean-target-libgloss: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing mostlyclean in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           mostlyclean) \
-	  || exit 1
-
 
 .PHONY: maybe-clean-target-libgloss clean-target-libgloss
 maybe-clean-target-libgloss:
-maybe-clean-target-libgloss: clean-target-libgloss
-
-clean-target-libgloss: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing clean in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           clean) \
-	  || exit 1
-
 
 .PHONY: maybe-distclean-target-libgloss distclean-target-libgloss
 maybe-distclean-target-libgloss:
-maybe-distclean-target-libgloss: distclean-target-libgloss
-
-distclean-target-libgloss: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing distclean in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           distclean) \
-	  || exit 1
-
 
 .PHONY: maybe-maintainer-clean-target-libgloss maintainer-clean-target-libgloss
 maybe-maintainer-clean-target-libgloss:
-maybe-maintainer-clean-target-libgloss: maintainer-clean-target-libgloss
-
-maintainer-clean-target-libgloss: 
-	@: $(MAKE); $(unstage)
-	@[ -f $(TARGET_SUBDIR)/libgloss/Makefile ] || exit 0; \
-	r=`${PWD_COMMAND}`; export r; \
-	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
-	$(NORMAL_TARGET_EXPORTS) \
-	echo "Doing maintainer-clean in $(TARGET_SUBDIR)/libgloss"; \
-	for flag in $(EXTRA_TARGET_FLAGS); do \
-	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
-	done; \
-	(cd $(TARGET_SUBDIR)/libgloss && \
-	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
-	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
-	          "RANLIB=$${RANLIB}" \
-	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
-	           maintainer-clean) \
-	  || exit 1
-
 
 
 

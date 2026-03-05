@@ -2,6 +2,8 @@
 #define _PTHREAD_H
 
 #include "stdint.h"
+#include "sys/types.h"
+#include "time.h"
 
 typedef int32_t pthread_t;
 
@@ -56,5 +58,32 @@ pthread_t pthread_self(void);
 int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param);
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param *param);
 int pthread_setschedprio(pthread_t thread, int prio);
+
+/* Mutex functions */
+int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr);
+int pthread_mutex_destroy(pthread_mutex_t *mutex);
+int pthread_mutex_lock(pthread_mutex_t *mutex);
+int pthread_mutex_trylock(pthread_mutex_t *mutex);
+int pthread_mutex_unlock(pthread_mutex_t *mutex);
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);
+
+/* Condition variable functions */
+typedef int32_t pthread_cond_t;
+typedef int32_t pthread_condattr_t;
+
+int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr);
+int pthread_cond_destroy(pthread_cond_t *cond);
+int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                           const struct timespec *abstime);
+int pthread_cond_signal(pthread_cond_t *cond);
+int pthread_cond_broadcast(pthread_cond_t *cond);
+
+int pthread_condattr_init(pthread_condattr_t *attr);
+int pthread_condattr_destroy(pthread_condattr_t *attr);
 
 #endif

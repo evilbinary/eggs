@@ -20,6 +20,13 @@
 #define JS_VALUE_TO_PTR(v) (void *)((uintptr_t)(v) - 1)
 #define JS_VALUE_FROM_PTR(ptr) (JSWord)((uintptr_t)(ptr) + 1)
 
+/* 
+ * JS_ROM_VALUE: create a tagged pointer to js_stdlib_table[offset].
+ * Using pointer arithmetic first, then cast to integer + add tag.
+ * This form is more likely to be accepted as constant initializer.
+ */
+#define JS_ROM_VALUE(offset) ((JSWord)(js_stdlib_table + (offset)) + 1)
+
 #define JS_IS_ROM_PTR(ctx, ptr) ((uintptr_t)(ptr) < (uintptr_t)ctx || (uintptr_t)(ptr) >= (uintptr_t)ctx->stack_top)
 
 enum {
@@ -53,8 +60,6 @@ typedef enum {
 
 #define JS_MB_HEADER_DEF(tag) ((tag) << 1)
 #define JS_VALUE_ARRAY_HEADER(size) (JS_MB_HEADER_DEF(JS_MTAG_VALUE_ARRAY) | ((size) << JS_MTAG_BITS))
-
-#define JS_ROM_VALUE(offset) JS_VALUE_FROM_PTR(&js_stdlib_table[offset])
 
 /* runtime helpers */
 JSValue js_function_constructor(JSContext *ctx, JSValue *this_val,
