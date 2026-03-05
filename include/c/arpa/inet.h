@@ -2,9 +2,8 @@
 #define ARPA_INET_H
 
 #include <stdint.h>
+#include <netinet/in.h>
 #include "types.h"
-
-typedef uint32_t in_addr_t;
 
 typedef unsigned socklen_t;
 

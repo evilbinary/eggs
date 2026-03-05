@@ -16,6 +16,9 @@
 #define _IOR(a,b,c) _IOC(_IOC_READ,(a),(b),sizeof(c))
 #define _IOWR(a,b,c) _IOC(_IOC_READ|_IOC_WRITE,(a),(b),sizeof(c))
 
+/* Terminal ioctls */
+#define TIOCGWINSZ  0x5413
+
 int ioctl(int fd, int cmd, ...);
 
 

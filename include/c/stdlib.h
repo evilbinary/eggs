@@ -12,6 +12,8 @@
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
 
+#define RAND_MAX 0x7fff
+
 
 typedef struct {
   int quot;
