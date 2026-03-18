@@ -12,6 +12,10 @@
 #include "stdarg.h"
 #include "syscall.h"
 
+// 启用 XWIN 用户态实现
+#define XWIN_USER_IMPL
+#include "xwin_user.h"
+
 #ifdef MIYOO
 #define DB_BUFFER 1
 #define NV12 1
@@ -296,7 +300,12 @@ inline void screen_put_pixel(u32 x, u32 y, u32 c) {
   if (y >= y_max) {
     return;
   }
-  gscreen.buffer[gscreen.width * y + x] = c;
+
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_fill_rect(gscreen.xwin_handle, x, y, 1, 1, c);
+  } else {
+    gscreen.buffer[gscreen.width * y + x] = c;
+  }
 }
 
 // 画点函数
@@ -382,6 +391,10 @@ void screen_draw_hline(i32 y1, i32 y2, i32 x, i32 color) {
   for (i = y1; i < y2; i++) screen_put_pixel(x, i, color);
 }
 void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_draw_line(gscreen.xwin_handle, x1, y1, x2, y2, color);
+    return;
+  }
   int t;
   int xerr = 0, yerr = 0, delta_x, delta_y, distance;
   int incx, incy, row, col;
@@ -426,11 +439,20 @@ void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
 }
 
 void screen_clear_screen(void) {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_clear(gscreen.xwin_handle);
+    return;
+  }
   i32 screen_size, i;
   screen_size = gscreen.width * gscreen.height;
   for (i = 0; i < screen_size; i++) gscreen.buffer[i] = 0;
 }
+
 void screen_fill_rect(i32 x, i32 y, i32 w, i32 h, u32 color) {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_fill_rect(gscreen.xwin_handle, x, y, w, h, color);
+    return;
+  }
   register i32 i;
   for (i = y; i < y + h; i++) screen_draw_vline(x, x + w, i, color);
 }
@@ -542,6 +564,11 @@ void screen_draw_string_with_color(i32 x, i32 y, i8 *str, u32 frcolor,
   x = gscreen.width - 1 - x;
   y = gscreen.height - 1 - y;
 #endif
+
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_draw_text(gscreen.xwin_handle, x, y, str, frcolor);
+    return;
+  }
 
   while ((*str != '\0')) {
     code = *str++;
@@ -655,6 +682,36 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
 }
 
 void screen_init() {
+  screen_init_with_mode(SCREEN_MODE_XWIN);  // 默认使用 xwin 模式
+}
+
+void screen_init_with_mode(screen_mode_t mode) {
+  gscreen.screen_mode = mode;
+
+  if (mode == SCREEN_MODE_XWIN) {
+    // XWIN 模式初始化
+    gscreen.width = 800;
+    gscreen.height = 600;
+    gscreen.bpp = 32;
+    gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+    gscreen.buffer = malloc(gscreen.buffer_length);
+    gscreen.pbuffer = gscreen.buffer;
+    gscreen.cur.x = 0;
+    gscreen.cur.y = 0;
+    gscreen.ASC = SCREEN_ASCII;
+    gscreen.fd = -1;
+
+    // 创建默认窗口
+    gscreen.xwin_handle = xwin_create(100, 100, gscreen.width, gscreen.height, "Screen");
+    xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
+
+    printf("screen init xwin mode %dx%d\n", gscreen.width, gscreen.height);
+    event_init();
+    printf("event init end\n");
+    return;
+  }
+
+  // FB 模式初始化
   int fd = open("/dev/fb", O_RDWR);
   printf("screen init fd:%d\n", fd);
   ioctl(fd, IOC_READ_FRAMBUFFER_INFO, &(gscreen.fb),
@@ -666,6 +723,7 @@ void screen_init() {
   gscreen.height = gscreen.fb.height;
   gscreen.bpp = gscreen.fb.bpp;
   gscreen.fd = fd;
+  gscreen.xwin_handle = 0;
 
 #ifdef DB_BUFFER
   gscreen.buffer_length = gscreen.width * gscreen.height * 8;
@@ -673,7 +731,7 @@ void screen_init() {
 
 #endif
 
-  printf("screen init %dx%d bpp:%d fb count:%d len:%d buffer len:%d\n",
+  printf("screen init fb mode %dx%d bpp:%d fb count:%d len:%d buffer len:%d\n",
          gscreen.width, gscreen.height, gscreen.fb.bpp,
          gscreen.fb.framebuffer_count, gscreen.fb.framebuffer_length,
          gscreen.buffer_length);
@@ -681,9 +739,42 @@ void screen_init() {
   printf("event init end\n");
 }
 
+void screen_set_mode(screen_mode_t mode) {
+  if (gscreen.screen_mode == mode) return;
+
+  // 销毁旧模式的资源
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_destroy(gscreen.xwin_handle);
+    gscreen.xwin_handle = 0;
+  }
+  if (gscreen.buffer && gscreen.screen_mode == SCREEN_MODE_XWIN) {
+    free(gscreen.buffer);
+    gscreen.buffer = NULL;
+  }
+
+  // 重新初始化新模式
+  screen_init_with_mode(mode);
+}
+
+screen_mode_t screen_get_mode(void) {
+  return gscreen.screen_mode;
+}
+
 screen_info_t *screen_info() { return &gscreen; }
 
 void screen_flush() {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN) {
+    // XWIN 模式：将 buffer 内容绘制到窗口
+    if (gscreen.xwin_handle == 0) {
+      printf("xwin handle is null\n");
+      return;
+    }
+    xwin_update(gscreen.xwin_handle);
+    xwin_render();
+    return;
+  }
+
+  // FB 模式
   if (gscreen.fb.framebuffer_count <= 0) {
     printf("init screen has some error,maybe no init first\n");
     return;

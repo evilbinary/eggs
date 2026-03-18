@@ -22,6 +22,12 @@ extern "C" {
 #define CHAR_HEIGHT 16
 #define ASC_NUM 256
 
+// 屏幕模式
+typedef enum {
+  SCREEN_MODE_FB = 0,    // 直接 framebuffer 模式
+  SCREEN_MODE_XWIN = 1   // xwin 窗口模式 (默认)
+} screen_mode_t;
+
 struct screen_point_t {
   i32 x;
   i32 y;
@@ -53,6 +59,8 @@ typedef struct screen_info {
   u8 *ASC;
   int fd;
   framebuffer_info_t fb;
+  screen_mode_t screen_mode;     // 当前模式
+  u32 xwin_handle;               // xwin 模式下的窗口句柄
 } screen_info_t;
 
 
@@ -106,6 +114,11 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
                              i32 dose_use_mask_color);
 
 void screen_flush();
+
+// 模式切换 API
+void screen_set_mode(screen_mode_t mode);
+screen_mode_t screen_get_mode(void);
+void screen_init_with_mode(screen_mode_t mode);
 
 #ifdef __cplusplus
 }

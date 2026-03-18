@@ -34,6 +34,12 @@
 #define HAVE_STDARG_H   1
 #define HAVE_STDDEF_H   1
 
+/* Disable ARM NEON intrinsics */
+#define SDL_DISABLE_ARM_NEON_H 1
+#ifdef __ARM_NEON
+#undef __ARM_NEON
+#endif
+
 /* Most everything except Visual Studio 2008 and earlier has stdint.h now */
 #if defined(_MSC_VER) && (_MSC_VER < 1600)
 /* Here are some reasonable defaults */
@@ -113,11 +119,22 @@ typedef signed short int16_t;
 typedef unsigned short uint16_t;
 typedef signed int int32_t;
 typedef unsigned int uint32_t;
-typedef unsigned int size_t;
 #define _Addr int
 
-typedef unsigned _Addr uintptr_t;
+#if defined(__NEED_size_t) && !defined(__DEFINED_size_t)
+typedef unsigned _Addr size_t;
+#define __DEFINED_size_t
+#endif
 
+#if defined(__NEED_uintptr_t) && !defined(__DEFINED_uintptr_t)
+typedef unsigned _Addr uintptr_t;
+#define __DEFINED_uintptr_t
+#endif
+
+#if defined(__NEED_uint64_t) && !defined(__DEFINED_uint64_t)
+typedef unsigned _Int64 uint64_t;
+#define __DEFINED_uint64_t
+#endif
 
 #define STDC_HEADERS    1
 #define HAVE_CTYPE_H    1

@@ -56,7 +56,9 @@ add_files(
     'src/main/dummy/*.c'
 )
 
-add_cflags(' -D__YIYIYA__ -D__GNUC__')
+add_cflags(' -D__YIYIYA__ -D__GNUC__ ')
+
+add_cflags(' -DSDL_DISABLE_ARM_NEON_H ')
 
 add_includedirs(
 '.',
