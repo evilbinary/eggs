@@ -29,11 +29,12 @@ typedef	int32_t		gid_t;
 typedef	int32_t		pid_t;
 #endif
 
-#ifndef _HAVE_SIZE_T
+#if !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
 #define _HAVE_SIZE_T
 #ifndef size_t
 typedef	uint32_t		size_t;
 #endif
+#define __DEFINED_size_t
 #endif
 
 

@@ -37,10 +37,11 @@ typedef int32_t clock_t;
 typedef int32_t clockid_t;
 #endif
 
-#ifndef _HAVE_SIZE_T
+#if !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
 #define _HAVE_SIZE_T
 // typedef	uint32_t	size_t;
 typedef long unsigned int size_t;
+#define __DEFINED_size_t
 #endif
 
 #ifndef _HAVE_TIME_T

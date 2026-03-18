@@ -98,6 +98,19 @@ static inline long __syscall6(long n, long a, long b, long c, long d, long e, lo
 	__asm_syscall(R7_OPERAND, "0"(r0), "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5));
 }
 
+static inline long __syscall7(long n, long a, long b, long c, long d, long e, long f, long g)
+{
+	register long r7 __ASM____R7__ = n;
+	register long r0 __asm__("r0") = a;
+	register long r1 __asm__("r1") = b;
+	register long r2 __asm__("r2") = c;
+	register long r3 __asm__("r3") = d;
+	register long r4 __asm__("r4") = e;
+	register long r5 __asm__("r5") = f;
+	register long r6 __asm__("r6") = g;
+	__asm_syscall(R7_OPERAND, "0"(r0), "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5), "r"(r6));
+}
+
 #define SYSCALL_FADVISE_6_ARG
 
 #define SYSCALL_IPC_BROKEN_MODE

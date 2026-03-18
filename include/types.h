@@ -91,16 +91,19 @@ typedef unsigned int uint32_t;
 
 #if !defined(_INTPTR_T) && !defined(intptr_t) && !defined(__DEFINED_intptr_t)
 typedef _Addr intptr_t;
+#define __DEFINED_intptr_t
 #endif
 
 #if !defined(_UINTPTR_T) && !defined(uintptr_t) && !defined(__DEFINED_uintptr_t)
 typedef unsigned _Addr uintptr_t;
+#define __DEFINED_uintptr_t
 #endif
 
 #if !defined(_SIZE_T) && !defined(size_t) && !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
 #define _HAVE_SIZE_T
 #define _SIZE_T
 typedef unsigned _Addr size_t;
+#define __DEFINED_size_t
 #endif
 
 

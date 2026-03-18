@@ -155,11 +155,12 @@ typedef	int32_t		pthread_t;
 #endif
 
 
-#ifndef _HAVE_SIZE_T
+#if !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
 #define _HAVE_SIZE_T
 #ifndef size_t
 typedef	uint32_t		size_t;
 #endif
+#define __DEFINED_size_t
 #endif
 
 

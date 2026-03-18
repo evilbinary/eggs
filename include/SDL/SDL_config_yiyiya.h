@@ -44,9 +44,13 @@ typedef unsigned int uint32_t;
 
 #if !defined(_SIZE_T) && !defined(size_t) && !defined(__DEFINED_size_t) && !defined(_HAVE_SIZE_T)
 typedef unsigned _Addr size_t;
+#define __DEFINED_size_t
 #endif
 
-typedef unsigned long uintptr_t;
+#if !defined(_UINTPTR_T) && !defined(uintptr_t) && !defined(__DEFINED_uintptr_t)
+typedef unsigned _Addr uintptr_t;
+#define __DEFINED_uintptr_t
+#endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
 #define SDL_AUDIO_DRIVER_DUMMY	1

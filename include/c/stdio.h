@@ -61,9 +61,10 @@ typedef struct
 
 
 
-#ifndef _HAVE_SIZE_T
+#if !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
 #define _HAVE_SIZE_T
 typedef	long unsigned int	size_t;
+#define __DEFINED_size_t
 #endif
 
 #ifndef _HAVE_OFF_T
