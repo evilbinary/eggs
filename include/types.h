@@ -1,18 +1,29 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#if defined(ARM64) || defined(__aarch64__)
+#define _Addr long
+#define _Int64 long long
+#define _Reg long
+#else
 #define _Addr int
 #define _Int64 long long
 #define _Reg int
+#endif
 
-typedef char i8;
+
+typedef signed char i8;
 typedef unsigned char u8;
 typedef short i16;
 typedef unsigned short u16;
 typedef int i32;
 typedef unsigned int u32;
+
 typedef long long i64;
 typedef unsigned long long u64;
+
+typedef long long illong;
+typedef unsigned long long ullong;
 
 typedef float f32;
 typedef double f64;
@@ -23,7 +34,10 @@ typedef unsigned long ulong;
 #define true 1
 #define false 0
 
+// Avoid NULL conflict with musl and other C libraries
+#ifndef NULL
 #define NULL ((void *)0)
+#endif
 
 #ifdef LIBYC
 #define bool char
@@ -31,36 +45,65 @@ typedef unsigned long ulong;
 #define bool _Bool
 #endif
 
+
+
+// Address-sized integer type: u64 on ARM64, u32 on 32-bit platforms
+#if defined(ARM64) || defined(__aarch64__)
+typedef u64 vaddr_t;
+#else
+typedef u32 vaddr_t;
+#endif
+
 typedef unsigned int u_int;
 
+#if !defined(_INT8_T) && !defined(int8_t)
 typedef signed char int8_t;
+#endif
+
+#if !defined(_INT16_T) && !defined(int16_t)
 typedef signed short int16_t;
+#endif
+
+#if !defined(_INT32_T) && !defined(int32_t)
 typedef signed int int32_t;
-typedef signed _Int64 int64_t;
+#endif
+
+// #if !defined(_INT64_T) && !defined(int64_t)
+// typedef signed long long int64_t;
+// #endif
+
+#if !defined(_UINT8_T) && !defined(uint8_t)
 typedef unsigned char uint8_t;
+#endif
+
+#if !defined(_UINT16_T) && !defined(uint16_t)
 typedef unsigned short uint16_t;
+#endif
+
+#if !defined(_UINT32_T) && !defined(uint32_t)
 typedef unsigned int uint32_t;
-typedef unsigned _Int64 uint64_t;
+#endif
 
-typedef signed _Int64   intmax_t;
+// #if !defined(_UINT64_T) && !defined(uint64_t)
+// typedef unsigned long long uint64_t;
+// #endif
+// typedef signed _Int64   int64_t;
 
-typedef _Addr ssize_t;
-
-
-#ifndef _INTPTR_T
-#define _INTPTR_T
+#if !defined(_INTPTR_T) && !defined(intptr_t) && !defined(__DEFINED_intptr_t)
 typedef _Addr intptr_t;
 #endif
 
-#ifndef _UINTPTR_T
-#define _UINTPTR_T
+#if !defined(_UINTPTR_T) && !defined(uintptr_t) && !defined(__DEFINED_uintptr_t)
 typedef unsigned _Addr uintptr_t;
 #endif
 
-#ifndef _SIZE_T
+#if !defined(_SIZE_T) && !defined(size_t) && !defined(_HAVE_SIZE_T) && !defined(__DEFINED_size_t)
+#define _HAVE_SIZE_T
 #define _SIZE_T
-typedef unsigned size_t;
+typedef unsigned _Addr size_t;
 #endif
+
+
 
 
 struct iovec { void *iov_base; size_t iov_len; };

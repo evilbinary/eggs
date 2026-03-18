@@ -35,10 +35,20 @@ typedef signed short int16_t;
 typedef unsigned short uint16_t;
 typedef signed int int32_t;
 typedef unsigned int uint32_t;
-typedef unsigned int size_t;
-#ifdef uintptr_t
-#undef uintptr_t
-typedef unsigned long uintptr_t;
+
+/* Use musl's size_t and uintptr_t definitions on aarch64 */
+#if defined(__aarch64__) || defined(ARM64)
+#define _Addr long
+#else
+#define _Addr int
+#endif
+
+#if !defined(_SIZE_T) && !defined(size_t) && !defined(__DEFINED_size_t)
+typedef unsigned _Addr size_t;
+#endif
+
+#if !defined(_UINTPTR_T) && !defined(uintptr_t) && !defined(__DEFINED_uintptr_t)
+typedef unsigned _Addr uintptr_t;
 #endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
