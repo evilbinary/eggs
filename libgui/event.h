@@ -40,6 +40,7 @@ typedef struct event_info {
   int is_init;
   int input_fd;
   int joystick_fd;
+  int xwin_mode;
   u32 scan_code;
   u32 joystick_code;
   u32 key_map_type;
@@ -47,6 +48,9 @@ typedef struct event_info {
 
 int event_init();
 int event_poll(event_t* event);
+int event_read_mouse(mouse_data_t* mouse_data);
+int event_read_key(u32* key);
+int event_read_joystick(u32* key);
 
 
 #endif

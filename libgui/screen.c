@@ -301,11 +301,7 @@ inline void screen_put_pixel(u32 x, u32 y, u32 c) {
     return;
   }
 
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
-    xwin_fill_rect(gscreen.xwin_handle, x, y, 1, 1, c);
-  } else {
-    gscreen.buffer[gscreen.width * y + x] = c;
-  }
+  gscreen.buffer[gscreen.width * y + x] = c;
 }
 
 // 画点函数
@@ -391,10 +387,6 @@ void screen_draw_hline(i32 y1, i32 y2, i32 x, i32 color) {
   for (i = y1; i < y2; i++) screen_put_pixel(x, i, color);
 }
 void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
-    xwin_draw_line(gscreen.xwin_handle, x1, y1, x2, y2, color);
-    return;
-  }
   int t;
   int xerr = 0, yerr = 0, delta_x, delta_y, distance;
   int incx, incy, row, col;
@@ -439,20 +431,12 @@ void screen_draw_line(u32 x1, u32 y1, u32 x2, u32 y2, u32 color) {
 }
 
 void screen_clear_screen(void) {
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
-    xwin_clear(gscreen.xwin_handle);
-    return;
-  }
   i32 screen_size, i;
   screen_size = gscreen.width * gscreen.height;
   for (i = 0; i < screen_size; i++) gscreen.buffer[i] = 0;
 }
 
 void screen_fill_rect(i32 x, i32 y, i32 w, i32 h, u32 color) {
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
-    xwin_fill_rect(gscreen.xwin_handle, x, y, w, h, color);
-    return;
-  }
   register i32 i;
   for (i = y; i < y + h; i++) screen_draw_vline(x, x + w, i, color);
 }
@@ -564,11 +548,6 @@ void screen_draw_string_with_color(i32 x, i32 y, i8 *str, u32 frcolor,
   x = gscreen.width - 1 - x;
   y = gscreen.height - 1 - y;
 #endif
-
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
-    xwin_draw_text(gscreen.xwin_handle, x, y, str, frcolor);
-    return;
-  }
 
   while ((*str != '\0')) {
     code = *str++;
@@ -702,7 +681,7 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.fd = -1;
 
     // 创建默认窗口
-    gscreen.xwin_handle = xwin_create(100, 100, gscreen.width, gscreen.height, "Screen");
+    gscreen.xwin_handle = xwin_create(0, 0, gscreen.width, gscreen.height, "Screen");
     xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
 
     printf("screen init xwin mode %dx%d\n", gscreen.width, gscreen.height);

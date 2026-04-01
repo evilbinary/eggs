@@ -12,7 +12,8 @@ add_deps("jpeg","png","algorithm")
 
 add_files(
     'screen.c',
-    'event.c'
+    'event.c',
+    'xwin_user.c'
 )
 
 add_includedirs(

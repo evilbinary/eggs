@@ -32,58 +32,24 @@
 
 int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * format, void ** pixels, int *pitch)
 {
-    printf("SDL_DUMMY_CreateWindowFramebuffer\n");
-    SDL_Surface *surface=NULL;
     const Uint32 surface_format = SDL_PIXELFORMAT_ARGB8888;
-    int w, h;
-    int bpp;
-    Uint32 Rmask, Gmask, Bmask, Amask;
-
-
     screen_info_t* screen = screen_info();
+    if (!screen || !screen->buffer) {
+        return SDL_SetError("libgui screen buffer is not initialized");
+    }
+
     *format = surface_format;
-    *pixels = screen->fb.frambuffer;
-    // window->w=screen->width;
-    // window->h=screen->height;
+    *pixels = screen->buffer;
     *pitch = (((screen->width * SDL_BYTESPERPIXEL(*format)) + 3) & ~3);
-
-    // /* Free the old framebuffer surface */
-    // surface = (SDL_Surface *) SDL_GetWindowData(window, DUMMY_SURFACE);
-    // SDL_FreeSurface(surface);
-
-    // /* Create a new one */
-    // SDL_PixelFormatEnumToMasks(surface_format, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-    // SDL_GetWindowSize(window, &w, &h);
-    // surface = SDL_CreateRGBSurface(0, w, h, bpp, Rmask, Gmask, Bmask, Amask);
-    // if (!surface) {
-    //     return -1;
-    // }
-
-    /* Save the info and return! */
-    SDL_SetWindowData(window, DUMMY_SURFACE, surface);
-    // *format = surface_format;
-    // *pixels = surface->pixels;
-    // *pitch = surface->pitch;
+    SDL_SetWindowData(window, DUMMY_SURFACE, (void *) 1);
     return 0;
 }
 
 int SDL_DUMMY_UpdateWindowFramebuffer(_THIS, SDL_Window * window, const SDL_Rect * rects, int numrects)
 {
 
-    static int frame_number;
-    SDL_Surface *surface;
-
-    surface = (SDL_Surface *) SDL_GetWindowData(window, DUMMY_SURFACE);
-    if (!surface) {
-        return SDL_SetError("Couldn't find dummy surface for window");
-    }
-
-    /* Send the data to the display */
-    if (SDL_getenv("SDL_VIDEO_DUMMY_SAVE_FRAMES")) {
-        char file[128];
-        SDL_snprintf(file, sizeof(file), "SDL_window%" SDL_PRIu32 "-%8.8d.bmp",
-                     SDL_GetWindowID(window), ++frame_number);
-        SDL_SaveBMP(surface, file);
+    if (!SDL_GetWindowData(window, DUMMY_SURFACE)) {
+        return SDL_SetError("Couldn't find yiyiya framebuffer for window");
     }
     screen_flush();
     return 0;
@@ -91,12 +57,7 @@ int SDL_DUMMY_UpdateWindowFramebuffer(_THIS, SDL_Window * window, const SDL_Rect
 
 void SDL_DUMMY_DestroyWindowFramebuffer(_THIS, SDL_Window * window)
 {
-    printf("SDL_DUMMY_DestroyWindowFramebuffer\n");
-
-    SDL_Surface *surface;
-
-    surface = (SDL_Surface *) SDL_SetWindowData(window, DUMMY_SURFACE, NULL);
-    SDL_FreeSurface(surface);
+    SDL_SetWindowData(window, DUMMY_SURFACE, NULL);
 }
 
 #endif /* SDL_VIDEO_DRIVER_DUMMY */

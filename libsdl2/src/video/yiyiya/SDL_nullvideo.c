@@ -42,6 +42,8 @@
 #include "../SDL_sysvideo.h"
 #include "../SDL_pixels_c.h"
 #include "../../events/SDL_events_c.h"
+#include "../../events/SDL_mouse_c.h"
+#include "../../events/SDL_keyboard_c.h"
 
 #include "SDL_nullvideo.h"
 #include "SDL_nullevents_c.h"
@@ -49,12 +51,15 @@
 
 #include "screen.h"
 
-#define DUMMYVID_DRIVER_NAME "dummy"
+#define DUMMYVID_DRIVER_NAME "yiyiya"
 
 /* Initialization/Query functions */
 static int DUMMY_VideoInit(_THIS);
 static int DUMMY_SetDisplayMode(_THIS, SDL_VideoDisplay * display, SDL_DisplayMode * mode);
 static void DUMMY_VideoQuit(_THIS);
+static int DUMMY_CreateWindow(_THIS, SDL_Window *window);
+static int DUMMY_SetWindowInputFocus(_THIS, SDL_Window *window);
+static void DUMMY_DestroyWindow(_THIS, SDL_Window *window);
 
 /* DUMMY driver bootstrap functions */
 
@@ -78,7 +83,6 @@ DUMMY_DeleteDevice(SDL_VideoDevice * device)
 static SDL_VideoDevice *
 DUMMY_CreateDevice(int devindex)
 {
-    printf("sdl create device\n");
     SDL_VideoDevice *device;
 
     if (!DUMMY_Available()) {
@@ -91,12 +95,15 @@ DUMMY_CreateDevice(int devindex)
         SDL_OutOfMemory();
         return (0);
     }
-    device->is_dummy = SDL_TRUE;
+    device->is_dummy = SDL_FALSE;
 
     /* Set the function pointers */
     device->VideoInit = DUMMY_VideoInit;
     device->VideoQuit = DUMMY_VideoQuit;
     device->SetDisplayMode = DUMMY_SetDisplayMode;
+    device->CreateSDLWindow = DUMMY_CreateWindow;
+    device->SetWindowInputFocus = DUMMY_SetWindowInputFocus;
+    device->DestroyWindow = DUMMY_DestroyWindow;
     device->PumpEvents = DUMMY_PumpEvents;
     device->CreateWindowFramebuffer = SDL_DUMMY_CreateWindowFramebuffer;
     device->UpdateWindowFramebuffer = SDL_DUMMY_UpdateWindowFramebuffer;
@@ -109,7 +116,7 @@ DUMMY_CreateDevice(int devindex)
 }
 
 VideoBootStrap DUMMY_bootstrap = {
-    DUMMYVID_DRIVER_NAME, "SDL dummy video driver",
+    DUMMYVID_DRIVER_NAME, "SDL libgui video driver",
     DUMMY_CreateDevice
 };
 
@@ -121,6 +128,9 @@ DUMMY_VideoInit(_THIS)
 
     screen_init();
     screen_info_t* screen = screen_info();
+    if (!screen) {
+        return SDL_SetError("libgui screen_info is not available");
+    }
 
     /* Use a fake 32-bpp desktop mode */
     SDL_zero(mode);
@@ -145,8 +155,48 @@ DUMMY_VideoInit(_THIS)
 static int
 DUMMY_SetDisplayMode(_THIS, SDL_VideoDisplay * display, SDL_DisplayMode * mode)
 {
-    printf("DUMMY_SetDisplayMode\n");
+    (void)_this;
+    (void)display;
+    (void)mode;
     return 0;
+}
+
+static int
+DUMMY_CreateWindow(_THIS, SDL_Window *window)
+{
+    (void)_this;
+    if (window->x == SDL_WINDOWPOS_UNDEFINED) {
+        window->x = 0;
+    }
+    if (window->y == SDL_WINDOWPOS_UNDEFINED) {
+        window->y = 0;
+    }
+    window->driverdata = window;
+    SDL_SetMouseFocus(window);
+    SDL_SetKeyboardFocus(window);
+    return 0;
+}
+
+static int
+DUMMY_SetWindowInputFocus(_THIS, SDL_Window *window)
+{
+    (void)_this;
+    SDL_SetMouseFocus(window);
+    SDL_SetKeyboardFocus(window);
+    return 0;
+}
+
+static void
+DUMMY_DestroyWindow(_THIS, SDL_Window *window)
+{
+    (void)_this;
+    if (SDL_GetMouseFocus() == window) {
+        SDL_SetMouseFocus(NULL);
+    }
+    if (SDL_GetKeyboardFocus() == window) {
+        SDL_SetKeyboardFocus(NULL);
+    }
+    window->driverdata = NULL;
 }
 
 void
