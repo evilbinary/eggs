@@ -21,7 +21,6 @@ size_t etk_get_relative_time(void) {
 }
 
 Ret etk_platform_flush() {
-  // screen_flush();
   EtkRect r;
   r.x = mouse.x;
   r.y = mouse.y;
@@ -34,6 +33,8 @@ Ret etk_platform_flush() {
   if (curssor != NULL) {
     screen_show_bitmap(mouse.x, mouse.y, 16, 16, curssor);
   }
+  screen_flush();
+
 }
 
 Ret etk_platform_event_poll(EtkEvent *event) {
