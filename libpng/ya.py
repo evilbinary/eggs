@@ -27,6 +27,7 @@ add_files(
     "pngwtran.c",
     "pngwutil.c"
 )
+add_cflags(' -DPNG_ARM_NEON_OPT=0 ')
 
 add_includedirs(
     '.',

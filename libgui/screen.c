@@ -682,7 +682,7 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
 }
 
 void screen_init() {
-  screen_init_with_mode(SCREEN_MODE_XWIN);  // 默认使用 xwin 模式
+  screen_init_with_mode(SCREEN_MODE_XWIN);  // SCREEN_MODE_XWIN 默认使用 fb 模式
 }
 
 void screen_init_with_mode(screen_mode_t mode) {
@@ -724,6 +724,17 @@ void screen_init_with_mode(screen_mode_t mode) {
   gscreen.bpp = gscreen.fb.bpp;
   gscreen.fd = fd;
   gscreen.xwin_handle = 0;
+  if (gscreen.fb.framebuffer_count == 0) {
+    gscreen.fb.framebuffer_count = 1;
+  }
+  if (gscreen.fb.framebuffer_length == 0 && gscreen.width > 0 &&
+      gscreen.height > 0 && gscreen.bpp > 0) {
+    gscreen.fb.framebuffer_length =
+        gscreen.width * gscreen.height * (gscreen.bpp / 8);
+  }
+  if (gscreen.buffer_length == 0) {
+    gscreen.buffer_length = gscreen.fb.framebuffer_length;
+  }
 
 #ifdef DB_BUFFER
   gscreen.buffer_length = gscreen.width * gscreen.height * 8;
@@ -776,8 +787,16 @@ void screen_flush() {
 
   // FB 模式
   if (gscreen.fb.framebuffer_count <= 0) {
-    printf("init screen has some error,maybe no init first\n");
-    return;
+    if (gscreen.width > 0 && gscreen.height > 0 && gscreen.fd >= 0) {
+      gscreen.fb.framebuffer_count = 1;
+      if (gscreen.fb.framebuffer_length == 0) {
+        gscreen.fb.framebuffer_length =
+            gscreen.width * gscreen.height * (gscreen.bpp / 8);
+      }
+    } else {
+      printf("init screen has some error,maybe no init first\n");
+      return;
+    }
   }
   u32 current_index = gscreen.fb.framebuffer_index;
   gscreen.fb.framebuffer_index =

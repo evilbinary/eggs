@@ -45,10 +45,12 @@ typedef unsigned int uint32_t;
 
 #if !defined(_SIZE_T) && !defined(size_t) && !defined(__DEFINED_size_t)
 typedef unsigned _Addr size_t;
+#define __DEFINED_size_t
 #endif
 
 #if !defined(_UINTPTR_T) && !defined(uintptr_t) && !defined(__DEFINED_uintptr_t)
 typedef unsigned _Addr uintptr_t;
+#define __DEFINED_uintptr_t
 #endif
 
 /* Enable the dummy audio driver (src/audio/dummy/\*.c) */
