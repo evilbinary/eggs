@@ -759,6 +759,10 @@ void screen_flush() {
       printf("xwin handle is null\n");
       return;
     }
+    if (gscreen.buffer != NULL) {
+      xwin_blit(gscreen.xwin_handle, 0, 0, (const u32*)gscreen.buffer,
+                gscreen.width, gscreen.height);
+    }
     xwin_update(gscreen.xwin_handle);
     xwin_render();
     return;
