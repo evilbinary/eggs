@@ -681,7 +681,7 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.fd = -1;
 
     // 创建默认窗口
-    gscreen.xwin_handle = xwin_create(0, 0, gscreen.width, gscreen.height, "Screen");
+    gscreen.xwin_handle = xwin_create(0, 0, gscreen.width, gscreen.height, "");
     xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
 
     printf("screen init xwin mode %dx%d\n", gscreen.width, gscreen.height);
@@ -748,6 +748,12 @@ void screen_set_mode(screen_mode_t mode) {
 
 screen_mode_t screen_get_mode(void) {
   return gscreen.screen_mode;
+}
+
+void screen_set_title(const char* title) {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    xwin_set_title(gscreen.xwin_handle, title);
+  }
 }
 
 screen_info_t *screen_info() { return &gscreen; }
