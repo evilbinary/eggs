@@ -122,6 +122,7 @@ void screen_init_with_mode(screen_mode_t mode);
 
 // 窗口 API
 void screen_set_title(const char* title);
+void screen_set_size(u32 width, u32 height);
 
 #ifdef __cplusplus
 }

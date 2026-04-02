@@ -669,8 +669,9 @@ void screen_init_with_mode(screen_mode_t mode) {
 
   if (mode == SCREEN_MODE_XWIN) {
     // XWIN 模式初始化
-    gscreen.width = 800;
-    gscreen.height = 600;
+    // 使用预设尺寸或默认尺寸
+    if (gscreen.width == 0) gscreen.width = 800;
+    if (gscreen.height == 0) gscreen.height = 600;
     gscreen.bpp = 32;
     gscreen.buffer_length = gscreen.width * gscreen.height * 4;
     gscreen.buffer = malloc(gscreen.buffer_length);
@@ -754,6 +755,25 @@ void screen_set_title(const char* title) {
   if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
     xwin_set_title(gscreen.xwin_handle, title);
   }
+}
+
+void screen_set_size(u32 width, u32 height) {
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+    // 已经初始化，重新创建窗口
+    xwin_destroy(gscreen.xwin_handle);
+    gscreen.xwin_handle = xwin_create(0, 0, width, height, "");
+    xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
+  }
+  // 更新尺寸
+  gscreen.width = width;
+  gscreen.height = height;
+  gscreen.buffer_length = width * height * 4;
+  // 重新分配 buffer
+  if (gscreen.buffer) {
+    free(gscreen.buffer);
+  }
+  gscreen.buffer = malloc(gscreen.buffer_length);
+  gscreen.pbuffer = gscreen.buffer;
 }
 
 screen_info_t *screen_info() { return &gscreen; }
