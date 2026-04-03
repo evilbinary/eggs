@@ -32,6 +32,20 @@ long xwin_syscall(int num, long a1, long a2, long a3, long a4, long a5) {
       : "=r"(ret)
       : "r"(num), "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5)
       : "r0", "r1", "r2", "r3", "r4", "r7");
+#elif defined(__xtensa__) || defined(XTENSA)
+  // ESP32/Xtensa: syscall number in a2, args in a3-a7, return in a2
+  register long _num __asm__("a2") = num;
+  register long _a1 __asm__("a3") = a1;
+  register long _a2 __asm__("a4") = a2;
+  register long _a3 __asm__("a5") = a3;
+  register long _a4 __asm__("a6") = a4;
+  register long _a5 __asm__("a7") = a5;
+  __asm__ volatile(
+      "syscall\n"
+      : "+r"(_num)
+      : "r"(_a1), "r"(_a2), "r"(_a3), "r"(_a4), "r"(_a5)
+      : "memory");
+  ret = _num;
 #else
 #error "Unsupported architecture for xwin_syscall"
 #endif

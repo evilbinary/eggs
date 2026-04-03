@@ -68,9 +68,10 @@ typedef signed short int16_t;
 typedef signed int int32_t;
 #endif
 
-// #if !defined(_INT64_T) && !defined(int64_t)
-// typedef signed long long int64_t;
-// #endif
+#if !defined(_INT64_T) && !defined(int64_t)
+typedef signed long long int64_t;
+#define _INT64_T
+#endif
 
 #if !defined(_UINT8_T) && !defined(uint8_t)
 typedef unsigned char uint8_t;
@@ -84,10 +85,10 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 #endif
 
-// #if !defined(_UINT64_T) && !defined(uint64_t)
-// typedef unsigned long long uint64_t;
-// #endif
-// typedef signed _Int64   int64_t;
+#if !defined(_UINT64_T) && !defined(uint64_t)
+typedef unsigned long long uint64_t;
+#define _UINT64_T
+#endif
 
 #if !defined(_INTPTR_T) && !defined(intptr_t) && !defined(__DEFINED_intptr_t)
 typedef _Addr intptr_t;
@@ -104,6 +105,12 @@ typedef unsigned _Addr uintptr_t;
 #define _SIZE_T
 typedef unsigned _Addr size_t;
 #define __DEFINED_size_t
+#endif
+
+#if !defined(_SSIZE_T) && !defined(ssize_t) && !defined(__DEFINED_ssize_t)
+#define _SSIZE_T
+typedef _Addr ssize_t;
+#define __DEFINED_ssize_t
 #endif
 
 
