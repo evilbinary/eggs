@@ -113,6 +113,18 @@ typedef _Addr ssize_t;
 #define __DEFINED_ssize_t
 #endif
 
+#if !defined(_INTMAX_T) && !defined(intmax_t) && !defined(__DEFINED_intmax_t)
+typedef long long intmax_t;
+#define _INTMAX_T
+#define __DEFINED_intmax_t
+#endif
+
+#if !defined(_UINTMAX_T) && !defined(uintmax_t) && !defined(__DEFINED_uintmax_t)
+typedef unsigned long long uintmax_t;
+#define _UINTMAX_T
+#define __DEFINED_uintmax_t
+#endif
+
 
 
 

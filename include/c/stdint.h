@@ -30,8 +30,7 @@ typedef int32_t int_fast32_t;
 typedef uint32_t uint_fast16_t;
 typedef uint32_t uint_fast32_t;
 
-typedef long long          intmax_t;
-typedef unsigned long long uintmax_t;
+// intptr_t, uintptr_t, intmax_t, uintmax_t are defined in types.h
 
 #define INT8_MIN   (-1-0x7f)
 #define INT16_MIN  (-1-0x7fff)
