@@ -35,7 +35,6 @@ void _start_c(exec_t *p) {
 
 #else
 #include "crt_arch.h"
-
 int main();
 weak void _init();
 weak void _fini();
