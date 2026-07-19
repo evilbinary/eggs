@@ -1,0 +1,6 @@
+readline.d
+mqjs_stdlib
+*.d
+*.
+example_stdlib
+__pycache__/ya.*.pyc

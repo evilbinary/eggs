@@ -21,3 +21,13 @@ libmusl/temp.txt
 libnewlib/arm-none-eabi/*
 libnewlib/Makefile
 libnewlib/etc/Makefile
+._.*
+**/PaxHeader/
+**/**/PaxHeader/
+.DS_Store
+*.swp
+*/*._*
+*.pyc
+**/**/*.pyc
+**/**/._*
+**/**/.DS_Store

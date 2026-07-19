@@ -1,15 +1,14 @@
-#define _REDIR_TIME64 1
-#define _Addr int
-#define _Int64 long long
-#define _Reg int
+#define _Addr long
+#define _Int64 long
+#define _Reg long
 
-#if __ARMEB__
+#if __AARCH64EB__
 #define __BYTE_ORDER 4321
 #else
 #define __BYTE_ORDER 1234
 #endif
 
-#define __LONG_MAX 0x7fffffffL
+#define __LONG_MAX 0x7fffffffffffffffL
 
 #ifndef __cplusplus
 #if defined(__NEED_wchar_t) && !defined(__DEFINED_wchar_t)
@@ -18,6 +17,22 @@ typedef unsigned wchar_t;
 #endif
 
 #endif
+#if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
+typedef unsigned wint_t;
+#define __DEFINED_wint_t
+#endif
+
+
+#if defined(__NEED_blksize_t) && !defined(__DEFINED_blksize_t)
+typedef int blksize_t;
+#define __DEFINED_blksize_t
+#endif
+
+#if defined(__NEED_nlink_t) && !defined(__DEFINED_nlink_t)
+typedef unsigned int nlink_t;
+#define __DEFINED_nlink_t
+#endif
+
 
 #if defined(__NEED_float_t) && !defined(__DEFINED_float_t)
 typedef float float_t;

@@ -1,0 +1,5 @@
+*.o
+*.swp
+.DS_*
+demo/demo
+__pycache__/ya.cpython-311.pyc
