@@ -1,7 +1,10 @@
 #include "layer.h"
 #include "render.h"
+#include "component_registry.h"
 #include "animate.h"
+#include "perf/perf.h"
 #include <limits.h>
+#include <math.h>
 
 extern int yui_inspect_mode_enabled;
 extern int yui_inspect_show_bounds;
@@ -47,69 +50,63 @@ void load_textures(Layer* root) {
     }
 }
 
-// 递归为所有图层加载字体（使用字体缓存）
+// 递归为所有图层加载字体（backend 按 path+size+weight 缓存 TTF_Font，多图层共享同一指针）
 void load_all_fonts(Layer* layer) {
+    int i;
+
     if (!layer) return;
     
-    // 为当前图层加载字体
     if (layer->font) {
-        // 如果字体已经加载，跳过
+        int needs_load = 1;
+
         if (layer->font->default_font != NULL) {
             if ((uintptr_t)layer->font->default_font != 0xbebebebebebebebeULL) {
-                // 有效字体，跳过
+                needs_load = 0;
             } else {
-                // 损坏的字体指针，重新加载
                 layer->font->default_font = NULL;
             }
         }
-        
-        // 构建字体路径
-        char font_path[MAX_PATH];
-        
-        // 检查字体路径是否为绝对路径
-        if (layer->font->path[0] == '/') {
-            // 使用绝对路径
-            snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
-        } else if (layer->assets && layer->assets->path[0] != '\0') {
-            // 使用相对路径，拼接 assets 路径
-            snprintf(font_path, sizeof(font_path), "%s/%s", layer->assets->path, layer->font->path);
-        } else {
-            // 直接使用字体路径
-            snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
-        }
-        
-        // 确保字体大小和粗细有效
-        if (layer->font->size == 0) {
-            layer->font->size = 16;
-        }
-        if (strlen(layer->font->weight) == 0) {
-            strcpy(layer->font->weight, "normal");
-        }
-        
-        // 加载字体（使用缓存）
-        printf("loading font for layer '%s': %s (size: %d, weight: %s)\n", 
-               layer->id, font_path, layer->font->size, layer->font->weight);
-        
-        DFont* font = backend_load_font_with_weight(font_path, layer->font->size, layer->font->weight);
-        
-        if (font) {
-            layer->font->default_font = font;
-            printf("font loaded successfully for layer '%s': %p\n", layer->id, (void*)font);
-        } else {
-            printf("error: failed to load font for layer '%s': %s\n", layer->id, font_path);
+
+        if (needs_load) {
+            char font_path[MAX_PATH];
+            
+            if (layer->font->path[0] == '/') {
+                snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
+            } else if (layer->assets && layer->assets->path[0] != '\0') {
+                snprintf(font_path, sizeof(font_path), "%s/%s", layer->assets->path, layer->font->path);
+            } else {
+                snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
+            }
+            
+            if (layer->font->size == 0) {
+                layer->font->size = 16;
+            }
+            if (strlen(layer->font->weight) == 0) {
+                strcpy(layer->font->weight, "normal");
+            }
+            
+            DFont* font = backend_load_font_with_weight(font_path, layer->font->size, layer->font->weight);
+            if (font) {
+                layer->font->default_font = font;
+            } else {
+                printf("error: failed to load font for layer '%s': %s (size: %d, weight: %s)\n",
+                       layer->id, font_path, layer->font->size, layer->font->weight);
+            }
         }
     }
     
-    // 递归加载子图层的字体
     if (layer->children) {
-        for (int i = 0; i < layer->child_count; i++) {
+        for (i = 0; i < layer->child_count; i++) {
             load_all_fonts(layer->children[i]);
         }
     }
     
-    // 处理子图层
     if (layer->sub) {
         load_all_fonts(layer->sub);
+    }
+
+    if (layer->item_template) {
+        load_all_fonts(layer->item_template);
     }
 }
 
@@ -172,6 +169,9 @@ Texture* render_text(Layer* layer,const char* text, Color color) {
         printf("error not found font %s %d\n",layer->id,layer->type);
         return NULL;
     }
+    if (!layer->font->default_font) {
+        load_all_fonts(layer);
+    }
     if (!layer->font->default_font) return NULL;
     
     Texture* texture= backend_render_texture(layer->font->default_font,text,color);
@@ -181,57 +181,53 @@ Texture* render_text(Layer* layer,const char* text, Color color) {
 
 // ====================== 渲染管线 ======================
 void render_layer(Layer* layer) {
-    // 添加调试信息，检查layer指针是否为NULL
     if (!layer) {
         printf("render_layer: layer is NULL\n");
         return;
     }
-    if(layer->visible==IN_VISIBLE){
+    if (layer->visible == IN_VISIBLE) {
         return;
     }
-    
-    // 在渲染图层之前更新动画状态
+
+    int perf_on = perf_is_enabled();
+    perf_layer_tree_enter(layer);
+
+    uint64_t self_ns = 0;
+    uint64_t t0 = perf_on ? perf_now_ns() : 0;
+
     layer_update_animation(layer);
-    
-    // 根据图层类型进行不同的渲染处理
-    if(layer->render!=NULL){
-            layer->render(layer);
-    }else if(layer->type==VIEW) {
-        //printf("layer->%s %dn",layer->id,layer->type);
-    // 绘制背景
-        if(layer->bg_color.a > 0) {
-            // 如果启用了毛玻璃效果，先渲染毛玻璃效果
+
+    const YuiComponentOps* ops = yui_type_get_ops(layer->type);
+    if (ops && (ops->flags & YUI_COMP_LVGL_WIDGET)) {
+        if (layer->layout) {
+            layer->layout(layer);
+        }
+    } else if (layer->render != NULL) {
+        layer->render(layer);
+    } else if (layer->type == VIEW) {
+        if (layer->bg_color.a > 0) {
             if (layer->backdrop_filter) {
                 backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
-            }
-            
-            if (layer->radius > 0) {
-                backend_render_rounded_rect(&layer->rect, layer->bg_color, layer->radius);
-            } else {
-                backend_render_fill_rect(&layer->rect, layer->bg_color);
             }
 
-        }else{
-            // 默认渲染方式
-            // 如果启用了毛玻璃效果，先渲染毛玻璃效果
-            if (layer->backdrop_filter) {
-                backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
-            }
-            
             if (layer->radius > 0) {
                 backend_render_rounded_rect(&layer->rect, layer->bg_color, layer->radius);
             } else {
                 backend_render_fill_rect(&layer->rect, layer->bg_color);
             }
-            
+        } else if (layer->backdrop_filter) {
+            backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
         }
     }
-    // 保存当前渲染目标的裁剪区域
+
+    if (perf_on) {
+        self_ns += perf_now_ns() - t0;
+    }
+
     Rect prev_clip;
-    render_clip_start(layer,&prev_clip);
-    // 递归渲染子图层
+    render_clip_start(layer, &prev_clip);
+
     for (int i = 0; i < layer->child_count; i++) {
-        // 添加调试信息，检查children指针是否为NULL
         if (!layer->children) {
             printf("render_layer: layer->children is NULL for layer %s\n", layer->id);
             break;
@@ -240,139 +236,141 @@ void render_layer(Layer* layer) {
             printf("render_layer: layer->children[%d] is NULL for layer %s\n", i, layer->id);
             continue;
         }
-        if(layer->children[i]->visible==IN_VISIBLE){
+        if (layer->children[i]->visible == IN_VISIBLE) {
             continue;
         }
         render_layer(layer->children[i]);
     }
 
-       // 递归渲染子图层
-    if(layer->sub!=NULL){
+    if (layer->sub != NULL) {
         render_layer(layer->sub);
     }
 
-        // 渲染滚动条
-    // 渲染垂直滚动条
-    if ((layer->scrollable == 1 || layer->scrollable == 3) && layer->scrollbar_v && layer->scrollbar_v->visible) {
-       render_vertical_scrollbar(layer);
+    if (perf_on) {
+        t0 = perf_now_ns();
     }
-    
-    // 渲染水平滚动条
-    // printf("DEBUG: Check horizontal scrollbar for layer '%s' - scrollable=%d, scrollbar_h=%p, visible=%d\n", 
-    //        layer->id, layer->scrollable, (void*)layer->scrollbar_h, layer->scrollbar_h ? layer->scrollbar_h->visible : -1);
-    if ((layer->scrollable == 2 || layer->scrollable == 3) && layer->scrollbar_h && layer->scrollbar_h->visible) {
-    //    printf("DEBUG: Rendering horizontal scrollbar for layer '%s'\n", layer->id);
-       render_horizontal_scrollbar(layer);
-    }
-    
-    // 兼容性处理：旧的滚动条（向后兼容）
-    if (layer->scrollable && layer->scrollbar && layer->scrollbar->visible) {
-       render_scrollbar(layer);
-    }
-    
-    render_clip_end(layer,&prev_clip);
 
-// Inspect 调试模式绘制
-if ((yui_inspect_mode_enabled || layer->inspect_enabled) && 
-    (layer->inspect_show_bounds || layer->inspect_show_info || yui_inspect_show_bounds || yui_inspect_show_info)) {
-    
-    // 显示边界框
-    if (yui_inspect_show_bounds && layer->inspect_show_bounds && layer->rect.w > 0 && layer->rect.h > 0) {
-        // 绘制边界矩形（半透明红色）
-        Color bounds_color = {255, 0, 0, 100}; // 半透明红色
+    if ((layer->scrollable == 1 || layer->scrollable == 3) && layer->scrollbar_v && layer->scrollbar_v->visible) {
+        render_vertical_scrollbar(layer);
+    }
+
+    if ((layer->scrollable == 2 || layer->scrollable == 3) && layer->scrollbar_h && layer->scrollbar_h->visible) {
+        render_horizontal_scrollbar(layer);
+    }
+
+    if (layer->scrollable && layer->scrollbar && layer->scrollbar->visible) {
+        render_scrollbar(layer);
+    }
+
+    if (perf_on) {
+        self_ns += perf_now_ns() - t0;
+        perf_layer_add_self_ns(layer, self_ns);
+    }
+
+    render_clip_end(layer, &prev_clip);
+
+#if DEBUG_VIEW
+    Texture* text_texture = render_text(layer, layer->id, (Color){strlen(layer->id) * 40 % 255, 0, 0, 255});
+    Rect r = {layer->rect.x + 2, layer->rect.y, (int)strlen(layer->id) * 6, 12};
+    backend_render_text_copy(text_texture, NULL, &r);
+    backend_render_text_destroy(text_texture);
+    backend_render_rect(&layer->rect, (Color){strlen(layer->id) * 40 % 255, 0, 0, 255});
+#endif
+}
+
+static void render_layer_inspect(Layer* layer) {
+    if (!layer) {
+        return;
+    }
+
+    if (!(yui_inspect_mode_enabled || layer->inspect_enabled)) {
+        return;
+    }
+
+    if (!(layer->inspect_show_bounds || layer->inspect_show_info ||
+          yui_inspect_show_bounds || yui_inspect_show_info)) {
+        return;
+    }
+
+    if (yui_inspect_show_bounds && layer->inspect_show_bounds &&
+        layer->rect.w > 0 && layer->rect.h > 0) {
+        Color bounds_color = {255, 0, 0, 255};
         backend_render_rect(&layer->rect, bounds_color);
-        
-        // 绘制四个角的标记点
+
         int corner_size = 4;
-        Color corner_color = {255, 0, 0, 200}; // 不透明红色
-        
-        // 左上角
-        Rect corner1 = {layer->rect.x - corner_size/2, layer->rect.y - corner_size/2, corner_size, corner_size};
+        Color corner_color = {255, 0, 0, 255};
+
+        Rect corner1 = {layer->rect.x - corner_size / 2, layer->rect.y - corner_size / 2, corner_size, corner_size};
         backend_render_fill_rect(&corner1, corner_color);
-        
-        // 右上角
-        Rect corner2 = {layer->rect.x + layer->rect.w - corner_size/2, layer->rect.y - corner_size/2, corner_size, corner_size};
+
+        Rect corner2 = {layer->rect.x + layer->rect.w - corner_size / 2, layer->rect.y - corner_size / 2, corner_size, corner_size};
         backend_render_fill_rect(&corner2, corner_color);
-        
-        // 左下角
-        Rect corner3 = {layer->rect.x - corner_size/2, layer->rect.y + layer->rect.h - corner_size/2, corner_size, corner_size};
+
+        Rect corner3 = {layer->rect.x - corner_size / 2, layer->rect.y + layer->rect.h - corner_size / 2, corner_size, corner_size};
         backend_render_fill_rect(&corner3, corner_color);
-        
-        // 右下角
-        Rect corner4 = {layer->rect.x + layer->rect.w - corner_size/2, layer->rect.y + layer->rect.h - corner_size/2, corner_size, corner_size};
+
+        Rect corner4 = {layer->rect.x + layer->rect.w - corner_size / 2, layer->rect.y + layer->rect.h - corner_size / 2, corner_size, corner_size};
         backend_render_fill_rect(&corner4, corner_color);
     }
-    
-    // 显示详细信息
+
     if (yui_inspect_show_info && layer->inspect_show_info && strlen(layer->id) > 0) {
-        // 准备信息文本（多行）
         char line1[128], line2[128], line3[128], line4[128];
         snprintf(line1, sizeof(line1), "ID: %s", layer->id);
-        snprintf(line2, sizeof(line2), "Type: %s", 
-                 layer->type >= 0 && layer->type < layer_type_size ? layer_type_name[layer->type] : "Unknown");
+        snprintf(line2, sizeof(line2), "Type: %s", yui_type_name(layer->type));
         snprintf(line3, sizeof(line3), "Pos: (%d,%d)", layer->rect.x, layer->rect.y);
         snprintf(line4, sizeof(line4), "Size: (%d,%d)", layer->rect.w, layer->rect.h);
-        
-        // 渲染每一行以计算总尺寸
+
         Color text_color = {255, 255, 255, 255};
         Texture* tex1 = render_text(layer, line1, text_color);
         Texture* tex2 = render_text(layer, line2, text_color);
         Texture* tex3 = render_text(layer, line3, text_color);
         Texture* tex4 = render_text(layer, line4, text_color);
-        
+
         if (tex1 && tex2 && tex3 && tex4) {
             int w1, h1, w2, h2, w3, h3, w4, h4;
             backend_query_texture(tex1, NULL, NULL, &w1, &h1);
             backend_query_texture(tex2, NULL, NULL, &w2, &h2);
             backend_query_texture(tex3, NULL, NULL, &w3, &h3);
             backend_query_texture(tex4, NULL, NULL, &w4, &h4);
-            
-            // 计算最大宽度和总高度
-            int max_width = w1 > w2 ? (w1 > w3 ? (w1 > w4 ? w1 : w4) : (w3 > w4 ? w3 : w4)) : (w2 > w3 ? (w2 > w4 ? w2 : w4) : (w3 > w4 ? w3 : w4));
+
+            int max_width = w1 > w2 ? (w1 > w3 ? (w1 > w4 ? w1 : w4) : (w3 > w4 ? w3 : w4))
+                                    : (w2 > w3 ? (w2 > w4 ? w2 : w4) : (w3 > w4 ? w3 : w4));
             int total_height = h1 + h2 + h3 + h4;
-            int line_spacing = 2; // 行间距
+            int line_spacing = 2;
             total_height += line_spacing * 3;
-            
-            // 添加边距
+
             int padding = 10;
             int info_width = max_width + padding * 2;
             int info_height = total_height + padding * 2;
             int info_x = layer->rect.x;
             int info_y = layer->rect.y;
-            
-            // 确保信息显示在屏幕内（相对于整个窗口）
-            // 这里可以添加屏幕边界检查逻辑，如果需要的话
-            
-            // 绘制信息背景（半透明黑色）
+
             Rect info_bg = {info_x, info_y, info_width, info_height};
-            Color bg_color = {0, 0, 0, 180}; // 半透明黑色
+            Color bg_color = {0, 0, 0, 180};
             backend_render_fill_rect(&info_bg, bg_color);
-            
-            // 渲染每一行文本（缩放80%）
-            float scale = 0.8f; // 缩放比例
+
+            float info_scale = 0.8f;
             int current_y = info_y + padding;
-            Rect rect1 = {info_x + padding, current_y, (int)(w1 * scale), (int)(h1 * scale)};
+            Rect rect1 = {info_x + padding, current_y, (int)(w1 * info_scale), (int)(h1 * info_scale)};
             backend_render_text_copy(tex1, NULL, &rect1);
-            current_y += (int)(h1 * scale) + line_spacing;
-            
-            Rect rect2 = {info_x + padding, current_y, (int)(w2 * scale), (int)(h2 * scale)};
+            current_y += (int)(h1 * info_scale) + line_spacing;
+
+            Rect rect2 = {info_x + padding, current_y, (int)(w2 * info_scale), (int)(h2 * info_scale)};
             backend_render_text_copy(tex2, NULL, &rect2);
-            current_y += (int)(h2 * scale) + line_spacing;
-            
-            Rect rect3 = {info_x + padding, current_y, (int)(w3 * scale), (int)(h3 * scale)};
+            current_y += (int)(h2 * info_scale) + line_spacing;
+
+            Rect rect3 = {info_x + padding, current_y, (int)(w3 * info_scale), (int)(h3 * info_scale)};
             backend_render_text_copy(tex3, NULL, &rect3);
-            current_y += (int)(h3 * scale) + line_spacing;
-            
-            Rect rect4 = {info_x + padding, current_y, (int)(w4 * scale), (int)(h4 * scale)};
+            current_y += (int)(h3 * info_scale) + line_spacing;
+
+            Rect rect4 = {info_x + padding, current_y, (int)(w4 * info_scale), (int)(h4 * info_scale)};
             backend_render_text_copy(tex4, NULL, &rect4);
-            
-            // 清理
+
             backend_render_text_destroy(tex1);
             backend_render_text_destroy(tex2);
             backend_render_text_destroy(tex3);
             backend_render_text_destroy(tex4);
         } else {
-            // 清理已创建的纹理
             if (tex1) backend_render_text_destroy(tex1);
             if (tex2) backend_render_text_destroy(tex2);
             if (tex3) backend_render_text_destroy(tex3);
@@ -381,40 +379,57 @@ if ((yui_inspect_mode_enabled || layer->inspect_enabled) &&
     }
 }
 
-#if DEBUG_VIEW
-    Texture* text_texture = render_text(layer,layer->id, (Color){strlen(layer->id)*40%255, 0, 0, 255});
-    Rect r={layer->rect.x+2,layer->rect.y,strlen(layer->id)*6,12};
-    backend_render_text_copy(text_texture,NULL,&r);
-    backend_render_text_destroy(text_texture);
-    backend_render_rect(&layer->rect,(Color){strlen(layer->id)*40%255, 0, 0, 255});
-#endif
-}
-void render_clip_start(Layer* layer,Rect* prev_clip){
-    backend_render_get_clip_rect(prev_clip);
-    // 设置当前图层的裁剪区域
-    Rect clip_rect = layer->rect;
-    
-    // 如果存在父级裁剪区域，则取交集作为最终裁剪区域
-    if (prev_clip->w > 0 && prev_clip->h > 0) {
-        // 计算两个矩形的交集
-        int left = fmax(clip_rect.x, prev_clip->x);
-        int top = fmax(clip_rect.y, prev_clip->y);
-        int right = fmin(clip_rect.x + clip_rect.w, prev_clip->x + prev_clip->w);
-        int bottom = fmin(clip_rect.y + clip_rect.h, prev_clip->y + prev_clip->h);
-        
-        if (left < right && top < bottom) {
-            clip_rect.x = left;
-            clip_rect.y = top;
-            clip_rect.w = right - left;
-            clip_rect.h = bottom - top;
-        } else {
-            // 没有交集，设置一个空的裁剪区域
-            clip_rect.w = 0;
-            clip_rect.h = 0;
+void render_inspect_overlay(Layer* layer) {
+    if (!layer || layer->visible == IN_VISIBLE) {
+        return;
+    }
+
+    if (!layer->parent) {
+        backend_render_set_clip_rect(NULL);
+    }
+
+    render_layer_inspect(layer);
+
+    for (int i = 0; i < layer->child_count; i++) {
+        if (layer->children[i]) {
+            render_inspect_overlay(layer->children[i]);
         }
     }
+
+    if (layer->sub) {
+        render_inspect_overlay(layer->sub);
+    }
+}
+
+static void render_rect_intersect(Rect* out, const Rect* a, const Rect* b) {
+    int left = (int)fmax((double)a->x, (double)b->x);
+    int top = (int)fmax((double)a->y, (double)b->y);
+    int right = (int)fmin((double)(a->x + a->w), (double)(b->x + b->w));
+    int bottom = (int)fmin((double)(a->y + a->h), (double)(b->y + b->h));
+
+    if (left < right && top < bottom) {
+        out->x = left;
+        out->y = top;
+        out->w = right - left;
+        out->h = bottom - top;
+    } else {
+        out->x = 0;
+        out->y = 0;
+        out->w = 0;
+        out->h = 0;
+    }
+}
+
+void render_clip_start(Layer* layer,Rect* prev_clip){
+    backend_render_get_clip_rect(prev_clip);
+    Rect clip_rect = layer->rect;
+    Rect intersected;
     
-    // 应用裁剪区域
+    if (prev_clip->w > 0 && prev_clip->h > 0) {
+        render_rect_intersect(&intersected, &clip_rect, prev_clip);
+        clip_rect = intersected;
+    }
+    
     backend_render_set_clip_rect(&clip_rect);
 }
 

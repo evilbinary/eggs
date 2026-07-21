@@ -13,6 +13,15 @@ typedef struct {
     void* user_data;                  // 用户数据
     int is_default;                  // 是否为默认按钮（回车键触发）
     int is_cancel;                   // 是否为取消按钮（ESC键触发）
+    int width;                       // 按钮宽度，0 表示使用对话框默认值
+    int height;                      // 按钮高度，0 表示使用对话框默认值
+    Color bg_color;                  // 按钮背景色
+    Color hover_color;               // 按钮悬停色
+    Color text_color;                // 按钮文字色
+    int has_bg_color;                // 是否自定义背景色
+    int has_hover_color;             // 是否自定义悬停色
+    int has_text_color;              // 是否自定义文字色
+    int radius;                      // 按钮圆角，0 表示方形
 } DialogButton;
 
 // 对话框类型
@@ -36,6 +45,15 @@ struct DialogComponent {
     int selected_button;       // 当前选中的按钮索引
     int is_modal;              // 是否为模态对话框
     int is_opened;             // 对话框是否已打开
+    int message_scroll_offset; // 消息区滚动偏移
+    int message_content_height;// 消息内容总高度
+    int message_area_height;   // 消息可见区高度
+    int scrollbar_dragging;    // 是否正在拖动滚动条
+    int scrollbar_drag_offset; // 拖动时鼠标与滑块顶部的偏移
+    int dragging;              // 是否正在拖动对话框
+    int drag_offset_x;         // 拖动时鼠标相对对话框左上角的 X 偏移
+    int drag_offset_y;         // 拖动时鼠标相对对话框左上角的 Y 偏移
+    int movable;               // 是否允许拖动
     void* user_data;           // 用户数据
     
     // 颜色配置
@@ -46,6 +64,11 @@ struct DialogComponent {
     Color button_color;        // 按钮颜色
     Color button_hover_color;  // 按钮悬停颜色
     Color button_text_color;   // 按钮文本颜色
+    int button_width;          // 默认按钮宽度
+    int button_height;         // 默认按钮高度
+    int button_spacing;        // 按钮间距
+    int button_area_bottom;    // 按钮区距底部距离
+    int close_hovered;         // 标题栏关闭按钮悬停
     
     // 回调函数
     void (*on_close)(DialogComponent* dialog, int button_index);
@@ -81,8 +104,8 @@ void dialog_component_hide(DialogComponent* component);
 bool dialog_component_is_opened(DialogComponent* component);
 
 // 事件处理
-void dialog_component_handle_mouse_event(Layer* layer, MouseEvent* event);
-void dialog_component_handle_key_event(Layer* layer, KeyEvent* event);
+int dialog_component_handle_pointer_event(Layer* layer, PointerEvent* event);
+int dialog_component_handle_key_event(Layer* layer, KeyEvent* event);
 void dialog_component_render(Layer* layer);
 
 // 便捷函数

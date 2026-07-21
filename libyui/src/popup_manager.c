@@ -1,5 +1,6 @@
 #include "popup_manager.h"
 #include "event.h"
+#include "backend.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -177,7 +178,10 @@ void popup_manager_close_by_type(PopupType type) {
 
 void popup_manager_render(void) {
     if (!g_popup_manager) return;
-    
+
+    // 重置裁剪区域，防止 tooltip 等弹出层被前一层裁剪
+    backend_render_set_clip_rect(NULL);
+
     PopupLayer* current = g_popup_manager->active_popups;
     while (current) {
         // 在调用回调函数前保存 next 指针，因为回调可能修改链表
@@ -192,7 +196,17 @@ void popup_manager_render(void) {
     }
 }
 
-bool popup_manager_handle_mouse_event(MouseEvent* event) {
+static int popup_point_inside(Layer* layer, PointerEvent* event) {
+    if (!layer || !event) {
+        return 0;
+    }
+    return event->x >= layer->rect.x &&
+           event->x < layer->rect.x + layer->rect.w &&
+           event->y >= layer->rect.y &&
+           event->y < layer->rect.y + layer->rect.h;
+}
+
+bool popup_manager_handle_pointer_event(PointerEvent* event) {
     if (!g_popup_manager || !event) {
         return false;
     }
@@ -202,33 +216,40 @@ bool popup_manager_handle_mouse_event(MouseEvent* event) {
     }
     
     PopupLayer* current = g_popup_manager->active_popups;
-    bool handled = false;
+    bool block_main = false;
     
-    // 处理popup内部的事件
     while (current) {
-        // 检查指针是否有效
         if ((uintptr_t)current == 0xabababababababab || 
             (uintptr_t)current == 0xfeeefeeefeeefeee) {
-            // 检测到 freed 内存指针，清空列表并返回
-            printf("ERROR: popup_manager_handle_mouse_event - detected freed memory pointer, clearing list\n");
+            printf("ERROR: popup_manager_handle_pointer_event - detected freed memory pointer, clearing list\n");
             g_popup_manager->active_popups = NULL;
             g_popup_manager->top_popup = NULL;
             return false;
         }
         
-        // 在调用回调函数前保存 next 指针，因为回调可能修改链表
         PopupLayer* next = current->next;
-        
-        if (current && current->layer && current->layer->handle_mouse_event) {
-            current->layer->handle_mouse_event(current->layer, event);
-            handled = true;
+        Layer* popup_layer = current->layer;
+
+        if (popup_layer) {
+            int inside = popup_point_inside(popup_layer, event);
+
+            if (popup_layer->handle_pointer_event) {
+                if (inside || current->type == POPUP_TYPE_DIALOG) {
+                    popup_layer->handle_pointer_event(popup_layer, event);
+                }
+            }
+
+            if (current->type == POPUP_TYPE_DIALOG) {
+                block_main = true;
+            } else if (inside) {
+                block_main = true;
+            }
         }
         
-        // 使用保存的 next 指针
         current = next;
     }
     
-    return handled;
+    return block_main;
 }
 
 bool popup_manager_handle_key_event(KeyEvent* event) {
@@ -273,6 +294,22 @@ bool popup_manager_handle_scroll_event(int scroll_delta) {
     }
     
     return handled;
+}
+
+bool popup_manager_contains_layer(Layer* layer) {
+    if (!g_popup_manager || !layer) {
+        return false;
+    }
+
+    PopupLayer* current = g_popup_manager->active_popups;
+    while (current) {
+        if (current->layer == layer) {
+            return true;
+        }
+        current = current->next;
+    }
+
+    return false;
 }
 
 bool popup_manager_is_point_in_popups(int x, int y) {

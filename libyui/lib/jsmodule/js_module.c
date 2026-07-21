@@ -54,6 +54,7 @@ int js_module_init(void)
     }
 
     js_module_register_api();
+    js_module_init_layer_lifecycle();
 
     printf("JS: JavaScript engine initialized\n");
     return 0;
@@ -62,6 +63,11 @@ int js_module_init(void)
 // 清理 JS 引擎
 void js_module_cleanup(void)
 {
+    if (g_layer_root) {
+        js_module_shutdown();
+    }
+    g_layer_root = NULL;
+
     if (g_js_ctx) {
         JS_FreeContext(g_js_ctx);
         g_js_ctx = NULL;
@@ -139,7 +145,10 @@ int js_module_call_event(const char* event_name, Layer* layer)
     JSValue func = JS_GetPropertyStr(g_js_ctx, global_obj, func_name);
 
     if (JS_IsUndefined(func) || !JS_IsFunction(g_js_ctx, func)) {
-        return -1;
+        JS_FreeValue(g_js_ctx, global_obj);
+        JS_FreeValue(g_js_ctx, func);
+        // 全局函数不存在时，回退到事件映射表查找
+        return js_module_trigger_event(func_name, layer);
     }
 
     // 调用函数

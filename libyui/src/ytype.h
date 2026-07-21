@@ -6,6 +6,147 @@
 #include <string.h>
 #include "cJSON.h"
 
+#if defined(YUI_BACKEND_MOBILE)
+
+#include <stdint.h>
+
+typedef uint32_t Uint32;
+typedef int SDL_EventType;
+
+#ifndef SDL_PRESSED
+#define SDL_PRESSED 1
+#endif
+#ifndef SDL_RELEASED
+#define SDL_RELEASED 0
+#endif
+#ifndef SDL_BUTTON_LEFT
+#define SDL_BUTTON_LEFT 1
+#endif
+#ifndef SDL_BUTTON_RIGHT
+#define SDL_BUTTON_RIGHT 3
+#endif
+#ifndef SDL_MOUSEBUTTONDOWN
+#define SDL_MOUSEBUTTONDOWN 1
+#endif
+#ifndef SDL_MOUSEBUTTONUP
+#define SDL_MOUSEBUTTONUP 2
+#endif
+#ifndef SDL_MOUSEMOTION
+#define SDL_MOUSEMOTION 3
+#endif
+
+/* SDL2 key/mod stubs — compile shared component code without linking SDL */
+#ifndef SDLK_UNKNOWN
+#define SDLK_UNKNOWN 0
+#endif
+#ifndef SDLK_RETURN
+#define SDLK_RETURN '\r'
+#endif
+#ifndef SDLK_ESCAPE
+#define SDLK_ESCAPE '\033'
+#endif
+#ifndef SDLK_BACKSPACE
+#define SDLK_BACKSPACE '\b'
+#endif
+#ifndef SDLK_TAB
+#define SDLK_TAB '\t'
+#endif
+#ifndef SDLK_SPACE
+#define SDLK_SPACE ' '
+#endif
+#ifndef SDLK_DELETE
+#define SDLK_DELETE 127
+#endif
+#ifndef SDLK_a
+#define SDLK_a 'a'
+#endif
+#ifndef SDLK_c
+#define SDLK_c 'c'
+#endif
+#ifndef SDLK_v
+#define SDLK_v 'v'
+#endif
+#ifndef SDLK_x
+#define SDLK_x 'x'
+#endif
+#ifndef SDLK_UP
+#define SDLK_UP 1073741906
+#endif
+#ifndef SDLK_DOWN
+#define SDLK_DOWN 1073741905
+#endif
+#ifndef SDLK_RIGHT
+#define SDLK_RIGHT 1073741903
+#endif
+#ifndef SDLK_LEFT
+#define SDLK_LEFT 1073741904
+#endif
+#ifndef SDLK_HOME
+#define SDLK_HOME 1073741898
+#endif
+#ifndef SDLK_END
+#define SDLK_END 1073741901
+#endif
+#ifndef SDLK_KP_ENTER
+#define SDLK_KP_ENTER 1073741912
+#endif
+#ifndef SDLK_F2
+#define SDLK_F2 1073741911
+#endif
+
+#ifndef KMOD_NONE
+#define KMOD_NONE 0x0000
+#endif
+#ifndef KMOD_LSHIFT
+#define KMOD_LSHIFT 0x0001
+#endif
+#ifndef KMOD_RSHIFT
+#define KMOD_RSHIFT 0x0002
+#endif
+#ifndef KMOD_LCTRL
+#define KMOD_LCTRL 0x0040
+#endif
+#ifndef KMOD_RCTRL
+#define KMOD_RCTRL 0x0080
+#endif
+#ifndef KMOD_SHIFT
+#define KMOD_SHIFT (KMOD_LSHIFT | KMOD_RSHIFT)
+#endif
+#ifndef KMOD_CTRL
+#define KMOD_CTRL (KMOD_LCTRL | KMOD_RCTRL)
+#endif
+
+typedef struct Rect {
+    int x, y;
+    int w, h;
+} Rect;
+
+typedef struct Color {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} Color;
+
+typedef struct YuiTexture {
+    int w;
+    int h;
+    void* priv;
+} YuiTexture;
+
+typedef struct YuiFont {
+    int size;
+    void* priv;
+} YuiFont;
+
+typedef YuiTexture Texture;
+typedef YuiFont DFont;
+
+#define BUTTON_LEFT SDL_BUTTON_LEFT
+#define BUTTON_PRESSED SDL_PRESSED
+#define BUTTON_RIGHT SDL_BUTTON_RIGHT
+
+#else /* !YUI_BACKEND_MOBILE */
 
 #ifdef D_SDL
 #include <SDL2/SDL.h>
@@ -15,10 +156,9 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <SDL_image.h>
-
-
-
 #endif
+
+#endif /* YUI_BACKEND_MOBILE */
 
 // 功能定义区域
 #define SDL2 1
@@ -33,6 +173,7 @@
 #define YUI_RADIOBOX_COMPONENT 1
 #define YUI_TEXT_COMPONENT 1
 #define YUI_TREEVIEW_COMPONENT 1
+#define YUI_LIST_COMPONENT 1
 #define YUI_TAB_COMPONENT 1
 #define YUI_SLIDER_COMPONENT 1
 #define YUI_SELECT_COMPONENT 1
@@ -40,7 +181,47 @@
 #define YUI_MENU_COMPONENT 1
 #define YUI_DIALOG_COMPONENT 1
 #define YUI_CLOCK_COMPONENT 1
+#define YUI_SASH_COMPONENT 1
+#define YUI_TABLE_COMPONENT 1
+#define YUI_PAGINATION_COMPONENT 1
+#define YUI_LOADING_COMPONENT 1
 
+// 指针输入设备（须在 animate.h 之前：animate→layer→event 依赖 PointerPhase）
+typedef enum {
+    POINTER_DEVICE_MOUSE = 0,
+    POINTER_DEVICE_TOUCH = 1,
+} PointerDevice;
+
+typedef enum {
+    POINTER_DOWN = 0,
+    POINTER_MOVE,
+    POINTER_UP,
+    POINTER_WHEEL,
+    POINTER_SWIPE,
+    POINTER_DOUBLE_TAP,
+    POINTER_LONG_PRESS,
+    POINTER_PINCH,
+    POINTER_ROTATE,
+    POINTER_CANCEL,
+} PointerPhase;
+
+typedef struct PointerEvent {
+    PointerDevice device;
+    PointerPhase phase;
+    int x;
+    int y;
+    int delta_x;   /* MOVE 拖动 / WHEEL 滚轮 / SWIPE 向量，由 phase 区分 */
+    int delta_y;
+    int button;  /* device == POINTER_DEVICE_MOUSE 时有效 */
+    int pointer_id;   /* 触点 ID（SDL fingerId / Android pointer），mouse 为 0 */
+    int finger_count; /* 当前屏幕上的触点数 */
+    union {
+        struct { float scale; float rotation; } gesture; /* PINCH / ROTATE */
+    } ext;
+} PointerEvent;
+
+typedef struct Layer Layer;
+typedef struct KeyEvent KeyEvent;
 
 #ifdef YUI_ANIMATION
 #include "animate.h"
@@ -56,7 +237,9 @@ typedef struct Point {
 } Point;
 
 
-#if SDL2
+#if defined(YUI_BACKEND_MOBILE)
+/* Rect / Color / Texture / DFont defined above */
+#elif SDL2
 
 #define Texture SDL_Texture
 #define Color SDL_Color
@@ -84,11 +267,11 @@ typedef struct Rect {
 
 #endif
 
-#define point_in_rect(pt, rect) \
-    ((pt.x) >= (rect).x && (pt.x) <= (rect).x + (rect).w) && \
-    ((pt.y) >= (rect).y && (pt.y) <= (rect).y + (rect).h)
-        
+#if !defined(YUI_BACKEND_MOBILE)
+
 #define DFont TTF_Font
+
+#endif
 
 
 
@@ -104,6 +287,7 @@ typedef enum {
     LAYOUT_CENTER,
     LAYOUT_LEFT,
     LAYOUT_RIGHT,
+    LAYOUT_GRID,
     LAYOUT_ALIGN_CENTER,
     LAYOUT_ALIGN_LEFT,
     LAYOUT_ALIGN_RIGHT,
@@ -121,7 +305,7 @@ typedef enum {
 typedef enum {
     VISIBLE,
     IN_VISIBLE,
-} VisableType;
+} VisibleType;
 
 
 
@@ -132,7 +316,7 @@ typedef enum {
     INPUT_FIELD,
     LABEL,
     IMAGE,
-    LIST,
+    LAYER_LIST,
     GRID,  // 添加GRID类型
     PROGRESS,
     CHECKBOX,
@@ -145,12 +329,17 @@ typedef enum {
     SCROLLBAR,  // 添加SCROLLBAR类型
     MENU,  // 添加MENU类型
     DIALOG,  // 添加DIALOG类型
-    CLOCK  // 添加CLOCK类型
-} LayerType;
+    CLOCK,  // 添加CLOCK类型
+    SASH,
+    TABLE,
+    PAGINATION,
+    LOADING,
+    CONNECTOR,
+    DRAGGABLE,
 
- 
-extern char* layer_type_name[];
-extern int layer_type_size ;
+    LAYER_TYPE_BUILTIN_MAX,
+    LAYER_TYPE_USER_BASE = 256,
+} LayerType;
 
 
 typedef struct Layer Layer;
@@ -202,37 +391,13 @@ typedef struct Scrollbar {
     ScrollbarDirection direction;  // 滚动条方向
 } Scrollbar;
 
-// 触屏事件类型枚举
-typedef enum {
-    TOUCH_TYPE_START,    // 触摸开始
-    TOUCH_TYPE_MOVE,     // 触摸移动
-    TOUCH_TYPE_END,      // 触摸结束
-    TOUCH_TYPE_SWIPE,    // 滑动
-    TOUCH_TYPE_DOUBLE_TAP, // 双击
-    TOUCH_TYPE_LONG_PRESS, // 长按
-    TOUCH_TYPE_PINCH,    // 捏合
-    TOUCH_TYPE_ROTATE    // 旋转
-} TouchType;
-
-// 触屏事件参数结构
-typedef struct TouchEvent {
-    TouchType type;       // 事件类型
-    int x;                // x坐标
-    int y;                // y坐标
-    int deltaX;           // x方向变化量
-    int deltaY;           // y方向变化量
-    float scale;          // 缩放比例（用于捏合）
-    float rotation;       // 旋转角度（用于旋转）
-    int fingerCount;      // 手指数量
-    Uint32 timestamp;     // 时间戳
-} TouchEvent;
-
 // 自定义键盘事件结构体
 typedef struct KeyEvent{
     enum {
         KEY_EVENT_DOWN,
         KEY_EVENT_UP,
-        KEY_EVENT_TEXT_INPUT
+        KEY_EVENT_TEXT_INPUT,
+        KEY_EVENT_TEXT_EDITING  // IME 文本编辑事件（候选词）
     } type;
     
     union {
@@ -244,23 +409,25 @@ typedef struct KeyEvent{
         
         struct {
             char text[32];  // 输入的文本
+            int start;      // 编辑起始位置（用于IME）
+            int length;     // 编辑长度（用于IME）
         } text;
     } data;
 } KeyEvent;
 
-// 事件结构
-typedef struct MouseEvent {
-    int x;
-    int y;
-    int button;
-    int state;
-    Uint32 timestamp;
-} MouseEvent;
+typedef struct ResizeEvent {
+    int old_width;
+    int old_height;
+    int new_width;
+    int new_height;
+    float scale_x;
+    float scale_y;
+} ResizeEvent;
 
 #define MAX_EVENT 512
 
 // 定义事件处理函数类型
-typedef void (*EventHandler)(void* data);
+typedef void* (*EventHandler)(void* data);
 
 
 typedef struct {
@@ -271,16 +438,22 @@ typedef struct {
 
 typedef struct Event {
     char click_name[MAX_PATH];
-    void (*click)(Layer*);  // 事件回调函数指针
-    void (*press)(Layer*);
+    EventHandler click;
+    EventHandler press;
     // 添加滚动事件回调函数指针
-    void (*scroll)(Layer*)    ; 
     char scroll_name[MAX_PATH];
-    
+    EventHandler scroll;
+
     // 合并的触屏事件
     char touch_name[MAX_PATH];
-    void (*touch)(TouchEvent* event);  // 统一的触屏事件处理函数
+    EventHandler touch;
+
+    char resize_name[MAX_PATH];
+    void (*resize)(Layer* layer, const ResizeEvent* event);
 } Event;
+
+#define EVENT_INVOKE(handler, layer) \
+    do { if ((handler)) (handler)((void*)(layer)); } while (0)
 
 // Animation结构体在animate.h中定义
 
@@ -307,15 +480,19 @@ typedef enum {
 
 typedef  int (*register_event_fun_t)(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler);
 typedef  cJSON* (*get_property_fun_t)(Layer* layer, const char* property_name);
+typedef  int (*set_property_fun_t)(Layer* layer, const char* key, cJSON* value, int is_creating);
+typedef void (*set_style_fun_t)(Layer* layer, cJSON* style);
 
 typedef struct Layer {
     char id[50];
+    char variant[128];
     int index;
     LayerType type;
     Rect rect;
     Color color;
     Color bg_color;
     int radius; // 圆角半径
+    int padding[4]; // style.padding: top, right, bottom, left
     char source[MAX_PATH];
     Texture* texture;
     Layer** children;
@@ -328,6 +505,13 @@ typedef struct Layer {
     // 是否可获得焦点
     int focusable;
     int visible;
+
+    // Layer 生命周期：声明位 + 运行时状态，见 layer_lifecycle.h
+    unsigned char lifecycle_flags;
+    char lifecycle_on_load[128];
+    char lifecycle_on_show[128];
+    char lifecycle_on_hide[128];
+    char lifecycle_on_unload[128];
 
     //动画
     Animation* animation;
@@ -363,7 +547,13 @@ typedef struct Layer {
 
     //事件
     Event* event;
-    
+
+    // 数据更新回调（由组件各自注册）；返回 1 表示已接管 data 所有权
+    int (*on_data_update)(Layer* layer, cJSON* data);
+
+    // 销毁回调（由组件各自注册，释放 component 等资源）
+    void (*on_destroy)(Layer* layer);
+
     // 添加滚动支持字段
     int scrollable;          // 滚动类型: 0=不可滚动, 1=垂直滚动, 2=水平滚动, 3=双向滚动
     int scroll_offset;       // 垂直滚动偏移
@@ -378,21 +568,26 @@ typedef struct Layer {
     // 自定义渲染函数指针
     void (*render)(Layer* layer);
 
+    // 显示/隐藏（组件可自定义，如 Dialog 弹出层）
+    int (*set_visible)(Layer* layer, int visible);
+
     // 布局更新函数指针
     void (*layout)(Layer* layer);
 
     // 新增事件处理函数指针
-    void (*handle_key_event)(Layer* layer, KeyEvent* event);
-    void (*handle_mouse_event)(Layer* layer, MouseEvent* event);
+    int (*handle_key_event)(Layer* layer, KeyEvent* event);
+    int (*handle_pointer_event)(Layer* layer, PointerEvent* event);
     void (*handle_scroll_event)(Layer* layer, int scroll_delta);
-    void (*handle_touch_event)(Layer* layer, TouchEvent* event);
+    void (*handle_resize_event)(Layer* layer, const ResizeEvent* event);
 
     //事件注册
     register_event_fun_t register_event;
     int (*unregister_event)(Layer* layer, const char* event_name);
     
-    //组件属性获取函数
+    //组件属性获取/设置函数
     get_property_fun_t get_property;
+    set_property_fun_t set_property;
+    set_style_fun_t set_style;
 
     // 毛玻璃效果相关属性
     int backdrop_filter;     // 是否启用毛玻璃效果
@@ -408,6 +603,14 @@ typedef struct Layer {
     int inspect_mode;         // Inspect模式
     int inspect_show_bounds; // 是否显示边界
     int inspect_show_info;   // 是否显示信息
+
+    // 初始布局快照，用于 layout_resize 等比缩放
+    Rect layout_base_rect;
+    int layout_base_fixed_w;
+    int layout_base_fixed_h;
+    unsigned char layout_base_valid;
+
+    int connectable;
 
 } Layer;
 // 全局变量：当前拥有焦点的图层
@@ -452,6 +655,10 @@ extern Layer* focused_layer;
 #include "components/treeview_component.h"
 #endif
 
+#ifdef YUI_LIST_COMPONENT
+#include "components/list_component.h"
+#endif
+
 #ifdef YUI_TAB_COMPONENT
 #include "components/tab_component.h"
 #endif
@@ -479,6 +686,22 @@ extern Layer* focused_layer;
 
 #ifdef YUI_CLOCK_COMPONENT
 #include "components/clock_component.h"
+#endif
+
+#ifdef YUI_SASH_COMPONENT
+#include "components/sash_component.h"
+#endif
+
+#ifdef YUI_TABLE_COMPONENT
+#include "components/table_component.h"
+#endif
+
+#ifdef YUI_PAGINATION_COMPONENT
+#include "components/pagination_component.h"
+#endif
+
+#ifdef YUI_LOADING_COMPONENT
+#include "components/loading_component.h"
 #endif
 
 #endif

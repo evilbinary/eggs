@@ -82,17 +82,17 @@ ProgressComponent* progress_component_create_from_json(Layer* layer, cJSON* json
         }
         
         // 读取形状配置
-        cJSON* shape_item = cJSON_GetObjectItem(json_obj, "shape");
+            cJSON* shape_item = cJSON_GetObjectItem(json_obj, "shape");
         if (!shape_item && style) {
             shape_item = cJSON_GetObjectItem(style, "shape");
         }
         if (shape_item && cJSON_IsString(shape_item)) {
-            const char* shape_str = shape_item->valuestring;
-            if (strcmp(shape_str, "circle") == 0) {
-                component->shape = PROGRESS_SHAPE_CIRCLE;
-            } else {
-                component->shape = PROGRESS_SHAPE_RECTANGLE;
-            }
+                const char* shape_str = shape_item->valuestring;
+                if (strcmp(shape_str, "circle") == 0) {
+                    component->shape = PROGRESS_SHAPE_CIRCLE;
+                } else {
+                    component->shape = PROGRESS_SHAPE_RECTANGLE;
+                }
             shape_specified = 1;
         }
         
@@ -119,17 +119,17 @@ ProgressComponent* progress_component_create_from_json(Layer* layer, cJSON* json
         }
         
         // 读取填充颜色
-        cJSON* color_item = cJSON_GetObjectItem(json_obj, "fillColor");
+            cJSON* color_item = cJSON_GetObjectItem(json_obj, "fillColor");
         if (!color_item && style) {
             color_item = cJSON_GetObjectItem(style, "fillColor");
         }
         if (color_item && cJSON_IsString(color_item)) {
-            // 解析颜色字符串（如 "#ff0000"）
-            const char* color_str = color_item->valuestring;
-            if (color_str[0] == '#') {
-                unsigned int r, g, b;
-                sscanf(color_str + 1, "%02x%02x%02x", &r, &g, &b);
-                component->fill_color = (Color){r, g, b, 255};
+                // 解析颜色字符串（如 "#ff0000"）
+                const char* color_str = color_item->valuestring;
+                if (color_str[0] == '#') {
+                    unsigned int r, g, b;
+                    sscanf(color_str + 1, "%02x%02x%02x", &r, &g, &b);
+                    component->fill_color = (Color){r, g, b, 255};
             }
         }
         
@@ -142,17 +142,17 @@ ProgressComponent* progress_component_create_from_json(Layer* layer, cJSON* json
         }
         
         // 读取圆形进度条宽度
-        cJSON* width_item = cJSON_GetObjectItem(json_obj, "circleWidth");
+            cJSON* width_item = cJSON_GetObjectItem(json_obj, "circleWidth");
         if (!width_item && style) {
             width_item = cJSON_GetObjectItem(style, "circleWidth");
         }
         if (width_item && cJSON_IsNumber(width_item)) {
-            component->circle_width = width_item->valueint;
-            if (component->circle_width < 1) {
-                component->circle_width = 1;
+                component->circle_width = width_item->valueint;
+                if (component->circle_width < 1) {
+                    component->circle_width = 1;
+                }
             }
         }
-    }
     
     // 如果没有设置方向，默认使用较长边作为进度方向
     if (!direction_specified) {
@@ -397,23 +397,31 @@ void progress_component_render(Layer* layer) {
             int text_width, text_height;
             backend_query_texture(text_texture, NULL, NULL, &text_width, &text_height);
             
+            int natural_w = text_width / yui_density;
+            int natural_h = text_height / yui_density;
+            int max_w = layer->rect.w - 10;
+            int max_h = layer->rect.h - 10;
+            if (max_w < 1) max_w = 1;
+            if (max_h < 1) max_h = 1;
+            
+            int draw_w = natural_w;
+            int draw_h = natural_h;
+            if (draw_w > max_w || draw_h > max_h) {
+                float scale_w = (float)max_w / (float)draw_w;
+                float scale_h = (float)max_h / (float)draw_h;
+                float fit_scale = scale_w < scale_h ? scale_w : scale_h;
+                draw_w = (int)(draw_w * fit_scale);
+                draw_h = (int)(draw_h * fit_scale);
+                if (draw_w < 1) draw_w = 1;
+                if (draw_h < 1) draw_h = 1;
+            }
+            
             Rect text_rect = {
-                layer->rect.x + (layer->rect.w - text_width / scale) / 2,  // 居中
-                layer->rect.y + (layer->rect.h - text_height / scale) / 2,
-                text_width / scale,
-                text_height / scale
+                layer->rect.x + (layer->rect.w - draw_w) / 2,
+                layer->rect.y + (layer->rect.h - draw_h) / 2,
+                draw_w,
+                draw_h
             };
-            
-            // 确保文本不会超出进度条边界
-            if (text_rect.w > layer->rect.w - 10) {
-                text_rect.w = layer->rect.w - 10;
-                text_rect.x = layer->rect.x + 5;
-            }
-            
-            if (text_rect.h > layer->rect.h - 10) {
-                text_rect.h = layer->rect.h - 10;
-                text_rect.y = layer->rect.y + 5;
-            }
             
             backend_render_text_copy(text_texture, NULL, &text_rect);
             backend_render_text_destroy(text_texture);

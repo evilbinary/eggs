@@ -6,9 +6,7 @@
 # ********************************************************************
 
 target("mquickjs")
-add_packages(get_config('default_libc'))
 set_kind("static")
-add_cflags(' -std=gnu11 -Wincompatible-pointer-types  -DNO_MAIN -g -MMD -D_GNU_SOURCE -fno-math-errno -fno-trapping-math ')
 add_files(
     'readline_tty.c',
     'readline.c',

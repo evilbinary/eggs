@@ -1,8 +1,16 @@
 #include "image_component.h"
 #include "../render.h"
 #include "../backend.h"
+#include "cJSON.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+void* image_component_create_from_json(Layer* layer, cJSON* json)
+{
+    (void)json;
+    return image_component_create(layer);
+}
 
 // 创建图片组件
 ImageComponent* image_component_create(Layer* layer) {
@@ -140,16 +148,16 @@ void image_component_render(Layer* layer) {
             
             if (layer->image_mode == IMAGE_MODE_ASPECT_FIT) {
                 // 自适应模式：完整显示图片，可能有空白区域
-                float scale = fmin(scale_x, scale_y);
-                render_rect.w = (int)(img_width * scale);
-                render_rect.h = (int)(img_height * scale);
+                float fit_scale = fmin(scale_x, scale_y);
+                render_rect.w = (int)(img_width * fit_scale);
+                render_rect.h = (int)(img_height * fit_scale);
                 render_rect.x = layer->rect.x + (layer->rect.w - render_rect.w) / 2;
                 render_rect.y = layer->rect.y + (layer->rect.h - render_rect.h) / 2;
             } else if (layer->image_mode == IMAGE_MODE_ASPECT_FILL) {
                 // 填充模式：填满整个区域，可能裁剪图片
-                float scale = fmax(scale_x, scale_y);
-                render_rect.w = (int)(img_width * scale);
-                render_rect.h = (int)(img_height * scale);
+                float fit_scale = fmax(scale_x, scale_y);
+                render_rect.w = (int)(img_width * fit_scale);
+                render_rect.h = (int)(img_height * fit_scale);
                 render_rect.x = layer->rect.x + (layer->rect.w - render_rect.w) / 2;
                 render_rect.y = layer->rect.y + (layer->rect.h - render_rect.h) / 2;
             }

@@ -3,8 +3,7 @@
 
 #include "../ytype.h"
 
-// 声明外部scale变量（用于DPI缩放）
-extern float scale;
+// DPI 缩放见 backend.h: extern float yui_density;
 
 // 前向声明
 typedef struct PopupLayer PopupLayer;
@@ -19,6 +18,7 @@ typedef struct {
     int separator;            // 是否为分隔符
     void (*callback)(void*);  // 点击回调函数
     void* user_data;          // 用户数据
+    MenuComponent* submenu;   // 子菜单
 } MenuItem;
 
 // 菜单组件结构体
@@ -31,6 +31,7 @@ struct MenuComponent {
     int opened_item;           // 当前打开的子菜单索引
     int is_popup;              // 是否为弹出菜单
     int is_submenu;            // 是否为子菜单
+    int expanded;              // items是否展开（0=折叠，1=展开）
     struct MenuComponent* parent_menu;  // 父菜单指针
     Color bg_color;            // 背景颜色
     Color text_color;          // 文本颜色
@@ -41,25 +42,32 @@ struct MenuComponent {
     int min_width;             // 最小宽度
     void* user_data;           // 用户数据
     void (*on_popup_closed)(MenuComponent* menu);  // 弹出菜单关闭回调
+    char on_select_name[128]; // onSelect 事件处理函数名称
+    int content_width;         // 根据内容自动计算的宽度(0=使用默认宽度)
+    int show_arrow;            // 是否显示展开/收起箭头(默认不显示)
 };
 
 // 函数声明
 MenuComponent* menu_component_create(Layer* layer);
 void menu_component_destroy(MenuComponent* component);
 MenuComponent* menu_component_create_from_json(Layer* layer, cJSON* json);
-void menu_component_add_item(MenuComponent* component, const char* text, const char* shortcut, 
-                            int enabled, int checked, int separator, 
+void menu_component_add_item(MenuComponent* component, const char* text, const char* shortcut,
+                            int enabled, int checked, int separator,
                             void (*callback)(void*), void* user_data);
+MenuComponent* menu_component_add_submenu(MenuComponent* component, int item_index);
 void menu_component_clear_items(MenuComponent* component);
 void menu_component_set_colors(MenuComponent* component, Color bg, Color text, 
                               Color hover, Color disabled, Color separator);
 void menu_component_set_item_height(MenuComponent* component, int height);
 void menu_component_set_min_width(MenuComponent* component, int width);
 void menu_component_set_user_data(MenuComponent* component, void* data);
-void menu_component_handle_mouse_event(Layer* layer, MouseEvent* event);
-void menu_component_handle_key_event(Layer* layer, KeyEvent* event);
+int menu_component_handle_pointer_event(Layer* layer, PointerEvent* event);
+int menu_component_handle_key_event(Layer* layer, KeyEvent* event);
 void menu_component_render(Layer* layer);
 int menu_component_get_item_at_position(MenuComponent* component, int x, int y);
+
+// 收起展开的菜单
+void menu_component_collapse(MenuComponent* component);
 
 // 弹出菜单相关函数
 bool menu_component_show_popup(MenuComponent* component, int x, int y);

@@ -46,7 +46,7 @@ RadioboxComponent* radiobox_component_create(Layer* layer, const char* group_id,
     layer->render = radiobox_component_render;
     
     // 绑定事件处理函数
-    layer->handle_mouse_event = radiobox_component_handle_mouse_event;
+    layer->handle_pointer_event = radiobox_component_handle_pointer_event;
     
     // 设置组件为可聚焦
     layer->focusable = !HAS_STATE(layer, LAYER_STATE_DISABLED);
@@ -163,14 +163,14 @@ int radiobox_component_is_disabled(RadioboxComponent* component) {
 }
 
 // 处理鼠标事件
-void radiobox_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
+int radiobox_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     if (!layer || !event || !layer->component) {
-        return;
+        return 0;
     }
 
     // 如果图层被禁用，则不处理鼠标事件
     if (HAS_STATE(layer, LAYER_STATE_DISABLED)) {
-        return;
+        return 0;
     }
 
     RadioboxComponent* component = (RadioboxComponent*)layer->component;
@@ -181,15 +181,16 @@ void radiobox_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
         event->y >= layer->rect.y && 
         event->y < layer->rect.y + layer->rect.h);
     // 处理鼠标点击事件
-    if (event->button == BUTTON_LEFT && event->state == BUTTON_PRESSED && is_inside) {
+    if (event->button == BUTTON_LEFT && event->phase == POINTER_DOWN && is_inside) {
         // 选中当前单选框，取消同组内其他单选框的选中状态
         radiobox_set_group_checked(component->group_id, component);
 
         // 如果有点击事件回调，调用它
         if (layer->event && layer->event->click) {
-            layer->event->click(layer);
+            EVENT_INVOKE(layer->event->click, layer);
         }
     }
+    return 0;
 }
 
 // 将颜色转换为灰度并降低透明度
@@ -283,14 +284,14 @@ void radiobox_component_render(Layer* layer) {
             backend_query_texture(text_texture, NULL, NULL, &text_width, &text_height);
 
             // 计算垂直居中的Y坐标
-            int label_y = layer->rect.y + (layer->rect.h - text_height/scale) / 2;
+            int label_y = layer->rect.y + (layer->rect.h - text_height/yui_density) / 2;
 
             // 创建目标矩形
             Rect dst_rect = {
                 .x = label_x,
                 .y = label_y,
-                .w = text_width/ scale,
-                .h = text_height/ scale
+                .w = text_width/ yui_density,
+                .h = text_height/ yui_density
             };
 
             // 渲染文本纹理

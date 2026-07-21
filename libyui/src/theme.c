@@ -1,6 +1,7 @@
 #include "theme.h"
 #include "util.h"
 #include "layer_update.h"
+#include "layer_properties.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,8 +117,11 @@ Theme* theme_load_from_json(cJSON* json) {
         return NULL;
     }
     
-    // 解析样式规则
+    // 解析样式规则（兼容 styles 与 rules 两种字段名）
     cJSON* styles = cJSON_GetObjectItem(json, "styles");
+    if (!styles || !cJSON_IsArray(styles)) {
+        styles = cJSON_GetObjectItem(json, "rules");
+    }
     if (styles && cJSON_IsArray(styles)) {
         int rule_count = cJSON_GetArraySize(styles);
         
@@ -172,13 +176,38 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
     // 解析选择器类型
     rule->selector_type = theme_parse_selector_type(selector);
     
-    // 解析样式属性
+    // 解析样式属性（兼容 style 与 properties 两种字段名）
     cJSON* style_obj = cJSON_GetObjectItem(json, "style");
     if (!style_obj || !cJSON_IsObject(style_obj)) {
+        style_obj = cJSON_GetObjectItem(json, "properties");
+    }
+
+    // 与 style 同级的图层属性（scrollable、scrollbar 等）
+    cJSON* props_obj = cJSON_CreateObject();
+    if (props_obj) {
+        cJSON* child = json->child;
+        while (child) {
+            if (child->string &&
+                strcmp(child->string, "selector") != 0 &&
+                strcmp(child->string, "style") != 0 &&
+                strcmp(child->string, "properties") != 0) {
+                cJSON_AddItemToObject(props_obj, child->string, cJSON_Duplicate(child, 1));
+            }
+            child = child->next;
+        }
+        if (props_obj->child) {
+            rule->props_json = props_obj;
+        } else {
+            cJSON_Delete(props_obj);
+        }
+    }
+
+    if ((!style_obj || !cJSON_IsObject(style_obj)) && !rule->props_json) {
         free(rule);
         return NULL;
     }
-    
+
+    if (style_obj && cJSON_IsObject(style_obj)) {
     // 颜色
     cJSON* color_obj = cJSON_GetObjectItem(style_obj, "color");
     if (color_obj && cJSON_IsString(color_obj)) {
@@ -264,7 +293,10 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
     if (height_obj && cJSON_IsNumber(height_obj)) {
         rule->height = height_obj->valueint;
     }
-    
+
+        rule->style_json = cJSON_Duplicate(style_obj, 1);
+    }
+
     rule->next = NULL;
     
     return rule;
@@ -273,8 +305,191 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
 // 销毁规则
 void theme_rule_destroy(ThemeRule* rule) {
     if (rule) {
+        if (rule->style_json) {
+            cJSON_Delete(rule->style_json);
+        }
+        if (rule->props_json) {
+            cJSON_Delete(rule->props_json);
+        }
         free(rule);
     }
+}
+
+#define THEME_COMPOUND_MARKER "."
+
+static int theme_is_variant_separator(char c) {
+    return c == ' ' || c == ',' || c == ';' || c == '\t';
+}
+
+static int theme_variant_contains(const char* variant_str, const char* modifier) {
+    const char* p;
+
+    if (!variant_str || !modifier || modifier[0] == '\0') {
+        return 0;
+    }
+
+    p = variant_str;
+    while (*p) {
+        size_t len;
+
+        while (theme_is_variant_separator(*p)) {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+
+        len = 0;
+        while (p[len] && !theme_is_variant_separator(p[len])) {
+            len++;
+        }
+        if (len > 0 && strlen(modifier) == len && strncmp(p, modifier, len) == 0) {
+            return 1;
+        }
+        p += len;
+    }
+
+    return 0;
+}
+
+static int theme_variant_contains_all(const char* variant_str, const char* modifiers) {
+    const char* p;
+
+    if (!variant_str || variant_str[0] == '\0' || !modifiers || modifiers[0] != '.') {
+        return 0;
+    }
+
+    p = modifiers + 1;
+    if (*p == '\0') {
+        return 0;
+    }
+
+    while (*p) {
+        char modifier[32];
+        int i = 0;
+
+        while (*p && *p != '.' && i < (int)sizeof(modifier) - 1) {
+            modifier[i++] = *p++;
+        }
+        modifier[i] = '\0';
+        if (i == 0 || !theme_variant_contains(variant_str, modifier)) {
+            return 0;
+        }
+        if (*p == '.') {
+            p++;
+        }
+    }
+
+    return 1;
+}
+
+static int theme_match_compound_selector(const char* selector, const char* id,
+                                         const char* type, const char* variant) {
+    const char* dot = strchr(selector, THEME_COMPOUND_MARKER[0]);
+    if (!dot || dot == selector) {
+        return 0;
+    }
+
+    if (!theme_variant_contains_all(variant, dot)) {
+        return 0;
+    }
+
+    if (selector[0] == '#') {
+        size_t id_len = (size_t)(dot - selector) - 1;
+        if (id_len == 0) {
+            return 0;
+        }
+        return strncmp(id, selector + 1, id_len) == 0 && id[id_len] == '\0';
+    }
+
+    {
+        size_t type_len = (size_t)(dot - selector);
+        return strncmp(type, selector, type_len) == 0 && type[type_len] == '\0';
+    }
+}
+
+static int theme_rule_matches(ThemeRule* rule, Layer* layer, const char* id, const char* type) {
+    if (!rule || !layer || !id || !type) {
+        return 0;
+    }
+
+    if (rule->selector_type == THEME_SELECTOR_ID) {
+        const char* selector_id = rule->selector + 1;
+        const char* dot = strchr(selector_id, '.');
+        if (dot) {
+            return theme_match_compound_selector(rule->selector, id, type, layer->variant);
+        }
+        return strcmp(selector_id, id) == 0;
+    }
+
+    if (rule->selector_type == THEME_SELECTOR_TYPE) {
+        return strcmp(rule->selector, type) == 0;
+    }
+
+    if (rule->selector_type == THEME_SELECTOR_COMPOUND) {
+        return theme_match_compound_selector(rule->selector, id, type, layer->variant);
+    }
+
+    return 0;
+}
+
+static int theme_rule_specificity(ThemeRule* rule) {
+    if (!rule) {
+        return 0;
+    }
+
+    if (rule->selector_type == THEME_SELECTOR_ID) {
+        int count = 1000;
+        const char* dot = strchr(rule->selector, '.');
+        while (dot) {
+            count++;
+            dot = strchr(dot + 1, '.');
+        }
+        return count;
+    }
+
+    if (rule->selector_type == THEME_SELECTOR_COMPOUND) {
+        int count = 0;
+        const char* dot = strchr(rule->selector, '.');
+        while (dot) {
+            count++;
+            dot = strchr(dot + 1, '.');
+        }
+        return count;
+    }
+
+    return 0;
+}
+
+void theme_apply_component_style(Layer* layer, cJSON* style) {
+    if (!layer || !style || !cJSON_IsObject(style)) {
+        return;
+    }
+
+    if (layer->set_style) {
+        layer->set_style(layer, style);
+        return;
+    }
+
+    if (layer->set_property) {
+        cJSON* item = style->child;
+        while (item) {
+            if (item->string) {
+                layer->set_property(layer, item->string, item, 0);
+            }
+            item = item->next;
+        }
+        return;
+    }
+
+    layer_set_properties_from_json(layer, style, 0);
+}
+
+void theme_apply_layer_properties(Layer* layer, cJSON* props) {
+    if (!layer || !props || !cJSON_IsObject(props)) {
+        return;
+    }
+    layer_set_properties_from_json(layer, props, 0);
 }
 
 // 应用主题样式到图层
@@ -282,38 +497,42 @@ void theme_apply_to_layer(Theme* theme, Layer* layer, const char* id, const char
     if (!theme || !layer || !id || !type) {
         return;
     }
-    
-    // 遍历所有规则，应用匹配的规则
-    ThemeRule* current = theme->rules;
-    printf("[Theme] Applying theme to layer id='%s', type='%s'\n", id, type);
-    while (current) {
-        int should_apply = 0;
-        
-        printf("[Theme] Checking rule selector='%s', type=%d\n", current->selector, current->selector_type);
-        
-        // 检查选择器是否匹配
-        if (current->selector_type == THEME_SELECTOR_ID) {
-            // ID选择器：格式为 "#id"
-            const char* selector_id = current->selector + 1;  // 跳过#
-            if (strcmp(selector_id, id) == 0) {
-                should_apply = 1;
-            }
-        } else if (current->selector_type == THEME_SELECTOR_TYPE) {
-            // 类型选择器：直接比较
-            printf("[Theme] Comparing selector '%s' with type '%s'\n", current->selector, type);
-            if (strcmp(current->selector, type) == 0) {
-                should_apply = 1;
-                printf("[Theme] MATCH! Applying rule to layer id='%s'\n", id);
-            }
+
+    ThemeRule* ordered[256];
+    int rule_count = 0;
+    for (ThemeRule* current = theme->rules; current && rule_count < 256; current = current->next) {
+        ordered[rule_count++] = current;
+    }
+
+    int max_specificity = -1;
+    for (int i = 0; i < rule_count; i++) {
+        if (!theme_rule_matches(ordered[i], layer, id, type)) {
+            continue;
         }
-        
-        // 如果匹配，应用样式
-        if (should_apply) {
-            printf("[Theme] Merging style for layer id='%s'\n", id);
-            theme_merge_style(current, layer);
+        int spec = theme_rule_specificity(ordered[i]);
+        if (spec > max_specificity) {
+            max_specificity = spec;
         }
-        
-        current = current->next;
+    }
+
+    if (max_specificity < 0) {
+        return;
+    }
+
+    printf("[Theme] Applying theme to layer id='%s', type='%s', specificity=%d\n",
+           id, type, max_specificity);
+    for (int i = rule_count - 1; i >= 0; i--) {
+        ThemeRule* current = ordered[i];
+        if (!theme_rule_matches(current, layer, id, type)) {
+            continue;
+        }
+        if (theme_rule_specificity(current) != max_specificity) {
+            continue;
+        }
+
+        printf("[Theme] Merging style for layer id='%s' selector='%s'\n",
+               id, current->selector);
+        theme_merge_style(current, layer);
     }
 }
 
@@ -331,6 +550,7 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
         printf("[Theme] Applying color to layer id='%s' (rule color RGBA=%d,%d,%d,%d)\n", 
                layer->id, rule->color.r, rule->color.g, rule->color.b, rule->color.a);
         layer->color = rule->color;
+        mark_layer_dirty(layer, DIRTY_COLOR);
     }
     
     // 背景颜色（主题总是覆盖图层背景色）
@@ -350,11 +570,28 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
     // 圆角半径
     if (rule->radius > 0) {
         layer->radius = rule->radius;
+        mark_layer_dirty(layer, DIRTY_STYLE);
     }
     
     // 字体大小
-    if (rule->font_size > 0 && layer->font) {
-        // TODO: 需要重新加载字体或调整字体大小
+    if (rule->font_size > 0) {
+        if (!layer->font) {
+            layer->font = (Font*)malloc(sizeof(Font));
+            memset(layer->font, 0, sizeof(Font));
+            strcpy(layer->font->path, "Roboto-Regular.ttf");
+            strcpy(layer->font->weight, "normal");
+            layer->font->size = 16;
+        } else if (layer->parent && layer->parent->font == layer->font) {
+            Font* shared = layer->font;
+            layer->font = (Font*)malloc(sizeof(Font));
+            memcpy(layer->font, shared, sizeof(Font));
+            layer->font->default_font = NULL;
+        }
+        if (layer->font->size != rule->font_size) {
+            layer->font->size = rule->font_size;
+            layer->font->default_font = NULL;
+            mark_layer_dirty(layer, DIRTY_TEXT | DIRTY_LAYOUT);
+        }
     }
     
     // 边框颜色
@@ -383,6 +620,14 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
         layer->color.a = rule->opacity;
         layer->bg_color.a = rule->opacity;
     }
+
+    if (rule->style_json) {
+        theme_apply_component_style(layer, rule->style_json);
+    }
+
+    if (rule->props_json) {
+        theme_apply_layer_properties(layer, rule->props_json);
+    }
 }
 
 // 解析选择器类型
@@ -391,9 +636,17 @@ ThemeSelectorType theme_parse_selector_type(const char* selector) {
         return THEME_SELECTOR_TYPE;  // 默认按类型处理
     }
     
-    // 如果以#开头，是ID选择器
+    // 如果以#开头，是ID选择器或 #id.modifier 复合选择器
     if (selector[0] == '#') {
+        if (strchr(selector + 1, '.') != NULL) {
+            return THEME_SELECTOR_COMPOUND;
+        }
         return THEME_SELECTOR_ID;
+    }
+
+    // Type.modifier 复合选择器
+    if (strchr(selector, '.') != NULL) {
+        return THEME_SELECTOR_COMPOUND;
     }
     
     // 否则按类型选择器处理

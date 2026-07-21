@@ -1,4 +1,7 @@
 #include "theme_manager.h"
+#include "render.h"
+#include "component_registry.h"
+#include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -269,7 +272,7 @@ static void theme_manager_apply_to_layer_recursive(Layer* layer) {
     }
     
     // 获取组件类型名称
-    const char* type_name = layer_type_name[layer->type];
+    const char* type_name = yui_type_name(layer->type);
     
     // 应用主题到当前图层
     theme_manager_apply_to_layer(layer, layer->id, type_name);
@@ -279,6 +282,10 @@ static void theme_manager_apply_to_layer_recursive(Layer* layer) {
         if (layer->children[i]) {
             theme_manager_apply_to_layer_recursive(layer->children[i]);
         }
+    }
+
+    if (layer->item_template) {
+        theme_manager_apply_to_layer_recursive(layer->item_template);
     }
 }
 
@@ -295,12 +302,12 @@ void theme_manager_apply_to_tree(Layer* root) {
     
     Theme* current_theme = manager->current_theme;
     if (!current_theme) {
-        printf("No current theme set\n");
         return;
     }
     
-    printf("Applying theme '%s' to layer tree\n", current_theme->name);
+    LOGD("theme", "applying theme '%s' to layer tree", current_theme->name);
     
-    // 递归应用
+    // 递归应用样式；字号变化时 theme_merge_style 会清空 default_font，再由 load_all_fonts 补载
     theme_manager_apply_to_layer_recursive(root);
+    load_all_fonts(root);
 }

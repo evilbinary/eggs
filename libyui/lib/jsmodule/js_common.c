@@ -1,11 +1,16 @@
 #include "js_module.h"
 #include "../../src/ytype.h"
+#include "../../src/layer_lifecycle.h"
+#include "../../src/backend.h"
+#include "../../src/layout.h"
+#include "../../src/log.h"
 
 #include "event.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <time.h>
 
 // 全局 UI 根图层
@@ -25,7 +30,7 @@ static CEventEntry g_c_event_handlers[MAX_C_EVENT_HANDLERS];
 static int g_c_event_handler_count = 0;
 
 // JS 事件映射表（存储 JS 函数名）
-#define MAX_JS_EVENTS 128
+#define MAX_JS_EVENTS 512
 typedef struct {
     char event_name[128];
     char func_name[128];
@@ -33,7 +38,6 @@ typedef struct {
 
 static JSEventMapping g_js_event_map[MAX_JS_EVENTS];
 static int g_js_event_count = 0;
-
 
 // ====================== 辅助函数 ======================
 
@@ -66,6 +70,8 @@ void js_module_set_button_style(Layer* layer, const char* bg_color)
         }
     }
 }
+
+static void js_layer_resize_handler(Layer* layer, const ResizeEvent* event);
 
 int js_module_set_layer_event(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler)
 {
@@ -106,13 +112,32 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
         layer->event->scroll = (EventHandler)event_handler;
         return 0;
     }
+    // 检查 touch 事件
+    if (strcmp(event_name, "touch") == 0 || strcmp(event_name, "onTouch") == 0) {
+        if (event_func_name) {
+            strncpy(layer->event->touch_name, event_func_name, MAX_PATH - 1);
+            layer->event->touch_name[MAX_PATH - 1] = '\0';
+        }
+        layer->event->touch = (EventHandler)event_handler;
+        return 0;
+    }
     // 检查 change 事件
     if (strcmp(event_name, "change") == 0 || strcmp(event_name, "onChange") == 0) {
-        if(layer->register_event!=NULL){
-            ((register_event_fun_t )layer->register_event)(layer, event_name, event_func_name, (EventHandler)event_handler);
+        register_event_fun_t fn=layer->register_event;
+        if(fn!=NULL){
+            fn(layer, event_name, event_func_name, (EventHandler)event_handler);
         }
         return 0;
     
+    }
+    // 检查 resize 事件
+    if (strcmp(event_name, "resize") == 0 || strcmp(event_name, "onResize") == 0) {
+        if (event_func_name) {
+            strncpy(layer->event->resize_name, event_func_name, MAX_PATH - 1);
+            layer->event->resize_name[MAX_PATH - 1] = '\0';
+        }
+        layer->event->resize = js_layer_resize_handler;
+        return 0;
     }
 
 
@@ -120,55 +145,107 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
 }
 
 // 通用的 JS 事件包装函数（用于 YUI 的 register_event_handler）
-static void js_module_common_event(void* data)
+static void* js_module_common_event(void* data)
 {
     Layer* layer = (Layer*)data;
-    if (layer && layer->event) {
-        // 查找 click_name 对应的 JS 函数并调用
-        if (layer->event->click_name[0] != '\0') {
-            printf("JS: YUI click handler calling '%s'\n", layer->event->click_name);
-            js_module_trigger_event(layer->event->click_name, layer);
+    if (!layer || !layer->event) {
+        return NULL;
+    }
+    /* 指针手势（touch / mouse drag）优先走 touch_name，传递 phase + delta */
+    if (get_current_pointer_event() && layer->event->touch_name[0] != '\0') {
+        const char* name = layer->event->touch_name;
+        if (js_module_trigger_event(name, layer) != 0) {
+            char full_name[256];
+            snprintf(full_name, sizeof(full_name), "%s.%s", layer->id, name);
+            if (js_module_trigger_event(full_name, layer) != 0) {
+                js_module_call_event(name, layer);
+            }
+        }
+        return NULL;
+    }
+    if (layer->event->click_name[0] != '\0') {
+        const char* name = layer->event->click_name;
+        if (js_module_trigger_event(name, layer) != 0) {
+            char full_name[256];
+            snprintf(full_name, sizeof(full_name), "%s.%s", layer->id, name);
+            if (js_module_trigger_event(full_name, layer) != 0) {
+                js_module_call_event(name, layer);
+            }
         }
     }
+    return NULL;
 }
 
 // Click 事件包装函数
-static void js_module_click_event(void* data)
+static void* js_module_click_event(void* data)
 {
     Layer* layer = (Layer*)data;
     if (layer) {
         printf("JS: Click event on layer '%s'\n", layer->id);
         js_module_call_layer_event(layer->id, "onClick");
     }
+    return NULL;
 }
 
 // Press 事件包装函数
-static void js_module_press_event(void* data)
+static void* js_module_press_event(void* data)
 {
     Layer* layer = (Layer*)data;
     if (layer) {
         printf("JS: Press event on layer '%s'\n", layer->id);
         js_module_call_layer_event(layer->id, "onPress");
     }
+    return NULL;
 }
 
 // Scroll 事件包装函数
-static void js_module_scroll_event(void* data)
+static void* js_module_scroll_event(void* data)
 {
     Layer* layer = (Layer*)data;
     if (layer) {
         printf("JS: Scroll event on layer '%s'\n", layer->id);
         js_module_call_layer_event(layer->id, "onScroll");
     }
+    return NULL;
+}
+
+// Touch 事件包装函数
+static void* js_module_touch_event(void* data)
+{
+    Layer* layer = (Layer*)data;
+    if (layer) {
+        // printf("JS: Touch event on layer '%s'\n", layer->id);
+        js_module_call_layer_event(layer->id, "onTouch");
+    }
+    return NULL;
 }
 
 // Change 事件包装函数
-static void js_module_change_event(void* data)
+static void* js_module_change_event(void* data)
 {
     Layer* layer = (Layer*)data;
     if (layer) {
         printf("JS: Change event on layer '%s'\n", layer->id);
         js_module_call_layer_event(layer->id, "onChange");
+    }
+    return NULL;
+}
+
+static void js_layer_resize_handler(Layer* layer, const ResizeEvent* event)
+{
+    if (!layer || !event) return;
+
+    char payload[192];
+    snprintf(payload, sizeof(payload),
+             "{\"oldWidth\":%d,\"oldHeight\":%d,\"newWidth\":%d,\"newHeight\":%d,\"scaleX\":%.4f,\"scaleY\":%.4f}",
+             event->old_width, event->old_height, event->new_width, event->new_height,
+             event->scale_x, event->scale_y);
+    layer_set_text(layer, payload);
+
+    if (layer->event && layer->event->resize_name[0] != '\0') {
+        js_module_call_event(layer->event->resize_name, layer);
+    } else {
+        js_module_call_layer_event(layer->id, "onResize");
     }
 }
 
@@ -182,10 +259,16 @@ static EventHandler get_event_handler_by_type(const char* event_type)
         return js_module_click_event;
     }else if (strcmp(event_type, "press") == 0 || strcmp(event_type, "onPress") == 0) {
         return js_module_press_event;
-    }else if (strcmp(event_type, "scroll") == 0 || strcmp(event_type, "onScroll") == 0) {
+    } else if (strcmp(event_type, "scroll") == 0 || strcmp(event_type, "onScroll") == 0) {
         return js_module_scroll_event;
+    } else if (strcmp(event_type, "touch") == 0 || strcmp(event_type, "onTouch") == 0) {
+        return js_module_touch_event;
     } else if (strcmp(event_type, "change") == 0 || strcmp(event_type, "onChange") == 0) {
         return js_module_change_event;
+    } else if (strcmp(event_type, "resize") == 0 || strcmp(event_type, "onResize") == 0) {
+        return NULL;
+    } else if (layer_lifecycle_is_event(event_type)) {
+        return NULL;
     }
     printf("JS: Unknown event type: %s\n", event_type);
 
@@ -252,7 +335,7 @@ static void build_js_path(const char* js_path, const char* json_dir, char* full_
 void js_module_init_layer(Layer* root)
 {
     g_layer_root = root;
-
+    backend_set_ui_root(root);
 }
 
 // 辅助函数：获取文件所在的目录
@@ -309,11 +392,16 @@ uint8_t* load_file(const char *filename, int *plen)
     return buf;
 }
 
+static int is_page_lifecycle_event(const char* event_name)
+{
+    return layer_lifecycle_is_event(event_name);
+}
+
 // 注册事件映射（存储 JS 函数名）
 static void register_js_event_mapping(const char* event_name, const char* func_name)
 {
     if (g_js_event_count >= MAX_JS_EVENTS) {
-        printf("JS: JS event map full, cannot register event: %s\n", event_name);
+        LOGW("js", "event map full, cannot register event: %s", event_name);
         return;
     }
 
@@ -328,13 +416,18 @@ static void register_js_event_mapping(const char* event_name, const char* func_n
     strncpy(g_js_event_map[g_js_event_count].func_name, clean_func_name, 127);
     g_js_event_map[g_js_event_count].func_name[127] = '\0';
 
-    printf("JS: Registered JS event: '%s' -> '%s'\n", event_name, clean_func_name);
+    LOGD("js", "registered event '%s' -> '%s'", event_name, clean_func_name);
 
 
 
-    // 支持event_name=id+event 这种格式 card1.onClick 这种格式的
+    // Extract event_type for dot-separated names (e.g., "menuTestApp.handleMenuClick" -> "handleMenuClick")
     char* dot_pos = strstr(event_name, ".");
-    if (dot_pos != NULL && g_layer_root ) {
+    char* event_type = NULL;
+    if (dot_pos != NULL) {
+        event_type = dot_pos + 1;
+    }
+
+    if (dot_pos != NULL && g_layer_root) {
         // 复制 id（在 . 之前的部分）
         char layer_id[128];
         int id_len = dot_pos - event_name;
@@ -342,26 +435,48 @@ static void register_js_event_mapping(const char* event_name, const char* func_n
         strncpy(layer_id, event_name, id_len);
         layer_id[id_len] = '\0';
 
-        // event_type 在 . 之后的部分
-        char* event_type = dot_pos + 1;
-
-        // 根据 event_type 获取对应的事件处理函数
-        EventHandler handler = get_event_handler_by_type(event_type);
-        if (handler != NULL) {
+        if (!is_page_lifecycle_event(event_type)) {
+            // 根据 event_type 获取对应的事件处理函数
+            EventHandler handler = get_event_handler_by_type(event_type);
             Layer * layer = find_layer_by_id(g_layer_root, layer_id);
-            if (layer != NULL) {
-                js_module_set_layer_event(layer, event_type, clean_func_name, handler);
+            if (handler != NULL) {
+                if (layer != NULL) {
+                    js_module_set_layer_event(layer, event_type, clean_func_name, handler);
+                } else {
+                    printf("JS: Warning: layer '%s' not found for event '%s'\n", layer_id, event_name);
+                }
+            } else if (layer != NULL &&
+                       (strcmp(event_type, "onResize") == 0 || strcmp(event_type, "resize") == 0)) {
+                js_module_set_layer_event(layer, event_type, clean_func_name, NULL);
+            } else {
+                // 非标准事件类型（如 onSelect），注册为全局处理器
+                if (func_name[0] == '@') {
+                    register_event_handler(clean_func_name, js_module_common_event);
+                } else {
+                    register_event_handler(event_type, js_module_common_event);
+                }
             }
-        } else {
-            printf("JS: Warning: Unknown event type '%s' for layer '%s'\n", event_type, layer_id);
         }
-    }else{
-        EventHandler handler = get_event_handler_by_type(event_name);
-
-        // 注册layer 回调用事件（使用通用事件处理器）
-        register_event_handler(clean_func_name, js_module_common_event);
+    } else if (!is_page_lifecycle_event(event_name)) {
+        if (func_name[0] == '@') {
+            register_event_handler(clean_func_name, js_module_common_event);
+        } else {
+            register_event_handler(event_name, js_module_common_event);
+        }
     }
     g_js_event_count++;
+
+    // Also register unprefixed event type (e.g., "handleMenuClick" without "menuTestApp." prefix)
+    // Page lifecycle events must stay page-scoped and should not overwrite global handlers.
+    if (dot_pos != NULL && event_type != NULL && !is_page_lifecycle_event(event_type) &&
+        g_js_event_count < MAX_JS_EVENTS) {
+        strncpy(g_js_event_map[g_js_event_count].event_name, event_type, 127);
+        g_js_event_map[g_js_event_count].event_name[127] = '\0';
+        strncpy(g_js_event_map[g_js_event_count].func_name, clean_func_name, 127);
+        g_js_event_map[g_js_event_count].func_name[127] = '\0';
+        LOGD("js", "registered event (unprefixed) '%s' -> '%s'", event_type, clean_func_name);
+        g_js_event_count++;
+    }
 }
 
 
@@ -388,6 +503,65 @@ static void build_event_name(const char* layer_id, const char* event_type, char*
     snprintf(event_name, max_len, "%s.%s", layer_id, event_type);
 }
 
+static void build_registered_event_name(const char* layer_id, const char* event_key,
+                                        char* full_event_name, size_t full_event_name_size)
+{
+    if (strchr(event_key, '.') != NULL) {
+        strncpy(full_event_name, event_key, full_event_name_size - 1);
+        full_event_name[full_event_name_size - 1] = '\0';
+        return;
+    }
+
+    if (layer_id && layer_id[0] != '\0') {
+        snprintf(full_event_name, full_event_name_size, "%s.%s", layer_id, event_key);
+        return;
+    }
+
+    strncpy(full_event_name, event_key, full_event_name_size - 1);
+    full_event_name[full_event_name_size - 1] = '\0';
+}
+
+static const char* layer_lifecycle_handler_name(Layer* layer, const char* event_type)
+{
+    if (!layer || !event_type) return NULL;
+
+    if (strcmp(event_type, "onLoad") == 0 && layer->lifecycle_on_load[0] != '\0') {
+        return layer->lifecycle_on_load;
+    }
+    if (strcmp(event_type, "onShow") == 0 && layer->lifecycle_on_show[0] != '\0') {
+        return layer->lifecycle_on_show;
+    }
+    if (strcmp(event_type, "onHide") == 0 && layer->lifecycle_on_hide[0] != '\0') {
+        return layer->lifecycle_on_hide;
+    }
+    if (strcmp(event_type, "onUnload") == 0 && layer->lifecycle_on_unload[0] != '\0') {
+        return layer->lifecycle_on_unload;
+    }
+    return NULL;
+}
+
+static void layer_lifecycle_js_dispatch(Layer* layer, const char* event_type)
+{
+    if (!layer || !event_type || !event_type[0]) {
+        return;
+    }
+
+    const char* handler_name = layer_lifecycle_handler_name(layer, event_type);
+    if (handler_name) {
+        js_module_call_event(handler_name, layer);
+        return;
+    }
+
+    char event_name[128];
+    if (layer->id[0] != '\0') {
+        snprintf(event_name, sizeof(event_name), "%s.%s", layer->id, event_type);
+    } else {
+        strncpy(event_name, event_type, sizeof(event_name) - 1);
+        event_name[sizeof(event_name) - 1] = '\0';
+    }
+    js_module_trigger_event(event_name, layer);
+}
+
 // 扫描并注册事件（从 events 或 event 对象）
 static void scan_and_register_events(cJSON* json)
 {
@@ -403,27 +577,13 @@ static void scan_and_register_events(cJSON* json)
     // 检查 "events" 对象
     cJSON* events_obj = cJSON_GetObjectItem(json, "events");
     if (events_obj && cJSON_IsObject(events_obj)) {
-        printf("JS: Found 'events' object, registering events...\n");
+        LOGD("js", "found 'events' object, registering events");
         cJSON* event = events_obj->child;
         while (event) {
             if (cJSON_IsString(event)) {
-                // 构建完整的事件名称：layerId.eventName
                 char full_event_name[256];
-                
-                // 全局事件（如 onLoad）不添加层ID前缀
-                // 如果事件名已经包含点号（如 "newGameBtn.onClick"），说明它已经指定了目标层ID
-                // 这两种情况都直接使用事件名，不添加前缀
-                if (strchr(event->string, '.') != NULL || 
-                    strcmp(event->string, "onLoad") == 0) {
-                    strncpy(full_event_name, event->string, sizeof(full_event_name) - 1);
-                    full_event_name[sizeof(full_event_name) - 1] = '\0';
-                } else if (layer_id && layer_id[0] != '\0') {
-                    snprintf(full_event_name, sizeof(full_event_name), "%s.%s", layer_id, event->string);
-                } else {
-                    strncpy(full_event_name, event->string, sizeof(full_event_name) - 1);
-                    full_event_name[sizeof(full_event_name) - 1] = '\0';
-                }
-                // 注册为 JS 事件（存储函数名）
+                build_registered_event_name(layer_id, event->string,
+                                            full_event_name, sizeof(full_event_name));
                 register_js_event_mapping(full_event_name, event->valuestring);
             }
             event = event->next;
@@ -437,23 +597,9 @@ static void scan_and_register_events(cJSON* json)
         cJSON* event = event_obj->child;
         while (event) {
             if (cJSON_IsString(event)) {
-                // 构建完整的事件名称：layerId.eventName
                 char full_event_name[256];
-                
-                // 全局事件（如 onLoad）不添加层ID前缀
-                // 如果事件名已经包含点号（如 "newGameBtn.onClick"），说明它已经指定了目标层ID
-                // 这两种情况都直接使用事件名，不添加前缀
-                if (strchr(event->string, '.') != NULL || 
-                    strcmp(event->string, "onLoad") == 0) {
-                    strncpy(full_event_name, event->string, sizeof(full_event_name) - 1);
-                    full_event_name[sizeof(full_event_name) - 1] = '\0';
-                } else if (layer_id && layer_id[0] != '\0') {
-                    snprintf(full_event_name, sizeof(full_event_name), "%s.%s", layer_id, event->string);
-                } else {
-                    strncpy(full_event_name, event->string, sizeof(full_event_name) - 1);
-                    full_event_name[sizeof(full_event_name) - 1] = '\0';
-                }
-                // 注册为 JS 事件（存储函数名）
+                build_registered_event_name(layer_id, event->string,
+                                            full_event_name, sizeof(full_event_name));
                 register_js_event_mapping(full_event_name, event->valuestring);
             }
             event = event->next;
@@ -524,37 +670,50 @@ void js_module_clear_events(void)
 }
 
 // 从 JSON 加载 JS 文件（递归遍历整个 JSON 树）
-int js_module_load_from_json(cJSON* root_json, const char* json_file_path)
+int js_module_load_from_json(cJSON* root_json, const char* json_file_path, int append)
 {
     if (!root_json) {
         printf("JS: root_json is NULL\n");
         return 0;
     }
 
-    // 清空之前的事件映射表
-    js_module_clear_events();
+    if (!append) {
+        js_module_clear_events();
+    }
 
-    // 获取 JSON 文件所在目录
     char json_dir[MAX_PATH];
     if (json_file_path && json_file_path[0] != '\0') {
         get_file_dir(json_file_path, json_dir, MAX_PATH);
+    } else if (append) {
+        strcpy(json_dir, ".");
     } else {
-        // 默认目录：app/mquickjs/
         strcpy(json_dir, "app/mquickjs");
     }
 
-    printf("JS: Loading JS from JSON directory: %s\n", json_dir);
+    LOGD("js", "%s JS from JSON directory: %s", append ? "Appending" : "Loading", json_dir);
 
     int total_loaded = load_js_recursive(root_json, json_dir);
-    printf("JS: Total %d JS file(s) loaded from JSON\n", total_loaded);
+    LOGD("js", "%s %d JS file(s) from JSON", append ? "Appended" : "Loaded", total_loaded);
 
-    // 自动触发 onLoad 事件（如果有）
-    if (total_loaded > 0) {
-        printf("JS: Triggering 'onLoad' event...\n");
-        js_module_trigger_event("onLoad", NULL);
+    if (!append) {
+        if (g_layer_root) {
+            layer_lifecycle_init_tree(g_layer_root);
+        }
     }
 
     return total_loaded;
+}
+
+void js_module_shutdown(void)
+{
+    if (g_layer_root) {
+        layer_lifecycle_before_destroy(g_layer_root);
+    }
+}
+
+void js_module_init_layer_lifecycle(void)
+{
+    layer_lifecycle_set_dispatch(layer_lifecycle_js_dispatch);
 }
 
 // 触发事件（根据事件名称自动查找并调用对应的 JS 函数）
@@ -564,22 +723,24 @@ int js_module_trigger_event(const char* event_name, Layer* layer)
         return -1;
     }
 
-    printf("JS: Searching for event '%s' in %d registered events\n", event_name, g_js_event_count);
-
     // 在 JS 事件映射表中查找对应的函数名
     for (int i = 0; i < g_js_event_count; i++) {
-        printf("JS:   [%d] '%s' -> '%s' (comparing with '%s')\n", 
-               i, g_js_event_map[i].event_name, g_js_event_map[i].func_name, event_name);
         if (strcmp(g_js_event_map[i].event_name, event_name) == 0) {
-            printf("JS: Triggering JS event '%s' -> calling function '%s'\n",
-                   event_name, g_js_event_map[i].func_name);
-            return js_module_call_event(g_js_event_map[i].func_name, layer);
+            const char* func_name = g_js_event_map[i].func_name;
+            // @ 前缀表示函数名引用：先在事件映射表中解析，再尝试直接调用
+            if (func_name[0] == '@') {
+                const char* redirect = func_name + 1;
+                if (strcmp(redirect, event_name) == 0) {
+                    return js_module_call_event(event_name, layer);
+                }
+                return js_module_trigger_event(redirect, layer);
+            }
+            return js_module_call_event(func_name, layer);
         }
     }
 
-    // 未找到事件映射
-    printf("JS: JS event '%s' not registered, trying direct call...\n", event_name);
-    return js_module_call_event(event_name, layer);
+    // 未找到事件映射：不要对带点号的事件名做 eval
+    return -1;
 }
 
 
@@ -606,8 +767,6 @@ int js_module_call_layer_event(const char* layer_id, const char* event_type)
     // 构建完整事件名称
     char full_event_name[128];
     build_event_name(layer_id, event_type, full_event_name, sizeof(full_event_name));
-
-    printf("JS: Calling event '%s' on layer '%s'\n", full_event_name, layer_id);
 
     // 1. 首先尝试调用 C 事件处理器
     for (int i = 0; i < g_c_event_handler_count; i++) {
@@ -638,17 +797,17 @@ int js_module_trigger_layer_event(Layer* layer, const char* event_name)
     if (layer->event) {
         // 检查 click 事件
         if (strcmp(event_name, "click") == 0 && layer->event->click) {
-            layer->event->click(layer);
+            EVENT_INVOKE(layer->event->click, layer);
             return 0;
         }
         // 检查 press 事件
         if (strcmp(event_name, "press") == 0 && layer->event->press) {
-            layer->event->press(layer);
+            EVENT_INVOKE(layer->event->press, layer);
             return 0;
         }
         // 检查 scroll 事件
         if (strcmp(event_name, "scroll") == 0 && layer->event->scroll) {
-            layer->event->scroll(layer);
+            EVENT_INVOKE(layer->event->scroll, layer);
             return 0;
         }
     }
@@ -693,7 +852,7 @@ int js_module_set_event(const char* layer_id, const char* event_name, const char
     }
 
     // 设置图层事件
-    int result = js_module_set_layer_event(layer, event_name, event_func_name, (void*)handler);
+    int result = js_module_set_layer_event(layer, event_name, event_func_name, handler);
     if (result == 0) {
         printf("JS: Set event '%s' for layer '%s' -> '%s'\n", event_name, layer_id, event_func_name);
         
@@ -813,4 +972,12 @@ char* js_module_read_file(const char* file_path) {
 
     printf("JS: Successfully read %ld bytes from file %s\n", bytes_read, file_path);
     return buffer;
+}
+
+int js_module_resize_root(int width, int height)
+{
+    if (!g_layer_root || width <= 0 || height <= 0) return -1;
+    layout_resize(g_layer_root, width, height);
+    backend_set_windowsize(width, height);
+    return 0;
 }

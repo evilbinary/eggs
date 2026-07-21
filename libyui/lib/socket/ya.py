@@ -5,7 +5,6 @@
 # * 邮箱: rootntsd@gmail.com
 # ********************************************************************
 target("socket")
-add_packages(get_config('default_libc'))
 set_kind("static")
 add_files(
     'socket.c',

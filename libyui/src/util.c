@@ -1,4 +1,5 @@
 #include "util.h"
+#include <ctype.h>
 #include <float.h> // 添加这个头文件以定义 DBL_EPSILON
 #include "ytype.h"
 
@@ -154,13 +155,22 @@ Color color_from_hex(const char* hex) {
 
 // 检查点是否在矩形内
 int is_point_in_rect(int x, int y, Rect rect) {
-    return (x >= rect.x && x <= rect.x + rect.w) && 
-           (y >= rect.y && y <= rect.y + rect.h);
+    return x >= rect.x && x < rect.x + rect.w &&
+           y >= rect.y && y < rect.y + rect.h;
+}
+
+int point_in_rect(Point pt, Rect rect) {
+    return is_point_in_rect(pt.x, pt.y, rect);
 }
 
 void parse_color(char* valuestring, Color* color) {
     // 支持多种颜色格式
-    if (strncmp(valuestring, "rgba(", 5) == 0) {
+    if (strcmp(valuestring, "transparent") == 0) {
+        color->r = 0;
+        color->g = 0;
+        color->b = 0;
+        color->a = 0;
+    } else if (strncmp(valuestring, "rgba(", 5) == 0) {
       // 解析 rgba(r, g, b, a) 格式，支持空格
       int r, g, b, a;
       sscanf(valuestring, "rgba(%d,%d,%d,%d)", &r, &g, &b, &a);
@@ -185,4 +195,140 @@ void parse_color(char* valuestring, Color* color) {
       sscanf(valuestring, "#%02hhx%02hhx%02hhx", &color->r, &color->g, &color->b);
       color->a = 255;  // 默认不透明
     }
-  }
+}
+
+// 获取 UTF-8 字符的字节长度（仅根据首字节判断）
+int utf8_char_len(unsigned char c) {
+    if ((c & 0x80) == 0) return 1;        // 0xxxxxxx - ASCII
+    if ((c & 0xE0) == 0xC0) return 2;     // 110xxxxx - 2字节
+    if ((c & 0xF0) == 0xE0) return 3;     // 1110xxxx - 3字节（中文）
+    if ((c & 0xF8) == 0xF0) return 4;     // 11110xxx - 4字节
+    return 1; // 默认返回1字节
+}
+
+int utf8_char_len_at(const char* s) {
+    const unsigned char* u = (const unsigned char*)s;
+    int len;
+
+    if (!u || !u[0]) {
+        return 0;
+    }
+
+    len = utf8_char_len(u[0]);
+    if (len == 2 && !u[1]) {
+        return 1;
+    }
+    if (len == 3 && (!u[1] || !u[2])) {
+        return 1;
+    }
+    if (len == 4 && (!u[1] || !u[2] || !u[3])) {
+        return 1;
+    }
+    return len;
+}
+
+// 获取光标前一个 UTF-8 字符的字节长度
+int get_prev_utf8_char_len(const char* text, int cursor_pos) {
+    if (cursor_pos <= 0) return 0;
+    
+    // 从光标位置向前查找 UTF-8 字符的起始位置
+    int i = cursor_pos - 1;
+    while (i >= 0 && ((unsigned char)text[i] & 0xC0) == 0x80) {
+        i--; // 跳过 UTF-8 continuation bytes (10xxxxxx)
+    }
+    
+    return cursor_pos - i;
+}
+
+// 获取光标处 UTF-8 字符的字节长度
+int get_current_utf8_char_len(const char* text, int cursor_pos) {
+    if (!text) {
+        return 0;
+    }
+    return utf8_char_len_at(text + cursor_pos);
+}
+
+int utf8_safe_prefix_bytes(const char* text, int byte_len) {
+    const char* p = text;
+    const char* end = text + byte_len;
+    const char* last = text;
+
+    if (!text || byte_len <= 0) {
+        return 0;
+    }
+
+    while (p < end && *p) {
+        int clen = utf8_char_len_at(p);
+        if (p + clen > end) {
+            break;
+        }
+        p += clen;
+        last = p;
+    }
+
+    return (int)(last - text);
+}
+
+int utf8_prev_prefix_bytes(const char* text, int byte_len) {
+    const char* p = text;
+    const char* end = text + byte_len;
+    const char* last_start = text;
+
+    if (!text || byte_len <= 0) {
+        return 0;
+    }
+
+    while (p < end && *p) {
+        int clen = utf8_char_len_at(p);
+        if (p + clen > end) {
+            break;
+        }
+        last_start = p;
+        p += clen;
+    }
+
+    return (int)(last_start - text);
+}
+
+int utf8_decode_codepoint(const char** text, uint32_t* codepoint) {
+    const unsigned char* p;
+
+    if (!text || !*text || !codepoint) {
+        return 0;
+    }
+
+    p = (const unsigned char*)(*text);
+    if (!p[0]) {
+        return 0;
+    }
+
+    if (p[0] < 0x80) {
+        *codepoint = p[0];
+        *text += 1;
+        return 1;
+    }
+    if ((p[0] & 0xE0) == 0xC0 && p[1]) {
+        *codepoint = ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+        *text += 2;
+        return 1;
+    }
+    if ((p[0] & 0xF0) == 0xE0 && p[1] && p[2]) {
+        *codepoint = ((uint32_t)(p[0] & 0x0F) << 12) |
+                     ((uint32_t)(p[1] & 0x3F) << 6) |
+                     (p[2] & 0x3F);
+        *text += 3;
+        return 1;
+    }
+    if ((p[0] & 0xF8) == 0xF0 && p[1] && p[2] && p[3]) {
+        *codepoint = ((uint32_t)(p[0] & 0x07) << 18) |
+                     ((uint32_t)(p[1] & 0x3F) << 12) |
+                     ((uint32_t)(p[2] & 0x3F) << 6) |
+                     (p[3] & 0x3F);
+        *text += 4;
+        return 1;
+    }
+
+    *codepoint = p[0];
+    *text += 1;
+    return 1;
+}

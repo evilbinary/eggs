@@ -1,14 +1,26 @@
 #include "lib/jsmodule/js_module.h"
 #include "../../lib/quickjs/quickjs.h"
 #include "../../src/layer.h"
+#include "../../src/layer_properties.h"
 #include "../../src/layout.h"
+#include "../../src/layer_update.h"
+#include "../../src/layer_lifecycle.h"
 #include "../../src/render.h"
+#include "../../src/theme_manager.h"
 #include "js_socket.h"
+#include "js_timer.h"
+#include "js_perf.h"
+#include "../../src/event.h"
+#include "../../src/backend.h"
+#include "../../src/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "../../lib/cjson/cJSON.h"
 
 // Layer 结构的最小定义
@@ -20,9 +32,23 @@ static JSRuntime* g_js_rt = NULL;
 static JSContext* g_js_ctx = NULL;
 extern struct Layer* g_layer_root;
 
+static void js_module_timer_tick(void)
+{
+    if (g_js_ctx) {
+        js_timer_run(g_js_ctx);
+    }
+}
+
 /* ====================== QuickJS 原生函数 ====================== */
 
 JSValue js_read_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_write_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_resize_root(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_screenshot(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_focus(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+
+static void print_quickjs_exception(JSContext* ctx, JSValueConst exception, const char* filename);
 
 // 设置文本
 static JSValue js_set_text(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -38,7 +64,6 @@ static JSValue js_set_text(JSContext *ctx, JSValueConst this_val, int argc, JSVa
         if (layer) {
             layer_set_text(layer, text); //
         
-            printf("JS(QuickJS): Set text for layer '%s': %s\n", layer_id, text);
         }
     }
 
@@ -181,8 +206,7 @@ static JSValue js_hide(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     if (layer_id && g_layer_root) {
         struct Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer->visible = 0; // IN_VISIBLE
-            printf("JS(QuickJS): Hide layer '%s'\n", layer_id);
+            layer_hide(layer);
         }
     }
 
@@ -201,8 +225,7 @@ static JSValue js_show(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     if (layer_id && g_layer_root) {
         struct Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer->visible = 1; // VISIBLE
-            printf("JS(QuickJS): Show layer '%s'\n", layer_id);
+            layer_show(layer);
         }
     }
 
@@ -222,14 +245,25 @@ static JSValue js_log(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
         }
     }
     printf("\n");
+    fflush(stdout);
     return JS_UNDEFINED;
 }
 
-// 从 JSON 字符串动态渲染到指定图层
+static int append_layer_child_qjs(Layer* parent, Layer* child) {
+    if (!parent || !child) return -1;
+    Layer** new_children = realloc(parent->children, sizeof(Layer*) * (parent->child_count + 1));
+    if (!new_children) return -2;
+    parent->children = new_children;
+    parent->children[parent->child_count] = child;
+    parent->child_count++;
+    return 0;
+}
+
+// 从 JSON 字符串动态渲染到指定图层（可选第三参数 append：true 时追加子图层，不清空已有子节点）
 static JSValue js_render_from_json(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) {
-        return JS_ThrowTypeError(ctx, "Expected 2 arguments: layer_id and json_string");
+        return JS_ThrowTypeError(ctx, "Expected at least 2 arguments: layer_id, json_string, append?");
     }
 
     size_t len1, len2;
@@ -242,76 +276,86 @@ static JSValue js_render_from_json(JSContext *ctx, JSValueConst this_val, int ar
         return JS_ThrowTypeError(ctx, "Invalid arguments");
     }
 
-    printf("JS(QuickJS): renderFromJson called with layer_id='%s'\n", layer_id);
-
-    if (g_layer_root) {
-        // 查找目标图层
-        Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
-        if (!parent_layer) {
-            printf("JS(QuickJS): ERROR - Layer '%s' not found\n", layer_id);
-            JS_FreeCString(ctx, layer_id);
-            JS_FreeCString(ctx, json_str);
-            return JS_NewInt32(ctx, -1);
-        }
-
-        printf("JS(QuickJS): Found parent layer '%s'\n", layer_id);
-
-        // 清除父图层的所有子图层
-        if (parent_layer->children) {
-            for (int i = 0; i < parent_layer->child_count; i++) {
-                if (parent_layer->children[i]) {
-                    destroy_layer(parent_layer->children[i]);
-                }
-            }
-            free(parent_layer->children);
-            parent_layer->children = NULL;
-        }
-        parent_layer->child_count = 0;
-
-        // 从 JSON 字符串创建新图层
-        Layer* new_layer = parse_layer_from_string(json_str, parent_layer);
-
-        if (new_layer) {
-            // 为子图层数组分配空间（初始分配1个，可以根据需要扩展）
-            parent_layer->children = malloc(sizeof(Layer*));
-            if (!parent_layer->children) {
-                printf("JS(QuickJS): ERROR - Failed to allocate memory for children array\n");
-                destroy_layer(new_layer);
-                JS_FreeCString(ctx, layer_id);
-                JS_FreeCString(ctx, json_str);
-                return JS_NewInt32(ctx, -2);
-            }
-
-            parent_layer->children[0] = new_layer;
-            parent_layer->child_count = 1;
-
-            // 重新布局父图层和新的子图层
-            printf("JS(QuickJS): Reloading layout for parent layer '%s'\n", layer_id);
-            layout_layer(parent_layer);
-            printf("JS(QuickJS): Layout updated successfully\n");
-
-            // 为新创建的图层加载字体
-            printf("JS(QuickJS): Loading fonts for new layer\n");
-            load_all_fonts(new_layer);
-            printf("JS(QuickJS): Fonts loaded successfully\n");
-
-            printf("JS(QuickJS): Successfully rendered JSON to layer '%s', new layer id: '%s'\n",
-                   layer_id, new_layer->id);
-            JS_FreeCString(ctx, layer_id);
-            JS_FreeCString(ctx, json_str);
-            return JS_NewInt32(ctx, 0);
-        } else {
-            printf("JS(QuickJS): ERROR - Failed to parse JSON string\n");
-            JS_FreeCString(ctx, layer_id);
-            JS_FreeCString(ctx, json_str);
-            return JS_NewInt32(ctx, -3);
-        }
+    int append = 0;
+    if (argc >= 3) {
+        append = JS_ToBool(ctx, argv[2]);
     }
 
-    printf("JS(QuickJS): ERROR - g_layer_root is NULL\n");
+    const char* json_source_path = NULL;
+    if (argc >= 4) {
+        json_source_path = JS_ToCStringLen(ctx, NULL, argv[3]);
+    }
+
+    LOGD("js", "renderFromJson called with layer_id='%s', append=%d", layer_id, append);
+
+    if (!g_layer_root) {
+        JS_FreeCString(ctx, layer_id);
+        JS_FreeCString(ctx, json_str);
+        return JS_NewInt32(ctx, -4);
+    }
+
+    Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
+    if (!parent_layer) {
+        LOGE("js", "renderFromJson: layer '%s' not found", layer_id);
+        JS_FreeCString(ctx, layer_id);
+        JS_FreeCString(ctx, json_str);
+        return JS_NewInt32(ctx, -1);
+    }
+
+    if (!append && parent_layer->children) {
+        for (int i = 0; i < parent_layer->child_count; i++) {
+            if (parent_layer->children[i]) {
+                layer_lifecycle_before_destroy(parent_layer->children[i]);
+                destroy_layer(parent_layer->children[i]);
+            }
+        }
+        free(parent_layer->children);
+        parent_layer->children = NULL;
+        parent_layer->child_count = 0;
+    }
+
+    Layer* new_layer = parse_layer_from_string(json_str, parent_layer);
+    if (!new_layer) {
+        JS_FreeCString(ctx, layer_id);
+        JS_FreeCString(ctx, json_str);
+        return JS_NewInt32(ctx, -3);
+    }
+    new_layer->visible = IN_VISIBLE;
+
+    if (append) {
+        if (append_layer_child_qjs(parent_layer, new_layer) != 0) {
+            destroy_layer(new_layer);
+            JS_FreeCString(ctx, layer_id);
+            JS_FreeCString(ctx, json_str);
+            return JS_NewInt32(ctx, -2);
+        }
+    } else {
+        parent_layer->children = malloc(sizeof(Layer*));
+        if (!parent_layer->children) {
+            destroy_layer(new_layer);
+            JS_FreeCString(ctx, layer_id);
+            JS_FreeCString(ctx, json_str);
+            return JS_NewInt32(ctx, -2);
+        }
+        parent_layer->children[0] = new_layer;
+        parent_layer->child_count = 1;
+    }
+
+    layout_layer(parent_layer);
+    theme_manager_apply_to_tree(new_layer);
+
+    cJSON* page_json = parse_json_string(json_str);
+    if (page_json) {
+        js_module_load_from_json(page_json, json_source_path, 1);
+        cJSON_Delete(page_json);
+    }
+
+    if (json_source_path) JS_FreeCString(ctx, json_source_path);
+
+    LOGD("js", "rendered JSON to layer '%s', new layer id: '%s'", layer_id, new_layer->id);
     JS_FreeCString(ctx, layer_id);
     JS_FreeCString(ctx, json_str);
-    return JS_NewInt32(ctx, -4);
+    return JS_NewInt32(ctx, 0);
 }
 
 // JSON 增量更新
@@ -611,6 +655,8 @@ int js_module_init(void)
 
     // 注册 API 函数
     js_module_register_api();
+    js_module_init_layer_lifecycle();
+    backend_register_update_callback(js_module_timer_tick);
 
     printf("JS(QuickJS): QuickJS engine initialized\n");
     return 0;
@@ -619,7 +665,13 @@ int js_module_init(void)
 // 清理 JS 引擎
 void js_module_cleanup(void)
 {
+    if (g_layer_root) {
+        js_module_shutdown();
+    }
+    g_layer_root = NULL;
+
     if (g_js_ctx) {
+        js_timer_clear_all(g_js_ctx);
         JS_FreeContext(g_js_ctx);
         g_js_ctx = NULL;
     }
@@ -629,7 +681,518 @@ void js_module_cleanup(void)
     }
 }
 
+// ====================== Layer 包装对象支持 ======================
+
+// 前向声明 (使用正确的 getter/setter 签名)
+static JSValue js_layer_wrapper_get_text(JSContext* ctx, JSValueConst this_val);
+static JSValue js_layer_wrapper_set_text(JSContext* ctx, JSValueConst this_val, JSValueConst val);
+static JSValue js_layer_wrapper_get_style(JSContext* ctx, JSValueConst this_val);
+static JSValue js_layer_wrapper_set_style(JSContext* ctx, JSValueConst this_val, JSValueConst val);
+static JSValue js_layer_wrapper_get_visible(JSContext* ctx, JSValueConst this_val);
+static JSValue js_layer_wrapper_set_visible(JSContext* ctx, JSValueConst this_val, JSValueConst val);
+static JSValue js_layer_wrapper_get_variant(JSContext* ctx, JSValueConst this_val);
+static JSValue js_layer_wrapper_set_variant(JSContext* ctx, JSValueConst this_val, JSValueConst val);
+static JSValue js_layer_wrapper_get_size(JSContext* ctx, JSValueConst this_val);
+static JSValue js_layer_wrapper_set_size(JSContext* ctx, JSValueConst this_val, JSValueConst val);
+
+// 从包装对象获取 Layer 指针
+static Layer* js_get_layer_from_wrapper(JSContext* ctx, JSValueConst val)
+{
+    if (!JS_IsObject(val)) {
+        return NULL;
+    }
+
+    JSValue ptr_val = JS_GetPropertyStr(ctx, val, "__layer_ptr");
+    if (JS_IsUndefined(ptr_val) || JS_IsNull(ptr_val)) {
+        JS_FreeValue(ctx, ptr_val);
+        return NULL;
+    }
+
+    int64_t ptr_int = 0;
+    if (JS_ToInt64(ctx, &ptr_int, ptr_val) != 0 || ptr_int == 0) {
+        JS_FreeValue(ctx, ptr_val);
+        return NULL;
+    }
+
+    JS_FreeValue(ctx, ptr_val);
+
+    Layer* layer = (Layer*)(uintptr_t)ptr_int;
+    return layer;
+}
+
+// Layer 包装对象的 text 属性 getter
+static JSValue js_layer_wrapper_get_text(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+    
+    const char* text = layer_get_text(layer);
+    return JS_NewString(ctx, text ? text : "");
+}
+
+// Layer 包装对象的 text 属性 setter
+static JSValue js_layer_wrapper_set_text(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    const char* text = JS_ToCString(ctx, val);
+    if (text) {
+        yui_set_text(layer, text);
+        JS_FreeCString(ctx, text);
+    }
+    return JS_UNDEFINED;
+}
+
+// Layer 包装对象的 style 属性 getter
+static JSValue js_layer_wrapper_get_style(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+    
+    // 创建一个包含当前样式的对象
+    JSValue style_obj = JS_NewObject(ctx);
+    
+    // 添加 color 属性
+    char color_str[32];
+    snprintf(color_str, sizeof(color_str), "#%02X%02X%02X", layer->color.r, layer->color.g, layer->color.b);
+    JS_SetPropertyStr(ctx, style_obj, "color", JS_NewString(ctx, color_str));
+    
+    // 添加 bgColor 属性
+    char bg_color_str[32];
+    snprintf(bg_color_str, sizeof(bg_color_str), "#%02X%02X%02X", layer->bg_color.r, layer->bg_color.g, layer->bg_color.b);
+    JS_SetPropertyStr(ctx, style_obj, "bgColor", JS_NewString(ctx, bg_color_str));
+    
+    return style_obj;
+}
+
+// Layer 包装对象的 style 属性 setter
+static JSValue js_layer_wrapper_set_style(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    int dirty = 0;
+
+    // 获取 color 属性
+    JSValue color_val = JS_GetPropertyStr(ctx, val, "color");
+    if (!JS_IsUndefined(color_val)) {
+        const char* color_str = JS_ToCString(ctx, color_val);
+        if (color_str) {
+            extern void parse_color(char* valuestring, Color* color);
+            parse_color((char*)color_str, &layer->color);
+            JS_FreeCString(ctx, color_str);
+            dirty = 1;
+        }
+    }
+    JS_FreeValue(ctx, color_val);
+
+    // 获取 bgColor 属性
+    JSValue bg_color_val = JS_GetPropertyStr(ctx, val, "bgColor");
+    if (!JS_IsUndefined(bg_color_val)) {
+        const char* bg_color_str = JS_ToCString(ctx, bg_color_val);
+        if (bg_color_str) {
+            extern void parse_color(char* valuestring, Color* color);
+            parse_color((char*)bg_color_str, &layer->bg_color);
+            JS_FreeCString(ctx, bg_color_str);
+            dirty = 1;
+        }
+    }
+    JS_FreeValue(ctx, bg_color_val);
+
+    if (dirty) {
+        mark_layer_dirty(layer, DIRTY_COLOR);
+    }
+
+    return JS_UNDEFINED;
+}
+
+// Layer 包装对象的 visible 属性 getter
+static JSValue js_layer_wrapper_get_visible(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+    return JS_NewBool(ctx, layer->visible == VISIBLE);
+}
+
+// Layer 包装对象的 visible 属性 setter
+static JSValue js_layer_wrapper_set_visible(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    int js_visible = JS_ToBool(ctx, val);
+    layer->visible = js_visible ? VISIBLE : IN_VISIBLE;
+    mark_layer_dirty(layer, DIRTY_VISIBLE | DIRTY_LAYOUT);
+
+    // 触发父容器重新布局
+    if (layer->parent) {
+        mark_layer_dirty(layer->parent, DIRTY_LAYOUT);
+        layout_layer(layer->parent);
+    }
+
+    return JS_UNDEFINED;
+}
+
+static JSValue js_layer_wrapper_get_variant(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_NewString(ctx, "");
+    return JS_NewString(ctx, layer->variant ? layer->variant : "");
+}
+
+static JSValue js_layer_wrapper_set_variant(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    const char* variant = JS_ToCString(ctx, val);
+    if (!variant) return JS_UNDEFINED;
+
+    extern int layer_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating);
+    cJSON* json_value = cJSON_CreateString(variant);
+    layer_set_property_from_json(layer, "variant", json_value, 0);
+    cJSON_Delete(json_value);
+    JS_FreeCString(ctx, variant);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_layer_wrapper_get_number_property(JSContext* ctx, Layer* layer, const char* key)
+{
+    if (!layer || !key) return JS_UNDEFINED;
+    extern cJSON* layer_get_property_as_json(Layer* layer, const char* key);
+    cJSON* value = layer_get_property_as_json(layer, key);
+    if (!value) return JS_UNDEFINED;
+    JSValue result = JS_UNDEFINED;
+    if (cJSON_IsNumber(value)) {
+        result = JS_NewFloat64(ctx, value->valuedouble);
+    }
+    cJSON_Delete(value);
+    return result;
+}
+
+static JSValue js_layer_wrapper_set_number_property(JSContext* ctx, Layer* layer, const char* key, JSValueConst val)
+{
+    if (!layer || !key) return JS_UNDEFINED;
+    double number = 0;
+    if (JS_ToFloat64(ctx, &number, val) != 0) return JS_UNDEFINED;
+    extern int layer_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating);
+    cJSON* json_value = cJSON_CreateNumber(number);
+    if (json_value) {
+        layer_set_property_from_json(layer, key, json_value, 0);
+        cJSON_Delete(json_value);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue js_layer_wrapper_get_page(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_get_number_property(ctx, layer, "page");
+}
+
+static JSValue js_layer_wrapper_set_page(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_set_number_property(ctx, layer, "page", val);
+}
+
+static JSValue js_layer_wrapper_get_page_size(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_get_number_property(ctx, layer, "pageSize");
+}
+
+static JSValue js_layer_wrapper_set_page_size(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_set_number_property(ctx, layer, "pageSize", val);
+}
+
+static JSValue js_layer_wrapper_get_total(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_get_number_property(ctx, layer, "total");
+}
+
+static JSValue js_layer_wrapper_set_total(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    return js_layer_wrapper_set_number_property(ctx, layer, "total", val);
+}
+
+// Layer 包装对象的 size 属性 getter
+static JSValue js_layer_wrapper_get_size(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    JSValue arr = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, arr, 0, JS_NewInt32(ctx, layer->rect.w));
+    JS_SetPropertyUint32(ctx, arr, 1, JS_NewInt32(ctx, layer->rect.h));
+    return arr;
+}
+
+// Layer 包装对象的 size 属性 setter
+static JSValue js_layer_wrapper_set_size(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    if (!JS_IsArray(ctx, val)) return JS_UNDEFINED;
+
+    JSValue w_val = JS_GetPropertyUint32(ctx, val, 0);
+    JSValue h_val = JS_GetPropertyUint32(ctx, val, 1);
+
+    int w = 0, h = 0;
+    if (JS_ToInt32(ctx, &w, w_val) == 0 && JS_ToInt32(ctx, &h, h_val) == 0) {
+        layer->rect.w = w;
+        layer->rect.h = h;
+        layer->fixed_width = w;
+        layer->fixed_height = h;
+        mark_layer_dirty(layer, DIRTY_RECT | DIRTY_LAYOUT);
+
+        // 触发父容器重新布局
+        if (layer->parent) {
+            mark_layer_dirty(layer->parent, DIRTY_LAYOUT);
+            layout_layer(layer->parent);
+        }
+    }
+
+    JS_FreeValue(ctx, w_val);
+    JS_FreeValue(ctx, h_val);
+    return JS_UNDEFINED;
+}
+
+static JSValue js_cjson_to_jsvalue(JSContext* ctx, const cJSON* item)
+{
+    if (!item) {
+        return JS_UNDEFINED;
+    }
+    if (cJSON_IsBool(item)) {
+        return JS_NewBool(ctx, cJSON_IsTrue(item));
+    }
+    if (cJSON_IsNull(item)) {
+        return JS_NULL;
+    }
+    if (cJSON_IsNumber(item)) {
+        return JS_NewFloat64(ctx, item->valuedouble);
+    }
+    if (cJSON_IsString(item)) {
+        return JS_NewString(ctx, item->valuestring);
+    }
+    if (cJSON_IsArray(item)) {
+        JSValue arr = JS_NewArray(ctx);
+        const cJSON* child = item->child;
+        uint32_t index = 0;
+        while (child) {
+            JS_SetPropertyUint32(ctx, arr, index++, js_cjson_to_jsvalue(ctx, child));
+            child = child->next;
+        }
+        return arr;
+    }
+    if (cJSON_IsObject(item)) {
+        JSValue obj = JS_NewObject(ctx);
+        const cJSON* child = item->child;
+        while (child) {
+            if (child->string) {
+                JS_SetPropertyStr(ctx, obj, child->string, js_cjson_to_jsvalue(ctx, child));
+            }
+            child = child->next;
+        }
+        return obj;
+    }
+    return JS_UNDEFINED;
+}
+
+// Layer 包装对象的 data 属性 getter
+static JSValue js_layer_wrapper_get_data(JSContext* ctx, JSValueConst this_val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    cJSON* value = layer_get_property_as_json(layer, "data");
+    if (!value) {
+        return JS_UNDEFINED;
+    }
+
+    JSValue result = js_cjson_to_jsvalue(ctx, value);
+    cJSON_Delete(value);
+    return result;
+}
+
+// Layer 包装对象的 data 属性 setter（通过统一属性系统）
+static JSValue js_layer_wrapper_set_data(JSContext* ctx, JSValueConst this_val, JSValueConst val)
+{
+    Layer* layer = js_get_layer_from_wrapper(ctx, this_val);
+    if (!layer) return JS_UNDEFINED;
+
+    // JSON.stringify → cJSON 后走统一 property 系统
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue json_obj = JS_GetPropertyStr(ctx, global, "JSON");
+    JSValue stringify = JS_GetPropertyStr(ctx, json_obj, "stringify");
+    
+    JSValue json_str_val = JS_Call(ctx, stringify, json_obj, 1, &val);
+    if (JS_IsException(json_str_val)) {
+        JS_FreeValue(ctx, json_str_val); JS_FreeValue(ctx, stringify);
+        JS_FreeValue(ctx, json_obj); JS_FreeValue(ctx, global);
+        return JS_UNDEFINED;
+    }
+    
+    const char* json_str = JS_ToCString(ctx, json_str_val);
+    if (json_str) {
+        cJSON* data_json = cJSON_Parse(json_str);
+        if (data_json) {
+            int result = layer_set_data(layer, data_json);
+            if (result != 2) {
+                cJSON_Delete(data_json);
+            }
+        }
+        JS_FreeCString(ctx, json_str);
+    }
+    
+    JS_FreeValue(ctx, json_str_val);
+    JS_FreeValue(ctx, stringify);
+    JS_FreeValue(ctx, json_obj);
+    JS_FreeValue(ctx, global);
+    
+    return JS_UNDEFINED;
+}
+
+// 创建 Layer 包装对象
+static JSValue js_create_layer_wrapper(JSContext* ctx, Layer* layer)
+{
+    // 创建普通对象
+    JSValue wrapper = JS_NewObject(ctx);
+
+    // 使用整数存储 layer 指针（避免字符串 GC 问题）
+    JSValue layer_ptr_val = JS_NewInt64(ctx, (int64_t)(uintptr_t)layer);
+    JS_SetPropertyStr(ctx, wrapper, "__layer_ptr", layer_ptr_val);
+    JS_FreeValue(ctx, layer_ptr_val);
+
+    // 定义 text 属性的 getter/setter (使用 JS_NewCFunction2 指定正确的类型)
+    JSValue text_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_text, "get text", 0, JS_CFUNC_getter, 0);
+    JSValue text_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_text, "set text", 1, JS_CFUNC_setter, 0);
+    JSAtom text_atom = JS_NewAtom(ctx, "text");
+    JS_DefinePropertyGetSet(ctx, wrapper, text_atom, text_getter, text_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, text_atom);
+    
+    // 定义 style 属性的 getter/setter
+    JSValue style_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_style, "get style", 0, JS_CFUNC_getter, 0);
+    JSValue style_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_style, "set style", 1, JS_CFUNC_setter, 0);
+    JSAtom style_atom = JS_NewAtom(ctx, "style");
+    JS_DefinePropertyGetSet(ctx, wrapper, style_atom, style_getter, style_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, style_atom);
+    
+    // 定义 data 属性的 getter/setter
+    JSValue data_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_data, "get data", 0, JS_CFUNC_getter, 0);
+    JSValue data_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_data, "set data", 1, JS_CFUNC_setter, 0);
+    JSAtom data_atom = JS_NewAtom(ctx, "data");
+    JS_DefinePropertyGetSet(ctx, wrapper, data_atom, data_getter, data_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, data_atom);
+
+    // 定义 visible 属性的 getter/setter
+    JSValue visible_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_visible, "get visible", 0, JS_CFUNC_getter, 0);
+    JSValue visible_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_visible, "set visible", 1, JS_CFUNC_setter, 0);
+    JSAtom visible_atom = JS_NewAtom(ctx, "visible");
+    JS_DefinePropertyGetSet(ctx, wrapper, visible_atom, visible_getter, visible_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, visible_atom);
+
+    JSValue variant_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_variant, "get variant", 0, JS_CFUNC_getter, 0);
+    JSValue variant_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_variant, "set variant", 1, JS_CFUNC_setter, 0);
+    JSAtom variant_atom = JS_NewAtom(ctx, "variant");
+    JS_DefinePropertyGetSet(ctx, wrapper, variant_atom, variant_getter, variant_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, variant_atom);
+
+    // 定义 size 属性的 getter/setter
+    JSValue size_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_size, "get size", 0, JS_CFUNC_getter, 0);
+    JSValue size_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_size, "set size", 1, JS_CFUNC_setter, 0);
+    JSAtom size_atom = JS_NewAtom(ctx, "size");
+    JS_DefinePropertyGetSet(ctx, wrapper, size_atom, size_getter, size_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, size_atom);
+
+    JSValue page_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_page, "get page", 0, JS_CFUNC_getter, 0);
+    JSValue page_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_page, "set page", 1, JS_CFUNC_setter, 0);
+    JSAtom page_atom = JS_NewAtom(ctx, "page");
+    JS_DefinePropertyGetSet(ctx, wrapper, page_atom, page_getter, page_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, page_atom);
+
+    JSValue page_size_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_page_size, "get pageSize", 0, JS_CFUNC_getter, 0);
+    JSValue page_size_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_page_size, "set pageSize", 1, JS_CFUNC_setter, 0);
+    JSAtom page_size_atom = JS_NewAtom(ctx, "pageSize");
+    JS_DefinePropertyGetSet(ctx, wrapper, page_size_atom, page_size_getter, page_size_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, page_size_atom);
+
+    JSValue total_getter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_get_total, "get total", 0, JS_CFUNC_getter, 0);
+    JSValue total_setter = JS_NewCFunction2(ctx, (JSCFunction*)js_layer_wrapper_set_total, "set total", 1, JS_CFUNC_setter, 0);
+    JSAtom total_atom = JS_NewAtom(ctx, "total");
+    JS_DefinePropertyGetSet(ctx, wrapper, total_atom, total_getter, total_setter, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, total_atom);
+
+    return wrapper;
+}
+
+// YUI.find() - 查找图层并返回包装对象
+static JSValue js_yui_find(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+{
+    if (argc < 1) return JS_NULL;
+    
+    const char* layer_id = JS_ToCString(ctx, argv[0]);
+    if (!layer_id || !g_layer_root) return JS_NULL;
+    
+    Layer* layer = find_layer_by_id(g_layer_root, layer_id);
+    if (!layer) {
+        JS_FreeCString(ctx, layer_id);
+        return JS_NULL;
+    }
+    
+    // 创建 Layer 包装对象
+    JSValue wrapper = js_create_layer_wrapper(ctx, layer);
+    
+    JS_FreeCString(ctx, layer_id);
+    
+    return wrapper;
+}
+
 // 注册 C API 到 JS
+/* ====================== YUI.call Bridge ====================== */
+
+void* js_module_get_context(void) {
+    return g_js_ctx;
+}
+
+static JSValue js_native_call(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_NewString(ctx, "{\"error\":\"Missing event name\"}");
+    }
+
+    const char* event_name = JS_ToCString(ctx, argv[0]);
+    if (!event_name) {
+        return JS_NewString(ctx, "{\"error\":\"Invalid event name\"}");
+    }
+
+    const char* json_args = NULL;
+    if (argc > 1 && JS_IsString(argv[1])) {
+        json_args = JS_ToCString(ctx, argv[1]);
+    }
+
+    EventHandler handler = find_event_by_name(event_name);
+    JSValue result;
+    if (handler) {
+        char* ret = (char*)handler((void*)json_args);
+        result = ret ? JS_NewString(ctx, ret) : JS_NewString(ctx, "{\"success\":true}");
+        free(ret);
+    } else {
+        char buf[512];
+        snprintf(buf, sizeof(buf), "{\"error\":\"No handler for event: %s\"}", event_name);
+        result = JS_NewString(ctx, buf);
+    }
+
+    if (json_args) JS_FreeCString(ctx, json_args);
+    JS_FreeCString(ctx, event_name);
+    return result;
+}
+
 void js_module_register_api(void)
 {
     if (!g_js_ctx) return;
@@ -637,8 +1200,15 @@ void js_module_register_api(void)
     // 获取全局对象
     JSValue global_obj = JS_GetGlobalObject(g_js_ctx);
 
+    // 注意：Layer 包装对象现在使用普通 JS 对象，通过 __layer_ptr 属性存储指针
+    // getter/setter 在创建对象时动态设置
+
     // 注册 YUI 对象
     JSValue yui_obj = JS_NewObject(g_js_ctx);
+    
+    // 添加 find 方法到 YUI 对象
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "find", JS_NewCFunction(g_js_ctx, js_yui_find, "find", 1));
+    printf("JS(QuickJS): Added find() method to YUI object\n");
 
     // 设置 YUI 的方法
     JS_SetPropertyStr(g_js_ctx, yui_obj, "setText", JS_NewCFunction(g_js_ctx, js_set_text, "setText", 2));
@@ -649,7 +1219,7 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "setBgColor", JS_NewCFunction(g_js_ctx, js_set_bg_color, "setBgColor", 2));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "hide", JS_NewCFunction(g_js_ctx, js_hide, "hide", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "show", JS_NewCFunction(g_js_ctx, js_show, "show", 1));
-    JS_SetPropertyStr(g_js_ctx, yui_obj, "renderFromJson", JS_NewCFunction(g_js_ctx, js_render_from_json, "renderFromJson", 2));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "renderFromJson", JS_NewCFunction(g_js_ctx, js_render_from_json, "renderFromJson", 3));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "update", JS_NewCFunction(g_js_ctx, js_update, "update", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "log", JS_NewCFunction(g_js_ctx, js_log, "log", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "themeLoad", JS_NewCFunction(g_js_ctx, js_theme_load, "themeLoad", 1));
@@ -659,6 +1229,11 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "themeUnload", JS_NewCFunction(g_js_ctx, js_theme_unload, "themeUnload", 1));
 
     JS_SetPropertyStr(g_js_ctx, yui_obj, "readFile", JS_NewCFunction(g_js_ctx, js_read_file, "readFile", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "writeFile", JS_NewCFunction(g_js_ctx, js_write_file, "writeFile", 2));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "resizeRoot", JS_NewCFunction(g_js_ctx, js_resize_root, "resizeRoot", 2));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "screenshot", JS_NewCFunction(g_js_ctx, js_screenshot, "screenshot", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "listDir", JS_NewCFunction(g_js_ctx, js_list_dir, "listDir", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "focus", JS_NewCFunction(g_js_ctx, js_focus, "focus", 1));
 
     // 创建并注册 Inspect 对象
     JSValue inspect_obj = JS_NewObject(g_js_ctx);
@@ -668,12 +1243,20 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, inspect_obj, "setShowBounds", JS_NewCFunction(g_js_ctx, js_inspect_set_show_bounds, "setShowBounds", 1));
     JS_SetPropertyStr(g_js_ctx, inspect_obj, "setShowInfo", JS_NewCFunction(g_js_ctx, js_inspect_set_show_info, "setShowInfo", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "inspect", inspect_obj);
+
+    js_module_register_perf_api(g_js_ctx, yui_obj);
     
     // 添加 setEvent 到 YUI 对象
     JS_SetPropertyStr(g_js_ctx, yui_obj, "setEvent", JS_NewCFunction(g_js_ctx, js_set_event, "setEvent", 3));
 
     // 将 YUI 对象添加到全局
     JS_SetPropertyStr(g_js_ctx, global_obj, "YUI", yui_obj);
+
+    // 创建 yui 小写别名（指向同一个 YUI 对象）
+    // 必须 DupValue 因为 JS_SetPropertyStr 会 steal 引用
+    JS_DupValue(g_js_ctx, yui_obj);
+    JS_SetPropertyStr(g_js_ctx, global_obj, "yui", yui_obj);
+    printf("JS(QuickJS): Created 'yui' alias for 'YUI'\n");
     
     // 也注册为全局函数（为了兼容性）
     JS_SetPropertyStr(g_js_ctx, global_obj, "setText", JS_NewCFunction(g_js_ctx, js_set_text, "setText", 2));
@@ -690,6 +1273,14 @@ void js_module_register_api(void)
     // 注册 readFile 到全局对象
     JS_SetPropertyStr(g_js_ctx, global_obj, "readFile", JS_NewCFunction(g_js_ctx, js_read_file, "readFile", 1));
 
+    js_timer_register_globals(g_js_ctx);
+
+    // 注册 print 到全局对象（与 log 功能相同）
+    JS_SetPropertyStr(g_js_ctx, global_obj, "print", JS_NewCFunction(g_js_ctx, js_log, "print", 1));
+
+    // 注册 YUI.call 桥接（C 事件处理器调用入口）
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "call", JS_NewCFunction(g_js_ctx, js_native_call, "call", 2));
+    printf("JS(QuickJS): Registered YUI.call bridge\n");
 
     JS_FreeValue(g_js_ctx, global_obj);
 
@@ -807,55 +1398,182 @@ int js_module_load_file(const char* filename)
 }
 
 // 调用 JS 事件函数
+static int is_js_identifier_name(const char* name)
+{
+    if (!name || !name[0]) return 0;
+    if (!isalpha((unsigned char)name[0]) && name[0] != '_') return 0;
+    for (const char* p = name + 1; *p; ++p) {
+        if (!isalnum((unsigned char)*p) && *p != '_') return 0;
+    }
+    return 1;
+}
+
+static int call_js_function_value(JSContext* ctx, JSValue func, const char* event_name, Layer* layer)
+{
+    const PointerEvent* pe = get_current_pointer_event();
+    JSValue result;
+    if (pe && pe->device == POINTER_DEVICE_TOUCH) {
+        JSValue args[5];
+        args[0] = JS_NewString(ctx, pointer_phase_to_string(pe->phase));
+        args[1] = JS_NewInt32(ctx, pe->delta_x);
+        args[2] = JS_NewInt32(ctx, pe->delta_y);
+        args[3] = JS_NewInt32(ctx, pe->pointer_id);
+        args[4] = JS_NewInt32(ctx, pe->finger_count);
+        result = JS_Call(ctx, func, JS_UNDEFINED, 5, args);
+        JS_FreeValue(ctx, args[0]);
+        JS_FreeValue(ctx, args[1]);
+        JS_FreeValue(ctx, args[2]);
+        JS_FreeValue(ctx, args[3]);
+        JS_FreeValue(ctx, args[4]);
+    } else if (pe) {
+        JSValue args[3];
+        args[0] = JS_NewString(ctx, pointer_phase_to_string(pe->phase));
+        args[1] = JS_NewInt32(ctx, pe->delta_x);
+        args[2] = JS_NewInt32(ctx, pe->delta_y);
+        result = JS_Call(ctx, func, JS_UNDEFINED, 3, args);
+        JS_FreeValue(ctx, args[0]);
+        JS_FreeValue(ctx, args[1]);
+        JS_FreeValue(ctx, args[2]);
+    } else {
+        JSValue args[1];
+        args[0] = layer ? JS_NewString(ctx, layer->id) : JS_NULL;
+        result = JS_Call(ctx, func, JS_UNDEFINED, 1, args);
+        JS_FreeValue(ctx, args[0]);
+    }
+
+    if (JS_IsException(result)) {
+        JSValue exc = JS_GetException(ctx);
+        char err_prefix[256];
+        snprintf(err_prefix, sizeof(err_prefix), "event '%s'", event_name ? event_name : "<unknown>");
+        print_quickjs_exception(ctx, exc, err_prefix);
+        JS_FreeValue(ctx, exc);
+        JS_FreeValue(ctx, result);
+        return -1;
+    }
+
+    JS_FreeValue(ctx, result);
+    return 0;
+}
+
 int js_module_call_event(const char* event_name, Layer* layer)
 {
     if (!g_js_ctx || !event_name) return -1;
 
-    // 移除 @ 前缀（如果有）
-    const char* func_name = event_name;
-    if (func_name[0] == '@') {
-        func_name++;
-    }
+    // @ 前缀表示函数名引用，否则是内联 JS 代码
+    if (event_name[0] == '@') {
+        // 函数名引用：移除 @ 前缀后查找全局函数并调用
+        const char* func_name = event_name + 1;
+        // 获取全局对象
+        JSValue global_obj = JS_GetGlobalObject(g_js_ctx);
+        JSValue func = JS_GetPropertyStr(g_js_ctx, global_obj, func_name);
 
-    // 获取全局对象
-    JSValue global_obj = JS_GetGlobalObject(g_js_ctx);
-    JSValue func = JS_GetPropertyStr(g_js_ctx, global_obj, func_name);
+        if (JS_IsUndefined(func) || JS_IsNull(func)) {
+            JS_FreeValue(g_js_ctx, global_obj);
+            JS_FreeValue(g_js_ctx, func);
+            // 全局函数不存在时，回退到事件映射表查找
+            return js_module_trigger_event(func_name, layer);
+        }
 
-    if (JS_IsUndefined(func) || JS_IsNull(func)) {
+        if (!JS_IsFunction(g_js_ctx, func)) {
+            JS_FreeValue(g_js_ctx, global_obj);
+            JS_FreeValue(g_js_ctx, func);
+            return js_module_trigger_event(func_name, layer);
+        }
+
+        int ret = call_js_function_value(g_js_ctx, func, event_name, layer);
         JS_FreeValue(g_js_ctx, global_obj);
         JS_FreeValue(g_js_ctx, func);
+        return ret;
+    }
+
+    if (is_js_identifier_name(event_name)) {
+        JSValue global_obj = JS_GetGlobalObject(g_js_ctx);
+        JSValue func = JS_GetPropertyStr(g_js_ctx, global_obj, event_name);
+        if (JS_IsFunction(g_js_ctx, func)) {
+            int ret = call_js_function_value(g_js_ctx, func, event_name, layer);
+            JS_FreeValue(g_js_ctx, global_obj);
+            JS_FreeValue(g_js_ctx, func);
+            return ret;
+        }
+        JS_FreeValue(g_js_ctx, global_obj);
+        JS_FreeValue(g_js_ctx, func);
+    }
+
+    if (strchr(event_name, '.') != NULL) {
         return -1;
     }
 
-    if (!JS_IsFunction(g_js_ctx, func)) {
-        JS_FreeValue(g_js_ctx, global_obj);
-        JS_FreeValue(g_js_ctx, func);
-        return -1;
+    // 内联 JS 代码：直接 eval 执行
+    const char* eval_src = event_name;
+    char* wrapped = NULL;
+    size_t eval_len = strlen(event_name);
+
+    if (strncmp(event_name, "function", 8) == 0) {
+        wrapped = malloc(eval_len + 3);
+        if (!wrapped) return -1;
+        wrapped[0] = '(';
+        memcpy(wrapped + 1, event_name, eval_len);
+        wrapped[1 + eval_len] = ')';
+        wrapped[2 + eval_len] = '\0';
+        eval_src = wrapped;
+        eval_len += 2;
     }
 
-    // 准备参数
-    JSValue args[1];
-    args[0] = layer ? JS_NewString(g_js_ctx, layer->id) : JS_NULL;
+    JSValue val = JS_Eval(g_js_ctx, eval_src, eval_len, "<event>", JS_EVAL_TYPE_GLOBAL);
+    if (wrapped) free(wrapped);
 
-    // 调用函数
-    JSValue result = JS_Call(g_js_ctx, func, JS_UNDEFINED, 1, args);
-
-    // 清理
-    JS_FreeValue(g_js_ctx, args[0]);
-    JS_FreeValue(g_js_ctx, global_obj);
-    JS_FreeValue(g_js_ctx, func);
-
-    if (JS_IsException(result)) {
+    if (JS_IsException(val)) {
         JSValue exc = JS_GetException(g_js_ctx);
-        char err_prefix[256];
-        snprintf(err_prefix, sizeof(err_prefix), "event '%s'", event_name);
-        print_quickjs_exception(g_js_ctx, exc, err_prefix);
+        print_quickjs_exception(g_js_ctx, exc, "<event>");
         JS_FreeValue(g_js_ctx, exc);
-        JS_FreeValue(g_js_ctx, result);
+        JS_FreeValue(g_js_ctx, val);
         return -1;
     }
 
-    JS_FreeValue(g_js_ctx, result);
+    // 如果求值结果是函数则调用它
+    if (JS_IsFunction(g_js_ctx, val)) {
+        const PointerEvent* pe = get_current_pointer_event();
+        JSValue result;
+        if (pe && pe->device == POINTER_DEVICE_TOUCH) {
+            JSValue args[5];
+            args[0] = JS_NewString(g_js_ctx, pointer_phase_to_string(pe->phase));
+            args[1] = JS_NewInt32(g_js_ctx, pe->delta_x);
+            args[2] = JS_NewInt32(g_js_ctx, pe->delta_y);
+            args[3] = JS_NewInt32(g_js_ctx, pe->pointer_id);
+            args[4] = JS_NewInt32(g_js_ctx, pe->finger_count);
+            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 5, args);
+            JS_FreeValue(g_js_ctx, args[0]);
+            JS_FreeValue(g_js_ctx, args[1]);
+            JS_FreeValue(g_js_ctx, args[2]);
+            JS_FreeValue(g_js_ctx, args[3]);
+            JS_FreeValue(g_js_ctx, args[4]);
+        } else if (pe) {
+            JSValue args[3];
+            args[0] = JS_NewString(g_js_ctx, pointer_phase_to_string(pe->phase));
+            args[1] = JS_NewInt32(g_js_ctx, pe->delta_x);
+            args[2] = JS_NewInt32(g_js_ctx, pe->delta_y);
+            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 3, args);
+            JS_FreeValue(g_js_ctx, args[0]);
+            JS_FreeValue(g_js_ctx, args[1]);
+            JS_FreeValue(g_js_ctx, args[2]);
+        } else {
+            JSValue args[1];
+            args[0] = layer ? JS_NewString(g_js_ctx, layer->id) : JS_NULL;
+            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 1, args);
+            JS_FreeValue(g_js_ctx, args[0]);
+        }
+
+        if (JS_IsException(result)) {
+            JSValue exc = JS_GetException(g_js_ctx);
+            print_quickjs_exception(g_js_ctx, exc, "<event>");
+            JS_FreeValue(g_js_ctx, exc);
+            JS_FreeValue(g_js_ctx, result);
+            JS_FreeValue(g_js_ctx, val);
+            return -1;
+        }
+        JS_FreeValue(g_js_ctx, result);
+    }
+    JS_FreeValue(g_js_ctx, val);
     return 0;
 }
 
@@ -882,4 +1600,131 @@ JSValue js_read_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     JSValue result = JS_NewString(ctx, content);
     free(content);
     return result;
+}
+
+// 文件写入函数绑定
+JSValue js_write_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "Expected 2 arguments: file_path, content");
+    }
+
+    const char* file_path = JS_ToCString(ctx, argv[0]);
+    if (!file_path) {
+        return JS_ThrowTypeError(ctx, "Invalid file path");
+    }
+
+    const char* content = JS_ToCString(ctx, argv[1]);
+    if (!content) {
+        JS_FreeCString(ctx, file_path);
+        return JS_ThrowTypeError(ctx, "Invalid content");
+    }
+
+    FILE* f = fopen(file_path, "w");
+    if (!f) {
+        JS_FreeCString(ctx, file_path);
+        JS_FreeCString(ctx, content);
+        return JS_FALSE;
+    }
+
+    fwrite(content, 1, strlen(content), f);
+    fclose(f);
+
+    JS_FreeCString(ctx, file_path);
+    JS_FreeCString(ctx, content);
+    return JS_TRUE;
+}
+
+JSValue js_resize_root(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "Expected 2 arguments: width, height");
+    }
+
+    int width = 0;
+    int height = 0;
+    if (JS_ToInt32(ctx, &width, argv[0]) != 0 || JS_ToInt32(ctx, &height, argv[1]) != 0) {
+        return JS_ThrowTypeError(ctx, "Invalid width or height");
+    }
+
+    extern int js_module_resize_root(int width, int height);
+    return JS_NewInt32(ctx, js_module_resize_root(width, height));
+}
+
+JSValue js_screenshot(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Expected 1 argument: file_path");
+    }
+
+    const char* file_path = JS_ToCString(ctx, argv[0]);
+    if (!file_path) {
+        return JS_ThrowTypeError(ctx, "Invalid file path");
+    }
+
+    int rc = backend_screenshot(file_path);
+    JS_FreeCString(ctx, file_path);
+    return JS_NewInt32(ctx, rc);
+}
+
+// 列出目录内容
+JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    const char* dir_path = ".";
+    int need_free = 0;
+
+    if (argc >= 1) {
+        dir_path = JS_ToCString(ctx, argv[0]);
+        if (!dir_path) dir_path = ".";
+        else need_free = 1;
+    }
+
+    DIR* dir = opendir(dir_path);
+    if (!dir) {
+        if (need_free) JS_FreeCString(ctx, dir_path);
+        return JS_NULL;
+    }
+
+    JSValue result = JS_NewArray(ctx);
+    int idx = 0;
+    struct dirent* entry;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+        JSValue item = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, item, "name", JS_NewString(ctx, entry->d_name));
+
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        struct stat st;
+        int is_dir = (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) ? 1 : 0;
+        JS_SetPropertyStr(ctx, item, "isDir", JS_NewBool(ctx, is_dir));
+
+        JS_SetPropertyUint32(ctx, result, idx++, item);
+    }
+
+    closedir(dir);
+    if (need_free) JS_FreeCString(ctx, dir_path);
+    return result;
+}
+
+JSValue js_focus(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !g_layer_root) return JS_UNDEFINED;
+
+    const char* layer_id = JS_ToCString(ctx, argv[0]);
+    if (!layer_id) return JS_UNDEFINED;
+
+    Layer* layer = find_layer_by_id(g_layer_root, layer_id);
+    JS_FreeCString(ctx, layer_id);
+
+    if (!layer) return JS_UNDEFINED;
+
+    // 清除旧焦点图层状态
+    extern Layer* focused_layer;
+    if (focused_layer && focused_layer != layer) {
+        CLEAR_STATE(focused_layer, LAYER_STATE_FOCUSED);
+    }
+
+    // 设置新焦点
+    focused_layer = layer;
+    SET_STATE(layer, LAYER_STATE_FOCUSED);
+
+    return JS_UNDEFINED;
 }

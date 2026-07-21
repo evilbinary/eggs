@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "component_registry.h"
 #include "event.h"
 #include "render.h"
 #include "ytype.h"
@@ -38,7 +39,18 @@
 extern LTDC_HandleTypeDef hltdc;
 extern DMA2D_HandleTypeDef hdma2d;
 
-float scale = 1.0;
+float yui_density = 1.0f;
+
+float backend_get_density(void) {
+    return yui_density > 0.0f ? yui_density : 1.0f;
+}
+
+void backend_set_density(float density) {
+    if (density > 0.0f) {
+        yui_density = density;
+    }
+}
+
 DFont* default_font = NULL;
 static uint32_t* framebuffer = NULL;
 
@@ -63,6 +75,9 @@ static TouchState touch_states[MAX_TOUCHES] = {0};
 
 // ====================== 初始化函数 ======================
 int backend_init() {
+    yui_component_registry_init();
+    yui_components_register_builtin();
+
     // 初始化显示缓冲区
     framebuffer = (uint32_t*)SDRAM_BANK_ADDR; // 使用外部SDRAM作为帧缓冲区
     
@@ -295,6 +310,19 @@ void backend_set_window_size(char* title) {
     // STM32 没有窗口标题概念，此功能不适用
 }
 
+void backend_set_resizable(int resizable) {
+    (void)resizable;
+}
+
+void backend_set_minimum_windowsize(int width, int height) {
+    (void)width;
+    (void)height;
+}
+
+void backend_set_resize_callback(ResizeCallback callback) {
+    (void)callback;
+}
+
 void backend_render_present() {
     if (!framebuffer || !display_needs_update) return;
     
@@ -426,53 +454,73 @@ void backend_run(Layer* ui_root) {
         for (int i = 0; i < MAX_TOUCHES; i++) {
             int x, y;
             bool active = touch_get_position(i, &x, &y);
+            int finger_count;
             
             if (active) {
                 if (!touch_states[i].active) {
-                    // 新的触摸按下
                     touch_states[i].active = true;
                     touch_states[i].x = x;
                     touch_states[i].y = y;
                     
-                    // 创建鼠标按下事件
-                    MouseEvent event = {0};
-                    event.type = MOUSE_DOWN;
+                    PointerEvent event = {0};
+                    event.device = POINTER_DEVICE_TOUCH;
+                    event.phase = POINTER_DOWN;
                     event.x = x;
                     event.y = y;
-                    event.button = MOUSE_LEFT;
-                    
-                    if (ui_root->handle_mouse_event) {
-                        ui_root->handle_mouse_event(ui_root, &event);
+                    event.button = 1;
+                    event.pointer_id = i;
+                    finger_count = 0;
+                    for (int j = 0; j < MAX_TOUCHES; j++) {
+                        if (touch_states[j].active) {
+                            finger_count++;
+                        }
                     }
+                    event.finger_count = finger_count;
+
+                    handle_pointer_event(ui_root, &event);
                 } else {
-                    // 触摸移动
+                    int dx = x - touch_states[i].x;
+                    int dy = y - touch_states[i].y;
                     touch_states[i].x = x;
                     touch_states[i].y = y;
                     
-                    // 创建鼠标移动事件
-                    MouseEvent event = {0};
-                    event.type = MOUSE_MOVE;
+                    PointerEvent event = {0};
+                    event.device = POINTER_DEVICE_TOUCH;
+                    event.phase = POINTER_MOVE;
                     event.x = x;
                     event.y = y;
-                    
-                    if (ui_root->handle_mouse_event) {
-                        ui_root->handle_mouse_event(ui_root, &event);
+                    event.delta_x = dx;
+                    event.delta_y = dy;
+                    event.pointer_id = i;
+                    finger_count = 0;
+                    for (int j = 0; j < MAX_TOUCHES; j++) {
+                        if (touch_states[j].active) {
+                            finger_count++;
+                        }
                     }
+                    event.finger_count = finger_count;
+
+                    handle_pointer_event(ui_root, &event);
                 }
             } else if (touch_states[i].active) {
-                // 触摸释放
                 touch_states[i].active = false;
                 
-                // 创建鼠标释放事件
-                MouseEvent event = {0};
-                event.type = MOUSE_UP;
+                PointerEvent event = {0};
+                event.device = POINTER_DEVICE_TOUCH;
+                event.phase = POINTER_UP;
                 event.x = touch_states[i].x;
                 event.y = touch_states[i].y;
-                event.button = MOUSE_LEFT;
-                
-                if (ui_root->handle_mouse_event) {
-                    ui_root->handle_mouse_event(ui_root, &event);
+                event.button = 1;
+                event.pointer_id = i;
+                finger_count = 0;
+                for (int j = 0; j < MAX_TOUCHES; j++) {
+                    if (touch_states[j].active) {
+                        finger_count++;
+                    }
                 }
+                event.finger_count = finger_count;
+
+                handle_pointer_event(ui_root, &event);
             }
         }
         
@@ -513,4 +561,18 @@ int backend_query_texture(Texture* texture, Uint32* format, int* access, int* w,
 char* backend_get_clipboard_text() {
     // STM32 平台通常没有剪贴板概念
     return strdup("");
+}
+
+void backend_set_clipboard_text(const char* text) {
+    // STM32 平台通常没有剪贴板概念，忽略此操作
+    (void)text;
+}
+
+int backend_screenshot(const char* path) {
+    (void)path;
+    return -1;
+}
+
+void backend_set_ui_root(Layer* root) {
+    (void)root;
 }

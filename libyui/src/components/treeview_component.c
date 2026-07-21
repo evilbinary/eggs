@@ -2,9 +2,11 @@
 #include "../backend.h"
 #include "../event.h"
 #include "../util.h"
+#include "../layer_update.h"
 #include <stdlib.h>
 #include <string.h>
 
+static void treeview_component_apply_theme_style(Layer* layer, cJSON* style);
 
 // 创建树视图组件
 TreeViewComponent* treeview_component_create(Layer* layer) {
@@ -18,20 +20,32 @@ TreeViewComponent* treeview_component_create(Layer* layer) {
     component->item_height = 24;
     component->indent_width = 20;
     component->font_size = 14; // 默认字体大小
-    component->text_color = (Color){0, 0, 0, 255};
-    component->selected_text_color = (Color){255, 255, 255, 255};
-    component->selected_bg_color = (Color){0, 120, 215, 255};
-    component->hover_bg_color = (Color){229, 243, 255, 255};
-    component->expand_icon_color = (Color){102, 102, 102, 255};
+    component->text_color = (Color){205, 214, 244, 255};  // Catppuccin 文本色
+    component->selected_text_color = (Color){205, 214, 244, 255};
+    component->selected_bg_color = (Color){69, 71, 90, 255};    // Catppuccin surface1
+    component->hover_bg_color = (Color){49, 50, 68, 255};       // Catppuccin surface0
+    component->expand_icon_color = (Color){108, 112, 134, 255}; // Catppuccin overlay0
     component->user_data = NULL;
     component->on_node_selected = NULL;
     component->on_node_expanded = NULL;
+    component->icon_size = 0;
+    component->expand_icon = strdup("▶");
+    component->collapse_icon = strdup("▼");
+    component->expand_icon_path = NULL;
+    component->collapse_icon_path = NULL;
+    component->on_select_name = NULL;
+    component->on_select_handler = NULL;
+    component->on_expand_name = NULL;
+    component->on_expand_handler = NULL;
     
     // 设置组件
     layer->component = component;
     layer->render = treeview_component_render;
-    layer->handle_mouse_event = treeview_component_handle_mouse_event;
+    layer->handle_pointer_event = treeview_component_handle_pointer_event;
     layer->handle_key_event = treeview_component_handle_key_event;
+    layer->focusable = 1;  // 支持键盘事件
+    layer->get_property = treeview_component_get_property;
+    layer->set_style = treeview_component_apply_theme_style;
     
     return component;
 }
@@ -47,7 +61,14 @@ void treeview_component_destroy(TreeViewComponent* component) {
         }
         free(component->root_nodes);
     }
-    
+
+    if (component->expand_icon) free(component->expand_icon);
+    if (component->collapse_icon) free(component->collapse_icon);
+    if (component->expand_icon_path) free(component->expand_icon_path);
+    if (component->collapse_icon_path) free(component->collapse_icon_path);
+    if (component->on_select_name) free(component->on_select_name);
+    if (component->on_expand_name) free(component->on_expand_name);
+
     free(component);
 }
 
@@ -62,9 +83,20 @@ TreeNode* treeview_create_node(const char* text) {
     node->expanded = 0;
     node->selected = 0;
     node->level = 0;
+    node->expandable = 0;
     node->user_data = NULL;
     node->parent = NULL;
-    
+    node->expand_icon = NULL;
+    node->collapse_icon = NULL;
+    node->expand_icon_path = NULL;
+    node->collapse_icon_path = NULL;
+    node->expand_icon_tex = NULL;
+    node->collapse_icon_tex = NULL;
+    node->icon = NULL;
+    node->icon_text = NULL;
+    node->icon_tex = NULL;
+    node->extra = NULL;
+
     return node;
 }
 
@@ -84,7 +116,17 @@ void treeview_destroy_node(TreeNode* node) {
     if (node->text) {
         free(node->text);
     }
-    
+    if (node->expand_icon) free(node->expand_icon);
+    if (node->collapse_icon) free(node->collapse_icon);
+    if (node->expand_icon_path) free(node->expand_icon_path);
+    if (node->collapse_icon_path) free(node->collapse_icon_path);
+    if (node->expand_icon_tex) backend_render_text_destroy(node->expand_icon_tex);
+    if (node->collapse_icon_tex) backend_render_text_destroy(node->collapse_icon_tex);
+    if (node->icon_tex) backend_render_text_destroy(node->icon_tex);
+    if (node->icon) free(node->icon);
+    if (node->icon_text) free(node->icon_text);
+    if (node->extra) cJSON_Delete((cJSON*)node->extra);
+
     free(node);
 }
 
@@ -205,7 +247,7 @@ const char* treeview_get_node_text(TreeNode* node) {
 
 // 展开节点
 void treeview_expand_node(TreeNode* node) {
-    if (!node || node->child_count == 0) return;
+    if (!node || (node->child_count == 0 && !node->expandable)) return;
     node->expanded = 1;
 }
 
@@ -217,7 +259,7 @@ void treeview_collapse_node(TreeNode* node) {
 
 // 切换节点展开状态
 void treeview_toggle_node(TreeNode* node) {
-    if (!node || node->child_count == 0) return;
+    if (!node || (node->child_count == 0 && !node->expandable)) return;
     node->expanded = !node->expanded;
 }
 
@@ -291,14 +333,86 @@ void treeview_set_font_size(TreeViewComponent* component, int size) {
 }
 
 
+static int treeview_data_update(Layer* layer, cJSON* data) {
+    if (!layer || !layer->component) return 0;
+    TreeViewComponent* component = (TreeViewComponent*)layer->component;
+    treeview_clear_all_root_nodes(component);
+    if (cJSON_IsArray(data)) {
+        int count = cJSON_GetArraySize(data);
+        for (int i = 0; i < count; i++) {
+            TreeNode* node = parse_tree_node(cJSON_GetArrayItem(data, i), 0, NULL);
+            if (node) treeview_add_root_node(component, node);
+        }
+    }
+    return 0;
+}
+
+
+static void treeview_component_apply_theme_style(Layer* layer, cJSON* style) {
+    if (!layer || !style || !layer->component) {
+        return;
+    }
+
+    TreeViewComponent* component = (TreeViewComponent*)layer->component;
+    Color text_color = component->text_color;
+    Color selected_text_color = component->selected_text_color;
+    Color selected_bg_color = component->selected_bg_color;
+    Color hover_bg_color = component->hover_bg_color;
+    Color expand_icon_color = component->expand_icon_color;
+
+    cJSON* color = cJSON_GetObjectItem(style, "textColor");
+    if (!color) color = cJSON_GetObjectItem(style, "color");
+    if (color && cJSON_IsString(color)) {
+        parse_color(color->valuestring, &text_color);
+        layer->color = text_color;
+    }
+
+    color = cJSON_GetObjectItem(style, "selectedTextColor");
+    if (color && cJSON_IsString(color)) {
+        parse_color(color->valuestring, &selected_text_color);
+    }
+
+    color = cJSON_GetObjectItem(style, "selectedBgColor");
+    if (color && cJSON_IsString(color)) {
+        parse_color(color->valuestring, &selected_bg_color);
+    }
+
+    color = cJSON_GetObjectItem(style, "hoverBgColor");
+    if (color && cJSON_IsString(color)) {
+        parse_color(color->valuestring, &hover_bg_color);
+    }
+
+    color = cJSON_GetObjectItem(style, "expandIconColor");
+    if (color && cJSON_IsString(color)) {
+        parse_color(color->valuestring, &expand_icon_color);
+    }
+
+    cJSON* bg_color = cJSON_GetObjectItem(style, "bgColor");
+    if (bg_color && cJSON_IsString(bg_color)) {
+        parse_color(bg_color->valuestring, &layer->bg_color);
+    }
+
+    cJSON* font_size = cJSON_GetObjectItem(style, "fontSize");
+    if (font_size && cJSON_IsNumber(font_size)) {
+        treeview_set_font_size(component, font_size->valueint);
+    }
+
+    treeview_set_colors(component, text_color, selected_text_color, selected_bg_color,
+                        hover_bg_color, expand_icon_color);
+    mark_layer_dirty(layer, DIRTY_COLOR | DIRTY_TEXT | DIRTY_LAYOUT);
+}
+
 TreeViewComponent* treeview_component_create_from_json(Layer* layer, cJSON* json_obj) {
     // 创建基础组件
     TreeViewComponent* component = treeview_component_create(layer);
     
     // 设置渲染函数和事件处理函数
     layer->render = treeview_component_render;
-    layer->handle_mouse_event = treeview_component_handle_mouse_event;
+    layer->handle_pointer_event = treeview_component_handle_pointer_event;
     layer->handle_key_event = treeview_component_handle_key_event;
+    
+    // 注册数据更新回调
+    layer->on_data_update = treeview_data_update;
     
     // 解析项目高度
     cJSON* itemHeight = cJSON_GetObjectItem(json_obj, "itemHeight");
@@ -311,44 +425,36 @@ TreeViewComponent* treeview_component_create_from_json(Layer* layer, cJSON* json
     if (indentWidth) {
         treeview_set_indent_width(component, indentWidth->valueint);
     }
-    
+
+    // 解析图标大小
+    cJSON* iconSize = cJSON_GetObjectItem(json_obj, "iconSize");
+    if (iconSize) {
+        component->icon_size = iconSize->valueint;
+    }
+
     // 解析颜色
     cJSON* style = cJSON_GetObjectItem(json_obj, "style");
     if (style) {
-        Color text_color = {0, 0, 0, 255}; // 默认黑色
-        Color selected_text_color = {255, 255, 255, 255}; // 默认白色
-        Color selected_bg_color = {51, 153, 255, 255}; // 默认蓝色
-        Color hover_bg_color = {220, 220, 220, 255}; // 默认灰色
-        Color expand_icon_color = {0, 0, 0, 255}; // 默认黑色
-        
-        cJSON* color = cJSON_GetObjectItem(style, "textColor");
-        if (color && color->valuestring) {
-            parse_color(color->valuestring, &text_color);
-        }
-        
-        color = cJSON_GetObjectItem(style, "selectedTextColor");
-        if (color && color->valuestring) {
-            parse_color(color->valuestring, &selected_text_color);
-        }
-        
-        color = cJSON_GetObjectItem(style, "selectedBgColor");
-        if (color && color->valuestring) {
-            parse_color(color->valuestring, &selected_bg_color);
-        }
-        
-        color = cJSON_GetObjectItem(style, "hoverBgColor");
-        if (color && color->valuestring) {
-            parse_color(color->valuestring, &hover_bg_color);
-        }
-        
-        color = cJSON_GetObjectItem(style, "expandIconColor");
-        if (color && color->valuestring) {
-            parse_color(color->valuestring, &expand_icon_color);
-        }
-        
-        treeview_set_colors(component, text_color, selected_text_color, selected_bg_color, hover_bg_color, expand_icon_color);
+        treeview_component_apply_theme_style(layer, style);
     }
-    
+
+    // 解析事件名（handler 在触发时查找，因为此时事件尚未注册）
+    cJSON* events = cJSON_GetObjectItem(json_obj, "events");
+    if (events) {
+        cJSON* onSelect = cJSON_GetObjectItem(events, "onSelect");
+        if (onSelect && onSelect->valuestring) {
+            const char* val = onSelect->valuestring;
+            if (val[0] == '@') val++;
+            component->on_select_name = strdup(val);
+        }
+        cJSON* onExpand = cJSON_GetObjectItem(events, "onExpand");
+        if (onExpand && onExpand->valuestring) {
+            const char* val = onExpand->valuestring;
+            if (val[0] == '@') val++;
+            component->on_expand_name = strdup(val);
+        }
+    }
+
     // 解析节点
     cJSON* nodes = cJSON_GetObjectItem(json_obj, "nodes");
     if (nodes && cJSON_IsArray(nodes)) {
@@ -380,10 +486,57 @@ TreeNode* parse_tree_node(cJSON* node_json, int level, TreeNode* parent) {
     if (expanded && expanded->type == cJSON_True) {
         node->expanded = 1;
     }
-    
+
+    // 解析expandable属性
+    cJSON* expandable_json = cJSON_GetObjectItem(node_json, "expandable");
+    if (expandable_json) {
+        node->expandable = cJSON_IsTrue(expandable_json) ? 1 : 0;
+    }
+
+    // 解析自定义展开/折叠图标
+    cJSON* expandIcon = cJSON_GetObjectItem(node_json, "expandIcon");
+    if (expandIcon && expandIcon->valuestring) {
+        node->expand_icon = strdup(expandIcon->valuestring);
+    }
+    cJSON* collapseIcon = cJSON_GetObjectItem(node_json, "collapseIcon");
+    if (collapseIcon && collapseIcon->valuestring) {
+        node->collapse_icon = strdup(collapseIcon->valuestring);
+    }
+    cJSON* icon = cJSON_GetObjectItem(node_json, "icon");
+    if (icon && icon->valuestring) {
+        node->icon = strdup(icon->valuestring);
+    }
+    cJSON* iconText = cJSON_GetObjectItem(node_json, "icon_text");
+    if (iconText && iconText->valuestring) {
+        node->icon_text = strdup(iconText->valuestring);
+    }
+
+    // 收集 JSON 中未被显式处理的字段到 extra，保证 JS↔C 往返不丢数据
+    {
+        static const char* known[] = {
+            "text", "expanded", "expandIcon", "collapseIcon",
+            "icon", "icon_text", "children", "expandable", NULL
+        };
+        cJSON* child = node_json->child;
+        while (child) {
+            if (child->string) {
+                int skip = 0;
+                for (int k = 0; known[k]; k++) {
+                    if (strcmp(child->string, known[k]) == 0) { skip = 1; break; }
+                }
+                if (!skip) {
+                    if (!node->extra) node->extra = cJSON_CreateObject();
+                    cJSON_AddItemToObject((cJSON*)node->extra, child->string, cJSON_Duplicate(child, 1));
+                }
+            }
+            child = child->next;
+        }
+    }
+
     // 解析children属性
     cJSON* children = cJSON_GetObjectItem(node_json, "children");
     if (children && cJSON_IsArray(children)) {
+        node->expandable = 1;
         int child_count = cJSON_GetArraySize(children);
         
         for (int i = 0; i < child_count; i++) {
@@ -412,6 +565,19 @@ void treeview_set_colors(TreeViewComponent* component, Color text, Color selecte
 void treeview_set_user_data(TreeViewComponent* component, void* data) {
     if (!component) return;
     component->user_data = data;
+}
+
+// 清空所有根节点
+void treeview_clear_all_root_nodes(TreeViewComponent* component) {
+    if (!component) return;
+    if (component->root_nodes) {
+        for (int i = 0; i < component->root_count; i++) {
+            treeview_destroy_node(component->root_nodes[i]);
+        }
+        free(component->root_nodes);
+        component->root_nodes = NULL;
+        component->root_count = 0;
+    }
 }
 
 // 设置节点选中回调
@@ -475,31 +641,72 @@ TreeNode** stack = (TreeNode**)malloc(sizeof(TreeNode*) * node->child_count);
 // 计算内容总高度
 int treeview_calculate_content_height(TreeViewComponent* component) {
     if (!component) return 0;
-    
+
     int visible_count = treeview_count_visible_nodes(component);
     return visible_count * component->item_height;
+}
+
+// 估算内容宽度（基于可见节点文本长度和缩进）
+int treeview_estimate_content_width(TreeViewComponent* component) {
+    if (!component || component->root_count == 0) return 0;
+    Layer* layer = component->layer;
+    if (!layer) return 0;
+
+    int left_margin = (layer->layout_manager && layer->layout_manager->padding[3] > 0)
+        ? layer->layout_manager->padding[3] : 0;
+    float char_width = component->font_size * 0.55f;
+    int max_width = 0;
+
+    for (int i = 0; i < component->root_count; i++) {
+        TreeNode* node = component->root_nodes[i];
+
+        int text_len = node->text ? (int)strlen(node->text) : 0;
+        int indent = node->level * component->indent_width + left_margin + 20;
+        int icon_offset = (node->icon_text && strlen(node->icon_text) > 0) ? component->icon_size + 4 : 4;
+        int node_width = indent + icon_offset + (int)(text_len * char_width);
+        if (node_width > max_width) max_width = node_width;
+
+        if (node->expanded && node->child_count > 0) {
+            TreeNode** stack = (TreeNode**)malloc(sizeof(TreeNode*) * node->child_count);
+            int stack_top = 0;
+            for (int j = node->child_count - 1; j >= 0; j--) {
+                stack[stack_top++] = node->children[j];
+            }
+            while (stack_top > 0) {
+                TreeNode* current = stack[--stack_top];
+                text_len = current->text ? (int)strlen(current->text) : 0;
+                indent = current->level * component->indent_width + left_margin + 20;
+                icon_offset = (current->icon_text && strlen(current->icon_text) > 0) ? component->icon_size + 4 : 4;
+                node_width = indent + icon_offset + (int)(text_len * char_width);
+                if (node_width > max_width) max_width = node_width;
+
+                if (current->expanded && current->child_count > 0) {
+                    TreeNode** new_stack = (TreeNode**)realloc(stack, sizeof(TreeNode*) * (stack_top + current->child_count));
+                    if (new_stack) {
+                        stack = new_stack;
+                        for (int j = current->child_count - 1; j >= 0; j--) {
+                            stack[stack_top++] = current->children[j];
+                        }
+                    }
+                }
+            }
+            free(stack);
+        }
+    }
+    return max_width;
 }
 
 // 更新滚动条状态
 void treeview_update_scrollbar(TreeViewComponent* component) {
     if (!component || !component->layer) return;
-    
+
     Layer* layer = component->layer;
-    
-    // 计算内容高度
+
     int content_height = treeview_calculate_content_height(component);
     layer->content_height = content_height;
-    
-    int visible_height = layer->rect.h;
-    
-    // printf("DEBUG: treeview_update_scrollbar - content_height=%d, visible_height=%d, scrollable=%d\n", 
-    //        content_height, visible_height, layer->scrollable);
-    
-    // // 更新滚动条可见性和位置
-    // if ((layer->scrollable == 1 || layer->scrollable == 3) && layer->scrollbar_v) {
-    //     layer->scrollbar_v->visible = (content_height > visible_height);
-    //     printf("DEBUG: scrollbar_v visible set to %d\n", layer->scrollbar_v->visible);
-    // }
+
+    int content_width = treeview_estimate_content_width(component);
+    layer->content_width = content_width;
 }
 
 // 滚动到指定节点
@@ -584,13 +791,95 @@ void treeview_scroll_to_node(TreeViewComponent* component, TreeNode* target_node
     }
 }
 
+static int treeview_get_visible_height(Layer* layer) {
+    int visible_height = layer->rect.h;
+    if (layer->layout_manager) {
+        visible_height -= layer->layout_manager->padding[0] + layer->layout_manager->padding[2];
+    }
+    return visible_height > 0 ? visible_height : 0;
+}
+
+static int treeview_get_visible_width(Layer* layer) {
+    int visible_width = layer->rect.w;
+    if (layer->layout_manager) {
+        visible_width -= layer->layout_manager->padding[1] + layer->layout_manager->padding[3];
+    }
+    return visible_width > 0 ? visible_width : 0;
+}
+
+static int treeview_get_vertical_scrollbar_track(Layer* layer, Rect* track_out) {
+    if (!layer || !track_out) return 0;
+
+    int visible_height = treeview_get_visible_height(layer);
+    if ((layer->scrollable == 1 || layer->scrollable == 3) &&
+        layer->scrollbar_v && layer->scrollbar_v->visible &&
+        layer->content_height > visible_height) {
+        int thickness = layer->scrollbar_v->thickness > 0 ? layer->scrollbar_v->thickness : 8;
+        track_out->x = layer->rect.x + layer->rect.w - thickness;
+        track_out->y = layer->rect.y;
+        track_out->w = thickness;
+        track_out->h = visible_height;
+        return 1;
+    }
+    return 0;
+}
+
+static int treeview_get_horizontal_scrollbar_track(Layer* layer, Rect* track_out) {
+    if (!layer || !track_out) return 0;
+
+    int visible_width = treeview_get_visible_width(layer);
+    if ((layer->scrollable == 2 || layer->scrollable == 3) &&
+        layer->scrollbar_h && layer->scrollbar_h->visible &&
+        layer->content_width > visible_width) {
+        int thickness = layer->scrollbar_h->thickness > 0 ? layer->scrollbar_h->thickness : 8;
+        track_out->x = layer->rect.x;
+        track_out->y = layer->rect.y + layer->rect.h - thickness;
+        track_out->w = visible_width;
+        track_out->h = thickness;
+        return 1;
+    }
+    return 0;
+}
+
+static int treeview_point_in_scrollbar(Layer* layer, int x, int y) {
+    Point pt = {x, y};
+    Rect track;
+    if (treeview_get_vertical_scrollbar_track(layer, &track) && point_in_rect(pt, track)) {
+        return 1;
+    }
+    if (treeview_get_horizontal_scrollbar_track(layer, &track) && point_in_rect(pt, track)) {
+        return 1;
+    }
+    return 0;
+}
+
+static int treeview_content_right_x(Layer* layer) {
+    Rect track;
+    if (treeview_get_vertical_scrollbar_track(layer, &track)) {
+        return track.x;
+    }
+    return layer->rect.x + layer->rect.w;
+}
+
+static int treeview_content_bottom_y(Layer* layer) {
+    Rect track;
+    if (treeview_get_horizontal_scrollbar_track(layer, &track)) {
+        return track.y;
+    }
+    return layer->rect.y + layer->rect.h;
+}
+
 // 根据位置获取节点
 TreeNode* treeview_get_node_from_position(TreeViewComponent* component, int x, int y) {
     if (!component || component->root_count == 0) return NULL;
-    
-    // 检查是否在组件区域内
-    if (x < component->layer->rect.x || x >= component->layer->rect.x + component->layer->rect.w ||
-        y < component->layer->rect.y || y >= component->layer->rect.y + component->layer->rect.h) {
+
+    Layer* layer = component->layer;
+    int content_right = treeview_content_right_x(layer);
+    int content_bottom = treeview_content_bottom_y(layer);
+
+    // 检查是否在内容区域内（排除滚动条轨道）
+    if (x < layer->rect.x || x >= content_right ||
+        y < layer->rect.y || y >= content_bottom) {
         return NULL;
     }
     
@@ -650,10 +939,15 @@ TreeNode* treeview_get_node_from_position(TreeViewComponent* component, int x, i
 
 // 检查是否点击在展开/折叠图标上
 int treeview_is_expand_icon_clicked(TreeViewComponent* component, TreeNode* node, int x, int y) {
-    if (!component || !node || node->child_count == 0) return 0;
+    if (!component || !node || (node->child_count == 0 && !node->expandable)) return 0;
     
     // 计算节点位置，考虑滚动偏移
     int item_y = component->layer->rect.y - component->layer->scroll_offset;
+    
+    // 与渲染一致的左边距
+    Layer* layer = component->layer;
+    int left_margin = (layer->layout_manager && layer->layout_manager->padding[3] > 0)
+        ? layer->layout_manager->padding[3] : 0;
     
     // 查找节点在可见节点中的位置
     for (int i = 0; i < component->root_count; i++) {
@@ -661,7 +955,7 @@ int treeview_is_expand_icon_clicked(TreeViewComponent* component, TreeNode* node
         
         if (current == node) {
             // 找到节点，检查是否点击在展开图标上
-            int icon_x = component->layer->rect.x + current->level * component->indent_width;
+            int icon_x = component->layer->rect.x - component->layer->scroll_offset_x + current->level * component->indent_width + left_margin;
             int icon_y = item_y + (component->item_height - 10) / 2;
             
             return (x >= icon_x && x < icon_x + 10 && y >= icon_y && y < icon_y + 10);
@@ -685,7 +979,7 @@ int treeview_is_expand_icon_clicked(TreeViewComponent* component, TreeNode* node
                 
                 if (stack_node == node) {
                     // 找到节点，检查是否点击在展开图标上
-                    int icon_x = component->layer->rect.x + stack_node->level * component->indent_width;
+                    int icon_x = component->layer->rect.x - component->layer->scroll_offset_x + stack_node->level * component->indent_width + left_margin;
                     int icon_y = item_y + (component->item_height - 10) / 2;
                     
                     free(stack);
@@ -712,13 +1006,94 @@ int treeview_is_expand_icon_clicked(TreeViewComponent* component, TreeNode* node
     return 0;
 }
 
+// 序列化 TreeNode 为 cJSON
+static cJSON* treeview_node_to_cjson(TreeNode* node) {
+    if (!node) {
+        return cJSON_CreateObject();
+    }
+
+    cJSON* obj = cJSON_CreateObject();
+    if (node->text) {
+        cJSON_AddStringToObject(obj, "text", node->text);
+    }
+    if (node->icon) {
+        cJSON_AddStringToObject(obj, "icon", node->icon);
+    }
+    if (node->icon_text) {
+        cJSON_AddStringToObject(obj, "icon_text", node->icon_text);
+    }
+    cJSON_AddBoolToObject(obj, "expanded", node->expanded);
+    cJSON_AddBoolToObject(obj, "expandable", node->expandable);
+
+    if (node->extra) {
+        cJSON* extra = (cJSON*)node->extra;
+        cJSON* child = extra->child;
+        while (child) {
+            if (child->string) {
+                cJSON_AddItemToObject(obj, child->string, cJSON_Duplicate(child, 1));
+            }
+            child = child->next;
+        }
+    }
+
+    if (node->child_count > 0) {
+        cJSON* children = cJSON_CreateArray();
+        for (int i = 0; i < node->child_count; i++) {
+            cJSON_AddItemToArray(children, treeview_node_to_cjson(node->children[i]));
+        }
+        cJSON_AddItemToObject(obj, "children", children);
+    }
+
+    return obj;
+}
+
+cJSON* treeview_component_get_property(Layer* layer, const char* property_name) {
+    if (!layer || !property_name || !layer->component) {
+        return NULL;
+    }
+
+    if (strcmp(property_name, "data") != 0) {
+        return NULL;
+    }
+
+    TreeViewComponent* component = (TreeViewComponent*)layer->component;
+    cJSON* result = cJSON_CreateArray();
+    if (!result) {
+        return NULL;
+    }
+
+    for (int i = 0; i < component->root_count; i++) {
+        cJSON_AddItemToArray(result, treeview_node_to_cjson(component->root_nodes[i]));
+    }
+
+    return result;
+}
+
+// 序列化TreeNode为JSON
+static char* treeview_node_to_json(TreeNode* node) {
+    cJSON* obj = treeview_node_to_cjson(node);
+    char* json_str = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return json_str;
+}
+
 // 处理鼠标事件
-void treeview_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
-    if (!layer || !event || !layer->component) return;
+int treeview_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
+    if (!layer || !event || !layer->component) return 0;
     
     TreeViewComponent* component = (TreeViewComponent*)layer->component;
+    treeview_update_scrollbar(component);
+
+    if ((layer->scrollbar_v && layer->scrollbar_v->is_dragging) ||
+        (layer->scrollbar_h && layer->scrollbar_h->is_dragging)) {
+        return 1;
+    }
+
+    if (treeview_point_in_scrollbar(layer, event->x, event->y)) {
+        return 1;
+    }
     
-    if (event->state == SDL_PRESSED && event->button == SDL_BUTTON_LEFT) {
+    if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
         // 调整鼠标坐标以考虑滚动偏移
         int adjusted_y = event->y;
         // 注意：treeview_get_node_from_position 内部已经处理了滚动偏移，所以这里不需要调整
@@ -739,64 +1114,119 @@ void treeview_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
                 if (component->on_node_expanded && old_expanded != node->expanded) {
                     component->on_node_expanded(node, node->expanded, component->user_data);
                 }
+
+                // 触发 JS onExpand 事件
+                if (component->on_expand_name && old_expanded != node->expanded) {
+                    EventHandler handler = find_event_by_name(component->on_expand_name);
+                    if (handler) {
+                        char* node_json = treeview_node_to_json(node);
+                        if (node_json) {
+                            if (!layer->event) {
+                                layer->event = calloc(1, sizeof(Event));
+                            }
+                            strncpy(layer->event->click_name, component->on_expand_name, MAX_PATH - 1);
+                            layer->event->click_name[MAX_PATH - 1] = '\0';
+                            free(layer->text);
+                            layer->text = strdup(node_json);
+                            free(node_json);
+                            handler(layer);
+                        }
+                    }
+                }
             } else {
                 // 选中节点
                 treeview_set_selected_node(component, node);
-                
+
                 // 滚动到选中的节点
                 treeview_scroll_to_node(component, node);
+
+                // 触发 onSelect 事件
+                if (component->on_select_name) {
+                    EventHandler handler = find_event_by_name(component->on_select_name);
+                    if (handler) {
+                        char* node_json = treeview_node_to_json(node);
+                        if (node_json) {
+                            if (!layer->event) {
+                                layer->event = calloc(1, sizeof(Event));
+                            }
+                            strncpy(layer->event->click_name, component->on_select_name, MAX_PATH - 1);
+                            layer->event->click_name[MAX_PATH - 1] = '\0';
+                            free(layer->text);
+                            layer->text = strdup(node_json);
+                            free(node_json);
+                            handler(layer);
+                        }
+                    }
+                }
             }
         }
     }
+    return 0;
 }
 
 // 处理键盘事件
-void treeview_component_handle_key_event(Layer* layer, KeyEvent* event) {
-    if (!layer || !event || !layer->component) return;
-    
+int treeview_component_handle_key_event(Layer* layer, KeyEvent* event) {
+    if (!layer || !event || !layer->component) return 0;
+
     TreeViewComponent* component = (TreeViewComponent*)layer->component;
-    
+
     if (event->type == KEY_EVENT_DOWN) {
         switch (event->data.key.key_code) {
-            case SDLK_UP:
-                // 选择上一个节点
-                if (component->selected_node) {
-                    // TODO: 实现选择上一个节点的逻辑
-                }
+            case SDLK_UP: {
+                // 垂直向上滚动
+                layer->scroll_offset -= component->item_height;
+                if (layer->scroll_offset < 0) layer->scroll_offset = 0;
+                treeview_update_scrollbar(component);
                 break;
-                
-            case SDLK_DOWN:
-                // 选择下一个节点
-                if (component->selected_node) {
-                    // TODO: 实现选择下一个节点的逻辑
-                }
+            }
+
+            case SDLK_DOWN: {
+                // 垂直向下滚动
+                layer->scroll_offset += component->item_height;
+                int max_offset = treeview_calculate_content_height(component) - layer->rect.h;
+                if (max_offset < 0) max_offset = 0;
+                if (layer->scroll_offset > max_offset) layer->scroll_offset = max_offset;
+                treeview_update_scrollbar(component);
                 break;
-                
+            }
+
             case SDLK_LEFT:
-                // 折叠节点
-                if (component->selected_node) {
+                // 水平向左滚动（优先），否则折叠选中节点
+                if ((layer->scrollable == 2 || layer->scrollable == 3) && layer->scroll_offset_x > 0) {
+                    layer->scroll_offset_x -= 40;
+                    if (layer->scroll_offset_x < 0) layer->scroll_offset_x = 0;
+                    treeview_update_scrollbar(component);
+                } else if (component->selected_node && component->selected_node->expanded) {
                     treeview_collapse_node(component->selected_node);
-                    
-                    // 调用回调函数
                     if (component->on_node_expanded) {
                         component->on_node_expanded(component->selected_node, 0, component->user_data);
                     }
+                    treeview_update_scrollbar(component);
                 }
                 break;
-                
+
             case SDLK_RIGHT:
-                // 展开节点
-                if (component->selected_node) {
+                // 水平向右滚动（优先），否则展开选中节点
+                if ((layer->scrollable == 2 || layer->scrollable == 3) && layer->content_width > layer->rect.w) {
+                    int max_x = layer->content_width - layer->rect.w;
+                    if (layer->scroll_offset_x < max_x) {
+                        layer->scroll_offset_x += 40;
+                        if (layer->scroll_offset_x > max_x) layer->scroll_offset_x = max_x;
+                        treeview_update_scrollbar(component);
+                        break;
+                    }
+                }
+                if (component->selected_node && component->selected_node->expandable && !component->selected_node->expanded) {
                     treeview_expand_node(component->selected_node);
-                    
-                    // 调用回调函数
                     if (component->on_node_expanded) {
                         component->on_node_expanded(component->selected_node, 1, component->user_data);
                     }
+                    treeview_update_scrollbar(component);
                 }
                 break;
         }
     }
+    return 0;
 }
 
 // 渲染树视图
@@ -820,17 +1250,23 @@ void treeview_component_render(Layer* layer) {
         if (temp_tex) {
             int temp_width, temp_height;
             backend_query_texture(temp_tex, NULL, NULL, &temp_width, &temp_height);
-            text_height = temp_height / scale;
+            text_height = temp_height / yui_density;
             backend_render_text_destroy(temp_tex);
         }
     }
     
     // 绘制背景
     Rect bg_rect = {layer->rect.x, layer->rect.y, layer->rect.w, layer->rect.h};
-    backend_render_rounded_rect(&bg_rect, (Color){255, 255, 255, 255}, 5);
+    if (layer->bg_color.a > 0) {
+        if (layer->radius > 0)
+            backend_render_rounded_rect(&bg_rect, layer->bg_color, layer->radius);
+        else
+            backend_render_fill_rect(&bg_rect, layer->bg_color);
+    }
     
-    // 绘制边框
-    backend_render_rounded_rect_with_border(&bg_rect, (Color){255, 255, 255, 255}, 5, 1, (Color){204, 204, 204, 255});
+    // 计算左边距（使用 layer 的 padding，无配置时默认 20）
+    int left_margin = (layer->layout_manager && layer->layout_manager->padding[3] > 0)
+        ? layer->layout_manager->padding[3] : 0;
     
     // 应用滚动偏移
     int item_y = layer->rect.y - layer->scroll_offset;
@@ -848,7 +1284,7 @@ void treeview_component_render(Layer* layer) {
         
         if (should_render_node) {
             // 绘制节点
-            int text_x = layer->rect.x + node->level * component->indent_width + 20;
+            int text_x = layer->rect.x - layer->scroll_offset_x + node->level * component->indent_width + 20;
             int text_y = item_y + (component->item_height - text_height) / 2;
             
             // 绘制背景
@@ -858,56 +1294,140 @@ void treeview_component_render(Layer* layer) {
             }
             
             // 绘制展开/折叠图标
-            if (node->child_count > 0) {
-                int icon_x = layer->rect.x + node->level * component->indent_width;
+            if (node->child_count > 0 || node->expandable) {
+                int icon_x = layer->rect.x - layer->scroll_offset_x + node->level * component->indent_width + left_margin;
                 int icon_y = item_y + (component->item_height - 10) / 2;
-                
-                // 绘制图标背景
-                Rect icon_rect = {icon_x, icon_y, 10, 10};
-                backend_render_rounded_rect(&icon_rect, component->expand_icon_color, 2);
-                
-                // 绘制图标符号
+
+                // 尝试加载 SVG/图片图标 → 文字图标 → 默认矩形 +/-
+                Texture* icon_tex = NULL;
+                int tex_owned = 0;
+
                 if (node->expanded) {
-                    // 绘制减号
-                    Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
-                    backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                    const char* path = node->collapse_icon_path ? node->collapse_icon_path : component->collapse_icon_path;
+                    if (path && !node->collapse_icon_tex) {
+                        node->collapse_icon_tex = backend_load_texture((char*)path);
+                    }
+                    if (node->collapse_icon_tex) { icon_tex = node->collapse_icon_tex; }
+                    else {
+                        const char* text = node->collapse_icon ? node->collapse_icon : component->collapse_icon;
+                        if (text) { icon_tex = backend_render_texture(layer->font->default_font, text, component->expand_icon_color); tex_owned = 1; }
+                    }
                 } else {
-                    // 绘制加号
-                    Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
-                    backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
-                    Rect plus_rect = {icon_x + 4, icon_y + 2, 2, 6};
-                    backend_render_rect(&plus_rect, (Color){255, 255, 255, 255});
+                    const char* path = node->expand_icon_path ? node->expand_icon_path : component->expand_icon_path;
+                    if (path && !node->expand_icon_tex) {
+                        node->expand_icon_tex = backend_load_texture((char*)path);
+                    }
+                    if (node->expand_icon_tex) { icon_tex = node->expand_icon_tex; }
+                    else {
+                        const char* text = node->expand_icon ? node->expand_icon : component->expand_icon;
+                        if (text) { icon_tex = backend_render_texture(layer->font->default_font, text, component->expand_icon_color); tex_owned = 1; }
+                    }
+                }
+
+                if (icon_tex) {
+                    int tw, th;
+                    backend_query_texture(icon_tex, NULL, NULL, &tw, &th);
+                    Rect dst = {icon_x, icon_y + (10 - th/yui_density) / 2, tw/yui_density, th/yui_density};
+                    backend_render_text_copy(icon_tex, NULL, &dst);
+                    if (tex_owned) backend_render_text_destroy(icon_tex);
+                } else {
+                    // 绘制图标背景
+                    Rect icon_rect = {icon_x, icon_y, 10, 10};
+                    backend_render_rounded_rect(&icon_rect, component->expand_icon_color, 2);
+
+                    // 绘制图标符号
+                    if (node->expanded) {
+                        Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
+                        backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                    } else {
+                        Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
+                        backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                        Rect plus_rect = {icon_x + 4, icon_y + 2, 2, 6};
+                        backend_render_rect(&plus_rect, (Color){255, 255, 255, 255});
+                    }
                 }
             }
-            
-            // 绘制文本
-            Color text_color = node->selected ? component->selected_text_color : component->text_color;
+
+            // 绘制文本（优先使用 layer->color，降级到组件默认色）
+            Color default_color = layer->color.a > 0 ? layer->color : component->text_color;
+            Color text_color = node->selected ? component->selected_text_color : default_color;
             if (node->text && layer->font && layer->font->default_font) {
+                // 计算文本起始X：展开图标(10px) + 间距(8px)
+                int base_text_x = layer->rect.x - layer->scroll_offset_x + node->level * component->indent_width + left_margin + 18;
+                int text_y_base = item_y + (component->item_height - text_height) / 2;
+                int text_x_offset = 0;
+
+                // 绘制节点icon: 优先加载SVG/图片，回退到icon_text文本
+                Texture* node_icon_tex = NULL;
+                int node_icon_owned = 0;
+                if (node->icon && !node->icon_tex) {
+                    // 只有看起来像文件路径时才尝试加载图片
+                    if (strchr(node->icon, '.') || strchr(node->icon, '/') || strchr(node->icon, '\\')) {
+                        node->icon_tex = backend_load_texture(node->icon);
+                    }
+                }
+                if (node->icon_tex) {
+                    node_icon_tex = node->icon_tex;
+                } else if (node->icon_text) {
+                    node_icon_tex = backend_render_texture(layer->font->default_font, node->icon_text, text_color);
+                    node_icon_owned = 1;
+                }
+                if (node_icon_tex) {
+                    int iw, ih;
+                    backend_query_texture(node_icon_tex, NULL, NULL, &iw, &ih);
+                    int icon_max_size = component->icon_size > 0 ? component->icon_size : component->item_height - 10;
+                    int icon_w = iw / yui_density;
+                    int icon_h = ih / yui_density;
+                    if (icon_w > icon_max_size || icon_h > icon_max_size) {
+                        float ratio = (float)icon_w / icon_h;
+                        if (ratio > 1.0f) {
+                            icon_w = icon_max_size;
+                            icon_h = (int)(icon_max_size / ratio);
+                        } else {
+                            icon_h = icon_max_size;
+                            icon_w = (int)(icon_max_size * ratio);
+                        }
+                    }
+                    Rect ir = {base_text_x, text_y_base + (icon_max_size - icon_h) / 2, icon_w, icon_h};
+                    backend_render_text_copy(node_icon_tex, NULL, &ir);
+                    if (node_icon_owned) backend_render_text_destroy(node_icon_tex);
+                    text_x_offset = icon_w + 4;
+                }
+
                 Texture* text_texture = backend_render_texture(layer->font->default_font, node->text, text_color);
                 if (text_texture) {
                     int actual_text_width, actual_text_height;
                     backend_query_texture(text_texture, NULL, NULL, &actual_text_width, &actual_text_height);
-                    
-                    // 计算文本位置
-                    int text_x = layer->rect.x + node->level * component->indent_width + 20;
-                    int text_y = item_y + (component->item_height - actual_text_height / scale) / 2;
-                    
+
+                    // 计算文本位置(加上icon偏移)
+                    int text_x = base_text_x + text_x_offset;
+                    int text_y = item_y + (component->item_height - actual_text_height / yui_density) / 2;
+
                     Rect text_rect = {
                         text_x,
                         text_y,
-                        actual_text_width / scale,
-                        actual_text_height / scale
+                        actual_text_width / yui_density,
+                        actual_text_height / yui_density
                     };
-                    
-                    // 确保文本不会超出边界
+
+                    // 确保文本不会超出边界，同时裁剪源纹理防止字体压缩
+                    Rect* p_src = NULL;
+                    Rect src_clip;
                     if (text_rect.x + text_rect.w > layer->rect.x + layer->rect.w) {
-                        text_rect.w = layer->rect.x + layer->rect.w - text_rect.x;
+                        int clipped_w = layer->rect.x + layer->rect.w - text_rect.x;
+                        if (clipped_w <= 0) { backend_render_text_destroy(text_texture); continue; }
+                        src_clip.x = 0;
+                        src_clip.y = 0;
+                        src_clip.w = (int)(clipped_w * yui_density);
+                        src_clip.h = actual_text_height;
+                        p_src = &src_clip;
+                        text_rect.w = clipped_w;
                     }
                     if (text_rect.y + text_rect.h > item_y + component->item_height) {
                         text_rect.h = item_y + component->item_height - text_rect.y;
                     }
-                    
-                    backend_render_text_copy(text_texture, NULL, &text_rect);
+
+                    backend_render_text_copy(text_texture, p_src, &text_rect);
                     backend_render_text_destroy(text_texture);
                 }
             }
@@ -934,7 +1454,7 @@ void treeview_component_render(Layer* layer) {
                 int should_render_current = !(item_y + component->item_height < visible_top || item_y > visible_bottom);
                 
                 if (should_render_current) {
-                        int current_text_x = layer->rect.x + current->level * component->indent_width + 20;
+                        int current_text_x = layer->rect.x - layer->scroll_offset_x + current->level * component->indent_width + 20;
                     int current_text_y = item_y + (component->item_height - text_height) / 2;
                     
                     // 绘制背景
@@ -944,56 +1464,137 @@ void treeview_component_render(Layer* layer) {
                     }
                     
                     // 绘制展开/折叠图标
-                    if (current->child_count > 0) {
-                        int icon_x = layer->rect.x + current->level * component->indent_width;
+                    if (current->child_count > 0 || current->expandable) {
+                        int icon_x = layer->rect.x - layer->scroll_offset_x + current->level * component->indent_width + left_margin;
                         int icon_y = item_y + (component->item_height - 10) / 2;
-                        
-                        // 绘制图标背景
-                        Rect icon_rect = {icon_x, icon_y, 10, 10};
-                        backend_render_rounded_rect(&icon_rect, component->expand_icon_color, 2);
-                        
-                        // 绘制图标符号
+
+                        Texture* icon_tex = NULL;
+                        int tex_owned = 0;
+
                         if (current->expanded) {
-                            // 绘制减号
-                            Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
-                            backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                            const char* path = current->collapse_icon_path ? current->collapse_icon_path : component->collapse_icon_path;
+                            if (path && !current->collapse_icon_tex) {
+                                current->collapse_icon_tex = backend_load_texture((char*)path);
+                            }
+                            if (current->collapse_icon_tex) { icon_tex = current->collapse_icon_tex; }
+                            else {
+                                const char* text = current->collapse_icon ? current->collapse_icon : component->collapse_icon;
+                                if (text) { icon_tex = backend_render_texture(layer->font->default_font, text, component->expand_icon_color); tex_owned = 1; }
+                            }
                         } else {
-                            // 绘制加号
-                            Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
-                            backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
-                            Rect plus_rect = {icon_x + 4, icon_y + 2, 2, 6};
-                            backend_render_rect(&plus_rect, (Color){255, 255, 255, 255});
+                            const char* path = current->expand_icon_path ? current->expand_icon_path : component->expand_icon_path;
+                            if (path && !current->expand_icon_tex) {
+                                current->expand_icon_tex = backend_load_texture((char*)path);
+                            }
+                            if (current->expand_icon_tex) { icon_tex = current->expand_icon_tex; }
+                            else {
+                                const char* text = current->expand_icon ? current->expand_icon : component->expand_icon;
+                                if (text) { icon_tex = backend_render_texture(layer->font->default_font, text, component->expand_icon_color); tex_owned = 1; }
+                            }
+                        }
+
+                        if (icon_tex) {
+                            int tw, th;
+                            backend_query_texture(icon_tex, NULL, NULL, &tw, &th);
+                            Rect dst = {icon_x, icon_y + (10 - th/yui_density) / 2, tw/yui_density, th/yui_density};
+                            backend_render_text_copy(icon_tex, NULL, &dst);
+                            if (tex_owned) backend_render_text_destroy(icon_tex);
+                        } else {
+                            // 绘制图标背景
+                            Rect icon_rect = {icon_x, icon_y, 10, 10};
+                            backend_render_rounded_rect(&icon_rect, component->expand_icon_color, 2);
+
+                            // 绘制图标符号
+                            if (current->expanded) {
+                                Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
+                                backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                            } else {
+                                Rect minus_rect = {icon_x + 2, icon_y + 4, 6, 2};
+                                backend_render_rect(&minus_rect, (Color){255, 255, 255, 255});
+                                Rect plus_rect = {icon_x + 4, icon_y + 2, 2, 6};
+                                backend_render_rect(&plus_rect, (Color){255, 255, 255, 255});
+                            }
                         }
                     }
                     
                     // 绘制文本 - 修复后的代码
                     Color current_text_color = current->selected ? component->selected_text_color : component->text_color;
                     if (current->text && layer->font && layer->font->default_font) {
+                        // base text x: 展开图标(10px) + 间距(10px)
+                        int base_text_x = layer->rect.x - layer->scroll_offset_x + current->level * component->indent_width + left_margin + 20;
+                        int text_y_base = item_y + (component->item_height - text_height) / 2;
+                        int text_x_offset = 0;
+
+                        // 绘制节点icon: 优先加载SVG/图片，回退到icon_text文本
+                        Texture* child_icon_tex = NULL;
+                        int child_icon_owned = 0;
+                        if (current->icon && !current->icon_tex) {
+                            if (strchr(current->icon, '.') || strchr(current->icon, '/') || strchr(current->icon, '\\')) {
+                                current->icon_tex = backend_load_texture(current->icon);
+                            }
+                        }
+                        if (current->icon_tex) {
+                            child_icon_tex = current->icon_tex;
+                        } else if (current->icon_text) {
+                            child_icon_tex = backend_render_texture(layer->font->default_font, current->icon_text, current_text_color);
+                            child_icon_owned = 1;
+                        }
+                        if (child_icon_tex) {
+                            int iw, ih;
+                            backend_query_texture(child_icon_tex, NULL, NULL, &iw, &ih);
+                            int icon_max_size = component->icon_size > 0 ? component->icon_size : component->item_height - 10;
+                            int icon_w = iw / yui_density;
+                            int icon_h = ih / yui_density;
+                            if (icon_w > icon_max_size || icon_h > icon_max_size) {
+                                float ratio = (float)icon_w / icon_h;
+                                if (ratio > 1.0f) {
+                                    icon_w = icon_max_size;
+                                    icon_h = (int)(icon_max_size / ratio);
+                                } else {
+                                    icon_h = icon_max_size;
+                                    icon_w = (int)(icon_max_size * ratio);
+                                }
+                            }
+                            Rect ir = {base_text_x, text_y_base + (icon_max_size - icon_h) / 2, icon_w, icon_h};
+                            backend_render_text_copy(child_icon_tex, NULL, &ir);
+                            if (child_icon_owned) backend_render_text_destroy(child_icon_tex);
+                            text_x_offset = icon_w + 4;
+                        }
+
                         Texture* text_texture = backend_render_texture(layer->font->default_font, current->text, current_text_color);
                         if (text_texture) {
                             int actual_text_width, actual_text_height;
                             backend_query_texture(text_texture, NULL, NULL, &actual_text_width, &actual_text_height);
-                            
+
                             // 计算文本位置
-                            int current_text_x = layer->rect.x + current->level * component->indent_width + 20;
-                            int current_text_y = item_y + (component->item_height - actual_text_height / scale) / 2;
-                            
+                            int current_text_x = base_text_x + text_x_offset;
+                            int current_text_y = item_y + (component->item_height - actual_text_height / yui_density) / 2;
+
                             Rect text_rect = {
                                 current_text_x,
                                 current_text_y,
-                                actual_text_width / scale,
-                                actual_text_height / scale
+                                actual_text_width / yui_density,
+                                actual_text_height / yui_density
                             };
-                            
-                            // 确保文本不会超出边界
+
+                            // 确保文本不会超出边界，同时裁剪源纹理防止字体压缩
+                            Rect* p_src = NULL;
+                            Rect src_clip;
                             if (text_rect.x + text_rect.w > layer->rect.x + layer->rect.w) {
-                                text_rect.w = layer->rect.x + layer->rect.w - text_rect.x;
+                                int clipped_w = layer->rect.x + layer->rect.w - text_rect.x;
+                                if (clipped_w <= 0) { backend_render_text_destroy(text_texture); continue; }
+                                src_clip.x = 0;
+                                src_clip.y = 0;
+                                src_clip.w = (int)(clipped_w * yui_density);
+                                src_clip.h = actual_text_height;
+                                p_src = &src_clip;
+                                text_rect.w = clipped_w;
                             }
                             if (text_rect.y + text_rect.h > item_y + component->item_height) {
                                 text_rect.h = item_y + component->item_height - text_rect.y;
                             }
-                            
-                            backend_render_text_copy(text_texture, NULL, &text_rect);
+
+                            backend_render_text_copy(text_texture, p_src, &text_rect);
                             backend_render_text_destroy(text_texture);
                         }
                     }

@@ -1,6 +1,10 @@
 #include "layer_properties.h"
 #include "layer.h"
 #include "layer_update.h"
+#include "theme_manager.h"
+#include "component_registry.h"
+#include "ytype.h"
+#include "animate.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,33 +170,88 @@ static int handle_position(Layer* layer, cJSON* value, int is_creating) {
     if (parse_int_array(value, &x, &y) == 0) {
         layer->rect.x = x;
         layer->rect.y = y;
+        if (layer->parent && layer->parent->layout_manager &&
+            layer->parent->layout_manager->type == LAYOUT_ABSOLUTE) {
+            layer->layout_base_rect.x = x;
+            layer->layout_base_rect.y = y;
+            layer->layout_base_valid = 1;
+        }
         if (!is_creating) {
-            mark_layer_dirty(layer, DIRTY_RECT);
+            mark_layer_dirty(layer, DIRTY_RECT | DIRTY_LAYOUT);
         }
     }
     return 1;
 }
 
-static int handle_padding(Layer* layer, cJSON* value, int is_creating) {
-    if (!cJSON_IsArray(value)) return 0;
-    if (!layer->layout_manager) return 0;
-    
-    int count = cJSON_GetArraySize(value);
-    if (count >= 4) {
-        layer->layout_manager->padding[0] = cJSON_GetArrayItem(value, 0)->valueint;  // top
-        layer->layout_manager->padding[1] = cJSON_GetArrayItem(value, 1)->valueint;  // right
-        layer->layout_manager->padding[2] = cJSON_GetArrayItem(value, 2)->valueint;  // bottom
-        layer->layout_manager->padding[3] = cJSON_GetArrayItem(value, 3)->valueint;  // left
-    } else if (count == 2) {
-        int vertical = cJSON_GetArrayItem(value, 0)->valueint;
-        int horizontal = cJSON_GetArrayItem(value, 1)->valueint;
-        layer->layout_manager->padding[0] = layer->layout_manager->padding[2] = vertical;
-        layer->layout_manager->padding[1] = layer->layout_manager->padding[3] = horizontal;
-    } else if (count == 1) {
-        int all = cJSON_GetArrayItem(value, 0)->valueint;
-        layer->layout_manager->padding[0] = layer->layout_manager->padding[2] = all;
-        layer->layout_manager->padding[1] = layer->layout_manager->padding[3] = all;
+static int handle_animation(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!layer || !cJSON_IsObject(value)) return 0;
+
+    float duration = 1.0f;
+    if (cJSON_HasObjectItem(value, "duration")) {
+        duration = (float)cJSON_GetObjectItem(value, "duration")->valuedouble;
     }
+
+    float (*easing_func)(float) = ease_in_out_quad;
+    if (cJSON_HasObjectItem(value, "easing")) {
+        const char* easing = cJSON_GetObjectItem(value, "easing")->valuestring;
+        if (strcmp(easing, "easeIn") == 0) easing_func = ease_in_quad;
+        else if (strcmp(easing, "easeOut") == 0) easing_func = ease_out_quad;
+        else if (strcmp(easing, "easeInOut") == 0) easing_func = ease_in_out_quad;
+        else if (strcmp(easing, "elasticOut") == 0) easing_func = ease_out_elastic;
+    }
+
+    if (layer->animation) {
+        animation_stop(layer);
+    }
+
+    Animation* anim = animation_create(duration, easing_func);
+    if (!anim) return 0;
+
+    if (cJSON_HasObjectItem(value, "fillMode")) {
+        const char* fill = cJSON_GetObjectItem(value, "fillMode")->valuestring;
+        if (strcmp(fill, "none") == 0) animation_set_fill_mode(anim, ANIMATION_FILL_NONE);
+        else if (strcmp(fill, "backwards") == 0) animation_set_fill_mode(anim, ANIMATION_FILL_BACKWARDS);
+        else if (strcmp(fill, "both") == 0) animation_set_fill_mode(anim, ANIMATION_FILL_BOTH);
+        else animation_set_fill_mode(anim, ANIMATION_FILL_FORWARDS);
+    } else {
+        animation_set_fill_mode(anim, ANIMATION_FILL_FORWARDS);
+    }
+
+    animation_set_target(anim, ANIMATION_PROPERTY_X,
+        cJSON_HasObjectItem(value, "x") ? (float)cJSON_GetObjectItem(value, "x")->valuedouble : (float)layer->rect.x);
+    animation_set_target(anim, ANIMATION_PROPERTY_Y,
+        cJSON_HasObjectItem(value, "y") ? (float)cJSON_GetObjectItem(value, "y")->valuedouble : (float)layer->rect.y);
+    animation_set_target(anim, ANIMATION_PROPERTY_WIDTH,
+        cJSON_HasObjectItem(value, "width") ? (float)cJSON_GetObjectItem(value, "width")->valuedouble : (float)layer->rect.w);
+    animation_set_target(anim, ANIMATION_PROPERTY_HEIGHT,
+        cJSON_HasObjectItem(value, "height") ? (float)cJSON_GetObjectItem(value, "height")->valuedouble : (float)layer->rect.h);
+    animation_set_target(anim, ANIMATION_PROPERTY_OPACITY,
+        cJSON_HasObjectItem(value, "opacity") ? (float)cJSON_GetObjectItem(value, "opacity")->valuedouble : layer->color.a / 255.0f);
+    animation_set_target(anim, ANIMATION_PROPERTY_ROTATION,
+        cJSON_HasObjectItem(value, "rotation") ? (float)cJSON_GetObjectItem(value, "rotation")->valuedouble : (float)layer->rotation);
+
+    if (cJSON_HasObjectItem(value, "autoPlay") && cJSON_IsFalse(cJSON_GetObjectItem(value, "autoPlay"))) {
+        layer->animation = anim;
+    } else {
+        animation_start(layer, anim);
+    }
+    return 1;
+}
+
+static int handle_padding(Layer* layer, cJSON* value, int is_creating) {
+    if (!layer_padding_apply_from_json(layer->padding, value)) {
+        return 0;
+    }
+
+    if (!layer->layout_manager) {
+        layer->layout_manager = (LayoutManager*)calloc(1, sizeof(LayoutManager));
+        if (!layer->layout_manager) {
+            return 0;
+        }
+        layer->layout_manager->type = LAYOUT_VERTICAL;
+    }
+    memcpy(layer->layout_manager->padding, layer->padding, sizeof(layer->padding));
     
     if (!is_creating) {
         mark_layer_dirty(layer, DIRTY_LAYOUT);
@@ -238,6 +297,46 @@ static int handle_scrollable(Layer* layer, cJSON* value, int is_creating) {
     return 1;
 }
 
+static void layer_apply_scrollbar_config(Layer* layer, cJSON* scrollbar) {
+    if (!layer || !scrollbar || !cJSON_IsObject(scrollbar)) return;
+
+    if (!layer->scrollbar) {
+        layer->scrollbar = (Scrollbar*)malloc(sizeof(Scrollbar));
+        if (layer->scrollbar) memset(layer->scrollbar, 0, sizeof(Scrollbar));
+    }
+
+    cJSON* visible = cJSON_GetObjectItem(scrollbar, "visible");
+    if (visible) {
+        int vis = cJSON_IsTrue(visible) ? 1 : 0;
+        if (layer->scrollbar) layer->scrollbar->visible = vis;
+        if (layer->scrollbar_v) layer->scrollbar_v->visible = vis;
+        if (layer->scrollbar_h) layer->scrollbar_h->visible = vis;
+    }
+
+    cJSON* thickness = cJSON_GetObjectItem(scrollbar, "thickness");
+    if (thickness && cJSON_IsNumber(thickness)) {
+        if (layer->scrollbar) layer->scrollbar->thickness = thickness->valueint;
+        if (layer->scrollbar_v) layer->scrollbar_v->thickness = thickness->valueint;
+        if (layer->scrollbar_h) layer->scrollbar_h->thickness = thickness->valueint;
+    }
+
+    cJSON* color = cJSON_GetObjectItem(scrollbar, "color");
+    if (color && cJSON_IsString(color)) {
+        Color parsed;
+        parse_color(color->valuestring, &parsed);
+        if (layer->scrollbar) layer->scrollbar->color = parsed;
+        if (layer->scrollbar_v) layer->scrollbar_v->color = parsed;
+        if (layer->scrollbar_h) layer->scrollbar_h->color = parsed;
+    }
+}
+
+static int handle_scrollbar(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    layer_apply_scrollbar_config(layer, value);
+    mark_layer_dirty(layer, DIRTY_STYLE);
+    return 1;
+}
+
 // 尺寸属性处理器
 static int handle_width(Layer* layer, cJSON* value, int is_creating) {
     if (!cJSON_IsNumber(value)) return 0;
@@ -255,6 +354,16 @@ static int handle_height(Layer* layer, cJSON* value, int is_creating) {
     layer->rect.h = layer->fixed_height;
     if (!is_creating) {
         mark_layer_dirty(layer, DIRTY_RECT | DIRTY_LAYOUT);
+    }
+    return 1;
+}
+
+static int handle_layout(Layer* layer, cJSON* value, int is_creating) {
+    if (!layer_apply_layout_from_json(layer, value)) {
+        return 0;
+    }
+    if (!is_creating) {
+        mark_layer_dirty(layer, DIRTY_LAYOUT);
     }
     return 1;
 }
@@ -288,14 +397,49 @@ static int handle_source(Layer* layer, cJSON* value, int is_creating) {
     return 1;
 }
 
+// data 属性处理器（通过回调分派给组件）
+static int handle_data(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    // YUI.update 传入的 value 位于临时解析树中，更新结束后会被释放；
+    // 组件会接管 data 指针，因此必须先复制一份。
+    cJSON* copy = cJSON_Duplicate(value, 1);
+    if (!copy) return 0;
+
+    int result = layer_set_data(layer, copy);
+    if (result != 2) {
+        cJSON_Delete(copy);
+    }
+    return result > 0 ? 1 : 0;
+}
+
+static int handle_variant(Layer* layer, cJSON* value, int is_creating) {
+    if (!cJSON_IsString(value)) return 0;
+
+    strncpy(layer->variant, value->valuestring, sizeof(layer->variant) - 1);
+    layer->variant[sizeof(layer->variant) - 1] = '\0';
+
+    if (!is_creating && layer->id[0] != '\0') {
+        Theme* theme = theme_manager_get_current();
+        if (theme) {
+            theme_manager_apply_to_layer(layer, layer->id, yui_type_name(layer->type));
+        }
+        mark_layer_dirty(layer, DIRTY_COLOR | DIRTY_TEXT);
+    }
+    return 1;
+}
+
 // 属性处理器查找表
 static const PropertyHandlerEntry property_handlers[] = {
     // 基础属性
     {"id", handle_id},
+    {"variant", handle_variant},
     
     // 文本属性
     {"text", handle_text},
     {"label", handle_label},
+    
+    // 数据属性（组件依赖，如 TreeView）
+    {"data", handle_data},
     
     // 颜色属性
     {"color", handle_color},
@@ -314,11 +458,13 @@ static const PropertyHandlerEntry property_handlers[] = {
     // 尺寸和位置属性
     {"size", handle_size},
     {"position", handle_position},
+    {"animation", handle_animation},
     {"width", handle_width},
     {"height", handle_height},
     {"padding", handle_padding},
     
     // 布局属性
+    {"layout", handle_layout},
     {"flex", handle_flex},
     {"rotation", handle_rotation},
     
@@ -327,12 +473,22 @@ static const PropertyHandlerEntry property_handlers[] = {
     {"enabled", handle_enabled},
     {"focusable", handle_focusable},
     {"scrollable", handle_scrollable},
+    {"scrollbar", handle_scrollbar},
     
     // 结束标记
     {NULL, NULL}
 };
 
 // ====================== 公共 API ======================
+
+int layer_set_data(Layer* layer, cJSON* data) {
+    if (!layer || !data) return 0;
+    if (layer->on_data_update) {
+        int adopted = layer->on_data_update(layer, data);
+        return adopted ? 2 : 1;
+    }
+    return 0;
+}
 
 int layer_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating) {
     if (!layer || !key || !value) {
@@ -357,6 +513,11 @@ int layer_set_property_from_json(Layer* layer, const char* key, cJSON* value, in
         if (strcmp(key, property_handlers[i].key) == 0) {
             return property_handlers[i].handler(layer, value, is_creating);
         }
+    }
+
+    if (layer->set_property) {
+        int result = layer->set_property(layer, key, value, is_creating);
+        if (result) return result;
     }
     
     // 未找到处理器
@@ -417,15 +578,15 @@ static cJSON* create_size_json(Rect rect) {
 
 // 辅助函数：创建内边距 JSON 对象
 static cJSON* create_padding_json(Layer* layer) {
-    if (!layer->layout_manager) {
+    if (!layer) {
         return cJSON_CreateNull();
     }
     
     cJSON* array = cJSON_CreateArray();
-    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer->layout_manager->padding[0]));  // top
-    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer->layout_manager->padding[1]));  // right
-    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer->layout_manager->padding[2]));  // bottom
-    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer->layout_manager->padding[3]));  // left
+    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer_padding_get(layer, 0)));
+    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer_padding_get(layer, 1)));
+    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer_padding_get(layer, 2)));
+    cJSON_AddItemToArray(array, cJSON_CreateNumber(layer_padding_get(layer, 3)));
     return array;
 }
 

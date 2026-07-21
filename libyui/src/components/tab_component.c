@@ -32,7 +32,7 @@ TabComponent* tab_component_create(Layer* layer) {
   // 设置组件类型和渲染函数
   layer->component = component;
   layer->render = tab_component_render;
-  layer->handle_mouse_event = tab_component_handle_mouse_event;
+  layer->handle_pointer_event = tab_component_handle_pointer_event;
   layer->handle_key_event = tab_component_handle_key_event;
 
   return component;
@@ -134,7 +134,7 @@ TabComponent* tab_component_create_from_json(Layer* layer, cJSON* json_obj) {
 
   // 设置渲染和事件处理函数
   layer->render = tab_component_render;
-  layer->handle_mouse_event = tab_component_handle_mouse_event;
+  layer->handle_pointer_event = tab_component_handle_pointer_event;
   layer->handle_key_event = tab_component_handle_key_event;
 
   return tabComponent;
@@ -254,7 +254,11 @@ void tab_component_set_active_tab(TabComponent* component, int index) {
   // 更新内容层的可见性
   for (int i = 0; i < component->tab_count; i++) {
     if (component->tabs[i].content_layer) {
-      component->tabs[i].content_layer->visible = (i == index)?VISIBLE:IN_VISIBLE;
+      if (i == index) {
+        layer_show(component->tabs[i].content_layer);
+      } else {
+        layer_hide(component->tabs[i].content_layer);
+      }
       printf("DEBUG: Tab %d content_layer visible=%d\n", i, component->tabs[i].content_layer->visible);
     }
   }
@@ -395,7 +399,7 @@ int tab_calculate_tab_width(TabComponent* component, int index) {
       backend_query_texture(temp_texture, NULL, NULL, &text_width,
                             &temp_height);
       backend_render_text_destroy(temp_texture);
-      // text_width /= scale;  // 暂时不考虑缩放因子
+      // text_width /= yui_density;  // 暂时不考虑缩放因子
     }
   }
 
@@ -456,12 +460,12 @@ int tab_is_close_button_clicked(TabComponent* component, int tab_index, int x,
 }
 
 // 处理鼠标事件
-void tab_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
-  if (!layer || !event || !layer->component) return;
+int tab_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
+  if (!layer || !event || !layer->component) return 0;
 
   TabComponent* component = (TabComponent*)layer->component;
 
-  if (event->state == SDL_PRESSED && event->button == SDL_BUTTON_LEFT) {
+  if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
     // 检查点击了哪个标签
     int tab_index = tab_get_tab_from_position(component, event->x, event->y);
     if (tab_index >= 0) {
@@ -478,11 +482,12 @@ void tab_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
       }
     }
   }
+  return 0;
 }
 
 // 处理键盘事件
-void tab_component_handle_key_event(Layer* layer, KeyEvent* event) {
-  if (!layer || !event || !layer->component) return;
+int tab_component_handle_key_event(Layer* layer, KeyEvent* event) {
+  if (!layer || !event || !layer->component) return 0;
 
   TabComponent* component = (TabComponent*)layer->component;
 
@@ -500,6 +505,7 @@ void tab_component_handle_key_event(Layer* layer, KeyEvent* event) {
         break;
     }
   }
+  return 0;
 }
 
 // 渲染选项卡
@@ -549,10 +555,10 @@ void tab_component_render(Layer* layer) {
         if (text_width > tab_width - 10) text_width = tab_width - 10;
         
         Rect text_rect = {
-          tab_x + (tab_width - text_width / scale) / 2,
-          layer->rect.y + (component->tab_height - text_height / scale) / 2,  // 使用实际高度居中
-          text_width / scale,
-          text_height / scale
+          tab_x + (tab_width - text_width / yui_density) / 2,
+          layer->rect.y + (component->tab_height - text_height / yui_density) / 2,  // 使用实际高度居中
+          text_width / yui_density,
+          text_height / yui_density
         };
         backend_render_text_copy(text_texture, NULL, &text_rect);
         backend_render_text_destroy(text_texture);

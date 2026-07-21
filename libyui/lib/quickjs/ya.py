@@ -5,8 +5,6 @@
 # * 邮箱: rootntsd@gmail.com
 # ********************************************************************
 target("quickjs")
-add_packages(get_config('default_libc'))
-
 set_kind("static")
 
 add_files(

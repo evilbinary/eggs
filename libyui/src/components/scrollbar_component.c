@@ -41,7 +41,7 @@ ScrollbarComponent* scrollbar_component_create(Layer* layer, Layer* target_layer
     layer->render = scrollbar_component_render;
     
     // 绑定事件处理函数
-    layer->handle_mouse_event = scrollbar_component_handle_mouse_event;
+    layer->handle_pointer_event = scrollbar_component_handle_pointer_event;
     // 初始更新位置
     scrollbar_component_update_position(component);
     
@@ -168,10 +168,10 @@ void scrollbar_component_update_position(ScrollbarComponent* component) {
 }
 
 // 处理鼠标事件
-void scrollbar_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
+int scrollbar_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     ScrollbarComponent* component = (ScrollbarComponent*)layer->component;
     if (!component || !component->target_layer) {
-        return;
+        return 0;
     }
     
     Layer* target = component->target_layer;
@@ -181,7 +181,7 @@ void scrollbar_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
     absolute_thumb_rect.y += layer->rect.y;
     
     // 鼠标按下事件
-    if (event->state == BUTTON_PRESSED && event->button == BUTTON_LEFT) {
+    if (event->phase == POINTER_DOWN && event->button == BUTTON_LEFT) {
         // 检查是否点击了滑块
         Point pt = {event->x, event->y};
         if (point_in_rect(pt, absolute_thumb_rect)) {
@@ -192,7 +192,7 @@ void scrollbar_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
                 component->drag_offset = event->x - absolute_thumb_rect.x;
             }
         }
-    } else if (event->state == 0) {
+    } else if (event->phase == POINTER_UP) {
         // 鼠标释放事件
         component->is_dragging = 0;
     }
@@ -262,6 +262,7 @@ void scrollbar_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
             target->scroll_offset_x = (int)(ratio * max_scroll_offset);
         }
     }
+    return 0;
 }
 
 // 渲染滚动条
@@ -281,6 +282,16 @@ void scrollbar_component_render(Layer* layer) {
     backend_render_fill_rect(&thumb_rect, component->thumb_color);
 }
 
+
+void* scrollbar_component_create_from_json_adapter(Layer* layer, cJSON* json_obj)
+{
+    Layer* target = layer && layer->parent ? layer->parent : layer;
+    if (!layer || !layer->parent) {
+        printf("Warning: SCROLLBAR layer %s has no parent layer\n",
+               layer && layer->id[0] ? layer->id : "<unknown>");
+    }
+    return scrollbar_component_create_from_json(layer, target, json_obj);
+}
 
 // 从JSON创建滚动条组件
 ScrollbarComponent* scrollbar_component_create_from_json(Layer* layer,Layer* target_layer, cJSON* json_obj) {

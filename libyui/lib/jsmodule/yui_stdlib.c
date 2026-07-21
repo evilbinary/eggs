@@ -22,6 +22,12 @@
 
 #include "theme_manager.h"
 #include "layer.h"
+#include "layer_lifecycle.h"
+#include "cJSON.h"
+
+#ifndef STDLIB_BUILD
+#include "../../src/perf/perf.h"
+#endif
 
 
 #define MAX_TEXT 256
@@ -37,6 +43,8 @@ extern Layer* g_layer_root;
 extern Layer* find_layer_by_id(Layer* root, const char* id);
 extern Layer* parse_layer_from_string(const char* json_str, Layer* parent);
 extern void destroy_layer(Layer* layer);
+extern int js_module_load_from_json(cJSON* root_json, const char* json_file_path, int append);
+extern char* js_module_read_file(const char* file_path);
 
 // 颜色结构体定义
 
@@ -253,7 +261,7 @@ static JSValue js_hide(JSContext *ctx, JSValue *this_val, int argc, JSValue *arg
     if (layer_id && g_layer_root ) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer->visible = 0;
+            layer_hide(layer);
             printf("YUI: Hide layer '%s'\n", layer_id);
         }
     }
@@ -272,7 +280,7 @@ static JSValue js_show(JSContext *ctx, JSValue *this_val, int argc, JSValue *arg
     if (layer_id && g_layer_root ) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer->visible = 1;
+            layer_show(layer);
             printf("YUI: Show layer '%s'\n", layer_id);
         }
     }
@@ -295,11 +303,25 @@ static JSValue js_yui_log(JSContext *ctx, JSValue *this_val, int argc, JSValue *
     return JS_UNDEFINED;
 }
 
-// 从 JSON 字符串动态渲染到指定图层
+static int append_layer_child(Layer* parent, Layer* child) {
+    if (!parent || !child) return -1;
+
+    Layer** new_children = realloc(parent->children, sizeof(Layer*) * (parent->child_count + 1));
+    if (!new_children) {
+        return -2;
+    }
+
+    parent->children = new_children;
+    parent->children[parent->child_count] = child;
+    parent->child_count++;
+    return 0;
+}
+
+// 从 JSON 字符串动态渲染到指定图层（可选第三参数 append：true 时追加子图层，不清空已有子节点）
 static JSValue js_render_from_json(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
     if (argc < 2) {
-        return JS_ThrowTypeError(ctx, "Expected 2 arguments: layer_id and json_string");
+        return JS_ThrowTypeError(ctx, "Expected at least 2 arguments: layer_id, json_string, append?");
     }
 
     JSCStringBuf buf1, buf2;
@@ -310,61 +332,113 @@ static JSValue js_render_from_json(JSContext *ctx, JSValue *this_val, int argc, 
         return JS_ThrowTypeError(ctx, "Invalid arguments");
     }
 
-    printf("YUI: render_from_json called with layer_id='%s'\n", layer_id);
-
-    if (g_layer_root) {
-        // 查找目标图层
-        Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
-        if (!parent_layer) {
-            printf("YUI: ERROR - Layer '%s' not found\n", layer_id);
-            return JS_NewInt32(ctx, -1);
-        }
-
-        printf("YUI: Found parent layer '%s'\n", layer_id);
-
-        // 清除父图层的所有子图层
-        if (parent_layer->children) {
-            for (int i = 0; i < parent_layer->child_count; i++) {
-                if (parent_layer->children[i]) {
-                    destroy_layer(parent_layer->children[i]);
-                }
-            }
-            free(parent_layer->children);
-            parent_layer->children = NULL;
-        }
-        parent_layer->child_count = 0;
-
-        // 从 JSON 字符串创建新图层
-        Layer* new_layer = parse_layer_from_string(json_str, parent_layer);
-
-        if (new_layer) {
-            // 为子图层数组分配空间（初始分配1个，可以根据需要扩展）
-            parent_layer->children = malloc(sizeof(Layer*));
-            if (!parent_layer->children) {
-                printf("YUI: ERROR - Failed to allocate memory for children array\n");
-                destroy_layer(new_layer);
-                return JS_NewInt32(ctx, -2);
-            }
-
-            parent_layer->children[0] = new_layer;
-            parent_layer->child_count = 1;
-            layout_layer(parent_layer);
-             // 为新创建的图层加载字体
-            printf("JS(mqjs): Loading fonts for new layer\n");
-            load_all_fonts(new_layer);
-            printf("JS(mqjs): Fonts loaded successfully\n");
-
-            printf("YUI: Successfully rendered JSON to layer '%s', new layer id: '%s'\n",
-                   layer_id, new_layer->id);
-            return JS_NewInt32(ctx, 0);
-        } else {
-            printf("YUI: ERROR - Failed to parse JSON string\n");
-            return JS_NewInt32(ctx, -3);
-        }
+    int append = 0;
+    if (argc >= 3) {
+        append = JS_ToBool(ctx, argv[2]);
     }
 
-    printf("YUI: ERROR - g_layer_root is NULL\n");
-    return JS_NewInt32(ctx, -4);
+    const char* json_source_path = NULL;
+    JSCStringBuf buf3;
+    if (argc >= 4) {
+        json_source_path = JS_ToCString(ctx, argv[3], &buf3);
+    }
+
+    printf("YUI: render_from_json called with layer_id='%s', append=%d\n", layer_id, append);
+
+    if (!g_layer_root) {
+        return JS_NewInt32(ctx, -4);
+    }
+
+    Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
+    if (!parent_layer) {
+        printf("YUI: ERROR - Layer '%s' not found\n", layer_id);
+        return JS_NewInt32(ctx, -1);
+    }
+
+    if (!append && parent_layer->children) {
+        for (int i = 0; i < parent_layer->child_count; i++) {
+            if (parent_layer->children[i]) {
+                layer_lifecycle_before_destroy(parent_layer->children[i]);
+                destroy_layer(parent_layer->children[i]);
+            }
+        }
+        free(parent_layer->children);
+        parent_layer->children = NULL;
+        parent_layer->child_count = 0;
+    }
+
+    Layer* new_layer = parse_layer_from_string(json_str, parent_layer);
+    if (!new_layer) {
+        printf("YUI: ERROR - Failed to parse JSON string\n");
+        return JS_NewInt32(ctx, -3);
+    }
+
+    if (append) {
+        if (append_layer_child(parent_layer, new_layer) != 0) {
+            destroy_layer(new_layer);
+            return JS_NewInt32(ctx, -2);
+        }
+    } else {
+        parent_layer->children = malloc(sizeof(Layer*));
+        if (!parent_layer->children) {
+            printf("YUI: ERROR - Failed to allocate memory for children array\n");
+            destroy_layer(new_layer);
+            return JS_NewInt32(ctx, -2);
+        }
+        parent_layer->children[0] = new_layer;
+        parent_layer->child_count = 1;
+    }
+
+    layout_layer(parent_layer);
+    theme_manager_apply_to_tree(new_layer);
+
+    cJSON* page_json = cJSON_Parse(json_str);
+    if (page_json) {
+        js_module_load_from_json(page_json, json_source_path, 1);
+        cJSON_Delete(page_json);
+    }
+
+    printf("YUI: Successfully rendered JSON to layer '%s', new layer id: '%s'\n",
+           layer_id, new_layer->id);
+    return JS_NewInt32(ctx, 0);
+}
+
+static JSValue js_read_file(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Expected 1 argument: file_path");
+    }
+
+    JSCStringBuf buf;
+    const char* file_path = JS_ToCString(ctx, argv[0], &buf);
+    if (!file_path) {
+        return JS_ThrowTypeError(ctx, "Invalid file path");
+    }
+
+    char* content = js_module_read_file(file_path);
+    if (!content) {
+        return JS_NULL;
+    }
+
+    JSValue result = JS_NewString(ctx, content);
+    free(content);
+    return result;
+}
+
+static JSValue js_resize_root(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "Expected 2 arguments: width, height");
+    }
+
+    int width = 0;
+    int height = 0;
+    if (JS_ToInt32(ctx, &width, argv[0]) != 0 || JS_ToInt32(ctx, &height, argv[1]) != 0) {
+        return JS_ThrowTypeError(ctx, "Invalid width or height");
+    }
+
+    extern int js_module_resize_root(int width, int height);
+    return JS_NewInt32(ctx, js_module_resize_root(width, height));
 }
 
 
@@ -419,7 +493,9 @@ static const JSPropDef js_yui[] = {
     JS_CFUNC_DEF("setBgColor", 1, js_set_bg_color ),
     JS_CFUNC_DEF("hide", 1, js_hide ),
     JS_CFUNC_DEF("show", 1, js_show ),
-    JS_CFUNC_DEF("renderFromJson", 2, js_render_from_json ),
+    JS_CFUNC_DEF("renderFromJson", 3, js_render_from_json ),
+    JS_CFUNC_DEF("readFile", 1, js_read_file ),
+    JS_CFUNC_DEF("resizeRoot", 2, js_resize_root ),
     JS_CFUNC_DEF("call", 2, js_yui_call ),
     JS_CFUNC_DEF("update", 1, js_yui_update ),
     JS_CFUNC_DEF("themeLoad", 1, js_yui_themeLoad ),
@@ -431,6 +507,17 @@ static const JSPropDef js_yui[] = {
     JS_CFUNC_DEF("inspect.setLayer", 2, js_yui_inspect_setLayer ),
     JS_CFUNC_DEF("inspect.setShowBounds", 1, js_yui_inspect_setShowBounds ),
     JS_CFUNC_DEF("inspect.setShowInfo", 1, js_yui_inspect_setShowInfo ),
+    JS_CFUNC_DEF("perf.enable", 0, js_yui_perf_enable ),
+    JS_CFUNC_DEF("perf.disable", 0, js_yui_perf_disable ),
+    JS_CFUNC_DEF("perf.reset", 0, js_yui_perf_reset ),
+    JS_CFUNC_DEF("perf.setOverlay", 1, js_yui_perf_setOverlay ),
+    JS_CFUNC_DEF("perf.setTopN", 1, js_yui_perf_setTopN ),
+    JS_CFUNC_DEF("perf.setLogInterval", 1, js_yui_perf_setLogInterval ),
+    JS_CFUNC_DEF("perf.watch", 1, js_yui_perf_watch ),
+    JS_CFUNC_DEF("perf.unwatch", 1, js_yui_perf_unwatch ),
+    JS_CFUNC_DEF("perf.clearWatch", 0, js_yui_perf_clearWatch ),
+    JS_CFUNC_DEF("perf.getFrameStats", 0, js_yui_perf_getFrameStats ),
+    JS_CFUNC_DEF("perf.getLayerStats", 1, js_yui_perf_getLayerStats ),
     JS_CFUNC_DEF("setEvent", 3, js_yui_set_event ),
     JS_PROP_END,
 };
@@ -751,6 +838,166 @@ static JSValue js_yui_inspect_setShowInfo(JSContext *ctx, JSValue *this_val, int
     printf("YUI Inspect: Set show info = %d\n", show_info);
     return JS_NewBool( 1);
 }
+
+#ifndef STDLIB_BUILD
+static int js_yui_parse_bool_arg(JSContext* ctx, JSValue val)
+{
+    if (JS_IsBool(val)) {
+        return JS_VALUE_GET_SPECIAL_VALUE(val) != 0;
+    }
+    if (JS_IsInt(val)) {
+        return JS_VALUE_GET_INT(val) != 0;
+    }
+    return !JS_IsNull(val) && !JS_IsUndefined(val);
+}
+
+static JSValue js_yui_perf_enable(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    perf_enable(1);
+    printf("YUI Perf: enabled\n");
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_disable(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    perf_enable(0);
+    printf("YUI Perf: disabled\n");
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_reset(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    perf_reset();
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_setOverlay(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "perf.setOverlay requires 1 argument");
+    }
+    perf_set_overlay(js_yui_parse_bool_arg(ctx, argv[0]));
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_setTopN(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    if (argc < 1 || !JS_IsInt(argv[0])) {
+        return JS_ThrowTypeError(ctx, "perf.setTopN requires an integer");
+    }
+    perf_set_top_n(JS_VALUE_GET_INT(argv[0]));
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_setLogInterval(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    if (argc < 1 || !JS_IsInt(argv[0])) {
+        return JS_ThrowTypeError(ctx, "perf.setLogInterval requires an integer");
+    }
+    perf_set_log_interval(JS_VALUE_GET_INT(argv[0]));
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_watch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "perf.watch requires layer id");
+    }
+    JSCStringBuf buf;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf);
+    int ok = layer_id ? perf_watch(layer_id) : 0;
+    return JS_NewBool(ok);
+}
+
+static JSValue js_yui_perf_unwatch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "perf.unwatch requires layer id");
+    }
+    JSCStringBuf buf;
+    const char* layer_id = JS_ToCString(ctx, argv[0], &buf);
+    int ok = layer_id ? perf_unwatch(layer_id) : 0;
+    return JS_NewBool(ok);
+}
+
+static JSValue js_yui_perf_clearWatch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    perf_clear_watch();
+    return JS_NewBool(1);
+}
+
+static JSValue js_yui_perf_getFrameStats(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    const PerfFrameStats* stats = perf_get_frame_stats();
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "fps", JS_NewFloat64(ctx, stats ? stats->fps : 0.0));
+    JS_SetPropertyStr(ctx, obj, "frameIndex", JS_NewInt64(ctx, stats ? (int64_t)stats->frame_index : 0));
+    JS_SetPropertyStr(ctx, obj, "frameMs", JS_NewFloat64(ctx, stats ? (double)stats->frame_ns / 1000000.0 : 0.0));
+    JS_SetPropertyStr(ctx, obj, "renderMs", JS_NewFloat64(ctx, stats ? (double)stats->render_tree_ns / 1000000.0 : 0.0));
+    JS_SetPropertyStr(ctx, obj, "layerCount", JS_NewInt32(ctx, stats ? (int)stats->layers_rendered : 0));
+    return obj;
+}
+
+static PerfSortBy js_yui_perf_parse_sort(JSContext* ctx, JSValue val)
+{
+    if (!JS_IsString(ctx, val)) {
+        return PERF_SORT_TIME;
+    }
+    JSCStringBuf buf;
+    const char* sort = JS_ToCString(ctx, val, &buf);
+    if (!sort) {
+        return PERF_SORT_TIME;
+    }
+    if (strcmp(sort, "count") == 0) {
+        return PERF_SORT_COUNT;
+    }
+    if (strcmp(sort, "name") == 0) {
+        return PERF_SORT_NAME;
+    }
+    return PERF_SORT_TIME;
+}
+
+static JSValue js_yui_perf_getLayerStats(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv)
+{
+    PerfSortBy sort_by = PERF_SORT_TIME;
+    if (argc >= 1) {
+        sort_by = js_yui_perf_parse_sort(ctx, argv[0]);
+    }
+
+    PerfLayerStats stats[32];
+    int count = perf_get_layer_stats(stats, 32, sort_by);
+    JSValue arr = JS_NewArray(ctx, count);
+
+    for (int i = 0; i < count; i++) {
+        JSValue item = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, item, "id", JS_NewString(ctx, stats[i].id ? stats[i].id : ""));
+        JS_SetPropertyStr(ctx, item, "type", JS_NewInt32(ctx, stats[i].type));
+        JS_SetPropertyStr(ctx, item, "renderCount", JS_NewInt32(ctx, (int)stats[i].render_count));
+        JS_SetPropertyStr(ctx, item, "renderMs", JS_NewFloat64(ctx, (double)stats[i].render_ns / 1000000.0));
+        JS_SetPropertyStr(ctx, item, "totalRenderMs", JS_NewFloat64(ctx, (double)stats[i].total_render_ns / 1000000.0));
+        JS_SetPropertyStr(ctx, item, "maxRenderCount", JS_NewInt32(ctx, (int)stats[i].max_render_count));
+        JS_SetPropertyStr(ctx, item, "framesSeen", JS_NewInt64(ctx, (int64_t)stats[i].total_frames_seen));
+
+        char key[16];
+        snprintf(key, sizeof(key), "%d", i);
+        JS_SetPropertyStr(ctx, arr, key, item);
+    }
+
+    return arr;
+}
+#else
+static JSValue js_yui_perf_enable(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_disable(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_reset(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_setOverlay(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_setTopN(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_setLogInterval(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_watch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_unwatch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_clearWatch(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_getFrameStats(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+static JSValue js_yui_perf_getLayerStats(JSContext* ctx, JSValue* this_val, int argc, JSValue* argv) { return JS_UNDEFINED; }
+#endif
 
 extern int js_module_set_event(const char* layer_id, const char* event_name, const char* event_func_name);
 // YUI.setEvent() - 设置图层事件回调

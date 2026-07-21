@@ -56,12 +56,15 @@ void popup_manager_close_by_type(PopupType type);
 void popup_manager_render(void);
 
 // 处理弹出层事件
-bool popup_manager_handle_mouse_event(MouseEvent* event);
+bool popup_manager_handle_pointer_event(PointerEvent* event);
 bool popup_manager_handle_key_event(KeyEvent* event);
 bool popup_manager_handle_scroll_event(int scroll_delta);
 
 // 检查点击是否在任何弹出层内
 bool popup_manager_is_point_in_popups(int x, int y);
+
+// 检查指定 layer 是否已注册为弹出层
+bool popup_manager_contains_layer(Layer* layer);
 
 // 创建弹出层辅助函数
 PopupLayer* popup_layer_create(Layer* layer, PopupType type, int priority);

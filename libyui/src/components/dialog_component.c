@@ -3,12 +3,13 @@
 #include "../backend.h"
 #include "../util.h"
 #include "../popup_manager.h"
+#include "../layer_update.h"
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
 
 // 外部变量
-extern float scale;
+
 
 // 默认颜色定义
 static const Color DEFAULT_TITLE_COLOR = {50, 50, 50, 255};
@@ -24,6 +25,32 @@ static const Color INFO_COLOR = {70, 130, 180, 255};
 static const Color WARNING_COLOR = {255, 165, 0, 255};
 static const Color ERROR_COLOR = {220, 20, 60, 255};
 static const Color QUESTION_COLOR = {60, 179, 113, 255};
+
+static int dialog_layer_set_visible(Layer* layer, int visible);
+static int dialog_get_button_at_position(DialogComponent* component, Layer* popup_layer, int x, int y);
+static int dialog_measure_text_width(Layer* text_layer, const char* text, Color color);
+static int dialog_get_line_height(Layer* text_layer, Color color);
+static int dialog_render_wrapped_message(Layer* text_layer, DialogComponent* component,
+    Rect* dialog_rect, int message_top, int message_area_height, int scroll_offset);
+static void dialog_component_handle_scroll_event(Layer* layer, int scroll_delta);
+static void dialog_get_message_area(DialogComponent* component, Layer* layer,
+    int* message_top, int* message_area_height);
+static int dialog_get_scrollbar_thumb(DialogComponent* component, Layer* layer,
+    Rect* out_thumb, Rect* out_track);
+static void dialog_render_message_scrollbar(DialogComponent* component, Layer* layer,
+    int message_top, int message_area_height);
+static void dialog_parse_button_style(DialogButton* button, cJSON* style);
+static int dialog_get_button_width(DialogComponent* component, int index);
+static int dialog_get_button_height(DialogComponent* component, int index);
+static int dialog_get_button_area_y(DialogComponent* component, Layer* layer);
+static int dialog_layout_button_rect(DialogComponent* component, Layer* layer,
+    int index, Rect* out_rect);
+static void dialog_get_button_colors(DialogComponent* component, DialogButton* button,
+    int selected, Color* bg, Color* text);
+static int dialog_point_in_close_button(DialogComponent* component, Layer* layer, int x, int y);
+static void dialog_get_close_button_rect(Layer* layer, Rect* out_rect);
+static void dialog_clamp_to_window(Layer* layer);
+static void dialog_component_apply_theme_style(Layer* layer, cJSON* style);
 
 // 创建对话框组件
 DialogComponent* dialog_component_create(Layer* layer) {
@@ -47,6 +74,15 @@ DialogComponent* dialog_component_create(Layer* layer) {
     component->selected_button = -1;
     component->is_modal = 1;
     component->is_opened = 0;
+    component->message_scroll_offset = 0;
+    component->message_content_height = 0;
+    component->message_area_height = 0;
+    component->scrollbar_dragging = 0;
+    component->scrollbar_drag_offset = 0;
+    component->dragging = 0;
+    component->drag_offset_x = 0;
+    component->drag_offset_y = 0;
+    component->movable = 1;
     component->user_data = NULL;
     component->on_close = NULL;
     component->on_show = NULL;
@@ -59,14 +95,46 @@ DialogComponent* dialog_component_create(Layer* layer) {
     component->button_color = DEFAULT_BUTTON_COLOR;
     component->button_hover_color = DEFAULT_BUTTON_HOVER_COLOR;
     component->button_text_color = DEFAULT_BUTTON_TEXT_COLOR;
+    component->button_width = 80;
+    component->button_height = 35;
+    component->button_spacing = 20;
+    component->button_area_bottom = 50;
     
-    // 设置组件指针和渲染函数
+    // 模板图层不参与普通渲染，仅通过 popup 显示
     layer->component = component;
-    layer->render = dialog_component_render;
-    layer->handle_mouse_event = dialog_component_handle_mouse_event;
+    layer->set_visible = dialog_layer_set_visible;
+    layer->handle_pointer_event = dialog_component_handle_pointer_event;
     layer->handle_key_event = dialog_component_handle_key_event;
+    layer->set_style = dialog_component_apply_theme_style;
     
     return component;
+}
+
+static int dialog_layer_set_visible(Layer* layer, int visible) {
+    if (!layer || !layer->component) {
+        return 0;
+    }
+
+    DialogComponent* component = (DialogComponent*)layer->component;
+    if (visible == VISIBLE) {
+        if (dialog_component_is_opened(component)) {
+            return 1;
+        }
+
+        int sw = 0, sh = 0;
+        int dw = layer->rect.w > 0 ? layer->rect.w : 400;
+        int dh = layer->rect.h > 0 ? layer->rect.h : 200;
+        backend_get_windowsize(&sw, &sh);
+        int x = sw > dw ? (sw - dw) / 2 : 0;
+        int y = sh > dh ? (sh - dh) / 2 : 0;
+        return dialog_component_show(component, x, y) ? 1 : 0;
+    }
+
+    if (dialog_component_is_opened(component)) {
+        dialog_component_hide(component);
+    }
+    layer->visible = IN_VISIBLE;
+    return 1;
 }
 
 // 销毁对话框组件
@@ -280,11 +348,24 @@ bool dialog_component_show(DialogComponent* component, int x, int y) {
     component->popup_layer->rect.h = dialog_height;
     
     // 复制基本属性
-    component->popup_layer->radius = 8;  // 圆角
+    component->popup_layer->radius = component->layer->radius > 0 ? component->layer->radius : 8;
+    component->popup_layer->font = component->layer->font;
+    component->popup_layer->assets = component->layer->assets;
     component->popup_layer->component = component;
     component->popup_layer->render = dialog_component_render;
-    component->popup_layer->handle_mouse_event = dialog_component_handle_mouse_event;
+    component->popup_layer->handle_pointer_event = dialog_component_handle_pointer_event;
     component->popup_layer->handle_key_event = dialog_component_handle_key_event;
+    component->popup_layer->handle_scroll_event = dialog_component_handle_scroll_event;
+
+    component->message_scroll_offset = 0;
+    component->message_content_height = 0;
+    component->message_area_height = 0;
+    component->scrollbar_dragging = 0;
+    component->scrollbar_drag_offset = 0;
+    component->dragging = 0;
+    component->drag_offset_x = 0;
+    component->drag_offset_y = 0;
+    component->movable = 1;
     
     // 创建弹出层并添加到弹出管理器
     PopupLayer* popup = popup_layer_create(component->popup_layer, POPUP_TYPE_DIALOG, 
@@ -327,12 +408,13 @@ void dialog_component_hide(DialogComponent* component) {
     
     // 保存指针以便调用 popup_manager_remove
     Layer* popup_layer = component->popup_layer;
-    component->popup_layer = NULL;  // 先设置为NULL，防止回调中再次使用
-    
-    // 从弹出管理器中移除
-    popup_manager_remove(popup_layer);
-    
+    component->popup_layer = NULL;
     component->is_opened = 0;
+    component->scrollbar_dragging = 0;
+    component->dragging = 0;
+
+    popup_manager_remove(popup_layer);
+    free(popup_layer);
 }
 
 // 检查对话框是否打开
@@ -341,26 +423,19 @@ bool dialog_component_is_opened(DialogComponent* component) {
 }
 
 // 获取按钮在指定位置的索引
-static int dialog_get_button_at_position(DialogComponent* component, int x, int y) {
-    if (!component || !component->popup_layer || component->button_count == 0) {
+static int dialog_get_button_at_position(DialogComponent* component, Layer* popup_layer, int x, int y) {
+    if (!component || !popup_layer || component->button_count == 0) {
         return -1;
     }
-    
-    Rect* rect = &component->popup_layer->rect;
-    
-    // 按钮区域在对话框底部
-    int button_area_y = rect->y + rect->h - 50;
-    int button_height = 35;
-    int button_width = 80;
-    int button_spacing = 20;
-    int total_width = component->button_count * button_width + (component->button_count - 1) * button_spacing;
-    int start_x = rect->x + (rect->w - total_width) / 2;
-    
+
     for (int i = 0; i < component->button_count; i++) {
-        int button_x = start_x + i * (button_width + button_spacing);
-        
-        if (x >= button_x && x < button_x + button_width &&
-            y >= button_area_y && y < button_area_y + button_height) {
+        Rect button_rect = {0};
+        if (!dialog_layout_button_rect(component, popup_layer, i, &button_rect)) {
+            continue;
+        }
+
+        if (x >= button_rect.x && x < button_rect.x + button_rect.w &&
+            y >= button_rect.y && y < button_rect.y + button_rect.h) {
             return i;
         }
     }
@@ -368,13 +443,410 @@ static int dialog_get_button_at_position(DialogComponent* component, int x, int 
     return -1;
 }
 
-// 处理键盘事件
-void dialog_component_handle_key_event(Layer* layer, KeyEvent* event) {
+static int dialog_measure_text_width(Layer* text_layer, const char* text, Color color) {
+    Texture* tex = render_text(text_layer, text, color);
+    if (!tex) {
+        return 0;
+    }
+    int w = 0, h = 0;
+    backend_query_texture(tex, NULL, NULL, &w, &h);
+    backend_render_text_destroy(tex);
+    return w / (int)yui_density;
+}
+
+static int dialog_get_line_height(Layer* text_layer, Color color) {
+    Texture* tex = render_text(text_layer, "A", color);
+    if (!tex) {
+        return 18;
+    }
+    int w = 0, h = 0;
+    backend_query_texture(tex, NULL, NULL, &w, &h);
+    backend_render_text_destroy(tex);
+    return h / (int)yui_density + 4;
+}
+
+static void dialog_parse_button_style(DialogButton* button, cJSON* style) {
+    if (!button || !style) {
+        return;
+    }
+
+    if (cJSON_HasObjectItem(style, "width")) {
+        button->width = cJSON_GetObjectItem(style, "width")->valueint;
+    }
+    if (cJSON_HasObjectItem(style, "height")) {
+        button->height = cJSON_GetObjectItem(style, "height")->valueint;
+    }
+    if (cJSON_HasObjectItem(style, "bgColor")) {
+        parse_color(cJSON_GetObjectItem(style, "bgColor")->valuestring, &button->bg_color);
+        button->has_bg_color = 1;
+    }
+    if (cJSON_HasObjectItem(style, "color")) {
+        parse_color(cJSON_GetObjectItem(style, "color")->valuestring, &button->text_color);
+        button->has_text_color = 1;
+    }
+    if (cJSON_HasObjectItem(style, "hoverColor")) {
+        parse_color(cJSON_GetObjectItem(style, "hoverColor")->valuestring, &button->hover_color);
+        button->has_hover_color = 1;
+    }
+    if (cJSON_HasObjectItem(style, "textColor")) {
+        parse_color(cJSON_GetObjectItem(style, "textColor")->valuestring, &button->text_color);
+        button->has_text_color = 1;
+    }
+    if (cJSON_HasObjectItem(style, "borderRadius")) {
+        button->radius = cJSON_GetObjectItem(style, "borderRadius")->valueint;
+    }
+}
+
+static int dialog_get_button_width(DialogComponent* component, int index) {
+    if (!component || index < 0 || index >= component->button_count) {
+        return component ? component->button_width : 80;
+    }
+    DialogButton* button = &component->buttons[index];
+    return button->width > 0 ? button->width : component->button_width;
+}
+
+static int dialog_get_button_height(DialogComponent* component, int index) {
+    if (!component || index < 0 || index >= component->button_count) {
+        return component ? component->button_height : 35;
+    }
+    DialogButton* button = &component->buttons[index];
+    return button->height > 0 ? button->height : component->button_height;
+}
+
+static int dialog_get_button_area_y(DialogComponent* component, Layer* layer) {
+    if (!component || !layer) {
+        return 0;
+    }
+    return layer->rect.y + layer->rect.h - component->button_area_bottom;
+}
+
+static int dialog_layout_button_rect(DialogComponent* component, Layer* layer,
+    int index, Rect* out_rect) {
+    if (!component || !layer || !out_rect || index < 0 || index >= component->button_count) {
+        return 0;
+    }
+
+    int spacing = component->button_spacing;
+    int total_width = 0;
+    for (int i = 0; i < component->button_count; i++) {
+        total_width += dialog_get_button_width(component, i);
+        if (i > 0) {
+            total_width += spacing;
+        }
+    }
+
+    int start_x = layer->rect.x + (layer->rect.w - total_width) / 2;
+    int button_x = start_x;
+    for (int i = 0; i < index; i++) {
+        button_x += dialog_get_button_width(component, i) + spacing;
+    }
+
+    int button_y = dialog_get_button_area_y(component, layer);
+    out_rect->x = button_x;
+    out_rect->y = button_y;
+    out_rect->w = dialog_get_button_width(component, index);
+    out_rect->h = dialog_get_button_height(component, index);
+    return 1;
+}
+
+static void dialog_get_button_colors(DialogComponent* component, DialogButton* button,
+    int selected, Color* bg, Color* text) {
+    if (!component || !button || !bg || !text) {
+        return;
+    }
+
+    if (selected) {
+        *bg = button->has_hover_color ? button->hover_color : component->button_hover_color;
+    } else {
+        *bg = button->has_bg_color ? button->bg_color : component->button_color;
+    }
+    *text = button->has_text_color ? button->text_color : component->button_text_color;
+}
+
+static void dialog_get_close_button_rect(Layer* layer, Rect* out_rect) {
+    if (!layer || !out_rect) {
+        return;
+    }
+    out_rect->w = 24;
+    out_rect->h = 24;
+    out_rect->x = layer->rect.x + layer->rect.w - out_rect->w - 8;
+    out_rect->y = layer->rect.y + 8;
+}
+
+static int dialog_point_in_close_button(DialogComponent* component, Layer* layer, int x, int y) {
+  (void)component;
+    Rect close_rect = {0};
+    dialog_get_close_button_rect(layer, &close_rect);
+    return is_point_in_rect(x, y, close_rect);
+}
+
+static int dialog_point_in_drag_area(DialogComponent* component, Layer* layer, int x, int y) {
+    if (!component || !layer || !component->movable) {
+        return 0;
+    }
+
+    Rect* rect = &layer->rect;
+    if (x < rect->x || x >= rect->x + rect->w) {
+        return 0;
+    }
+    if (dialog_point_in_close_button(component, layer, x, y)) {
+        return 0;
+    }
+
+    int drag_bottom = rect->y + (strlen(component->title) > 0 ? 56 : 24);
+    int message_top = 0;
+    int message_area_height = 0;
+    dialog_get_message_area(component, layer, &message_top, &message_area_height);
+    if (message_top > drag_bottom) {
+        drag_bottom = message_top;
+    }
+
+    return y >= rect->y && y < drag_bottom;
+}
+
+static void dialog_clamp_to_window(Layer* layer) {
+    if (!layer) {
+        return;
+    }
+
+    int sw = 0;
+    int sh = 0;
+    backend_get_windowsize(&sw, &sh);
+    if (sw <= 0 || sh <= 0) {
+        return;
+    }
+
+    if (layer->rect.x < 0) {
+        layer->rect.x = 0;
+    }
+    if (layer->rect.y < 0) {
+        layer->rect.y = 0;
+    }
+    if (layer->rect.x + layer->rect.w > sw) {
+        layer->rect.x = sw - layer->rect.w;
+    }
+    if (layer->rect.y + layer->rect.h > sh) {
+        layer->rect.y = sh - layer->rect.h;
+    }
+    if (layer->rect.x < 0) {
+        layer->rect.x = 0;
+    }
+    if (layer->rect.y < 0) {
+        layer->rect.y = 0;
+    }
+}
+
+static void dialog_get_message_area(DialogComponent* component, Layer* layer,
+    int* message_top, int* message_area_height) {
+    Rect* rect = &layer->rect;
+    int current_y = rect->y + 20;
+
+    if (component && strlen(component->title) > 0) {
+        current_y += 40;
+    }
+
+    int top = current_y;
+    int button_area_y = dialog_get_button_area_y(component, layer);
+    int area_height = button_area_y - top - 10;
+    if (area_height < 0) {
+        area_height = 0;
+    }
+
+    if (message_top) {
+        *message_top = top;
+    }
+    if (message_area_height) {
+        *message_area_height = area_height;
+    }
+}
+
+static int dialog_get_scrollbar_thumb(DialogComponent* component, Layer* layer,
+    Rect* out_thumb, Rect* out_track) {
+    if (!component || !layer) {
+        return 0;
+    }
+
+    int message_top = 0;
+    int message_area_height = 0;
+    dialog_get_message_area(component, layer, &message_top, &message_area_height);
+
+    int content_h = component->message_content_height;
+    int visible_h = message_area_height;
+    if (content_h <= visible_h || visible_h <= 0) {
+        return 0;
+    }
+
+    const int scrollbar_width = 8;
+    int scrollbar_x = layer->rect.x + layer->rect.w - scrollbar_width - 8;
+    int max_scroll = content_h - visible_h;
+    int scroll_offset = component->message_scroll_offset;
+    if (scroll_offset < 0) {
+        scroll_offset = 0;
+    } else if (scroll_offset > max_scroll) {
+        scroll_offset = max_scroll;
+    }
+
+    int thumb_h = (int)((float)visible_h / content_h * visible_h);
+    if (thumb_h < 20) {
+        thumb_h = 20;
+    }
+    if (thumb_h > visible_h) {
+        thumb_h = visible_h;
+    }
+
+    int thumb_y = message_top;
+    if (max_scroll > 0) {
+        thumb_y = message_top + (int)((float)scroll_offset / max_scroll * (visible_h - thumb_h));
+    }
+
+    if (out_track) {
+        *out_track = (Rect){scrollbar_x, message_top, scrollbar_width, visible_h};
+    }
+    if (out_thumb) {
+        *out_thumb = (Rect){scrollbar_x, thumb_y, scrollbar_width, thumb_h};
+    }
+    return 1;
+}
+
+static void dialog_render_message_scrollbar(DialogComponent* component, Layer* layer,
+    int message_top, int message_area_height) {
+    Rect track = {0};
+    Rect thumb = {0};
+    if (!dialog_get_scrollbar_thumb(component, layer, &thumb, &track)) {
+        return;
+    }
+
+    Color track_color = {100, 100, 100, 60};
+    backend_render_fill_rect(&track, track_color);
+
+    Color thumb_color = component->border_color;
+    if (thumb_color.a == 0) {
+        thumb_color = (Color){130, 130, 130, 200};
+    }
+    backend_render_fill_rect(&thumb, thumb_color);
+}
+
+static int dialog_render_wrapped_message(Layer* text_layer, DialogComponent* component,
+    Rect* dialog_rect, int message_top, int message_area_height, int scroll_offset) {
+    const char* text = component->message;
+    if (!text || !text[0] || message_area_height <= 0) {
+        return 0;
+    }
+
+    int max_width = dialog_rect->w - 52;
+    int x = dialog_rect->x + 20;
+    int line_height = dialog_get_line_height(text_layer, component->text_color);
+    int rel_y = 0;
+    const char* paragraph = text;
+
+    Rect clip = {dialog_rect->x, message_top, dialog_rect->w, message_area_height};
+    Rect prev_clip;
+    backend_render_get_clip_rect(&prev_clip);
+    backend_render_set_clip_rect(&clip);
+
+    while (*paragraph) {
+        const char* next_nl = strchr(paragraph, '\n');
+        int para_len = next_nl ? (int)(next_nl - paragraph) : (int)strlen(paragraph);
+        const char* line_start = paragraph;
+        const char* para_end = paragraph + para_len;
+
+        while (line_start < para_end) {
+            char buf[512];
+            int remain = (int)(para_end - line_start);
+            if (remain >= (int)sizeof(buf)) {
+                remain = (int)sizeof(buf) - 1;
+            }
+            memcpy(buf, line_start, remain);
+            buf[remain] = '\0';
+
+            int fit_len = remain;
+            if (dialog_measure_text_width(text_layer, buf, component->text_color) > max_width) {
+                fit_len = 0;
+                int pos = 0;
+                while (line_start + pos < para_end) {
+                    int clen = utf8_char_len_at(line_start + pos);
+                    if (clen <= 0) {
+                        clen = 1;
+                    }
+                    if (pos + clen >= (int)sizeof(buf)) {
+                        break;
+                    }
+                    memcpy(buf, line_start, pos + clen);
+                    buf[pos + clen] = '\0';
+                    if (dialog_measure_text_width(text_layer, buf, component->text_color) > max_width) {
+                        break;
+                    }
+                    pos += clen;
+                    fit_len = pos;
+                }
+                if (fit_len == 0) {
+                    fit_len = utf8_char_len_at(line_start);
+                    if (fit_len <= 0) {
+                        fit_len = 1;
+                    }
+                }
+                memcpy(buf, line_start, fit_len);
+                buf[fit_len] = '\0';
+            }
+
+            int draw_y = message_top + rel_y - scroll_offset;
+            if (draw_y + line_height > message_top && draw_y < message_top + message_area_height) {
+                Texture* line_tex = render_text(text_layer, buf, component->text_color);
+                if (line_tex) {
+                    int tw = 0, th = 0;
+                    backend_query_texture(line_tex, NULL, NULL, &tw, &th);
+                    Rect line_rect = {x, draw_y, tw / (int)yui_density, th / (int)yui_density};
+                    backend_render_text_copy(line_tex, NULL, &line_rect);
+                    backend_render_text_destroy(line_tex);
+                }
+            }
+
+            line_start += fit_len;
+            rel_y += line_height;
+        }
+
+        if (next_nl) {
+            paragraph = next_nl + 1;
+        } else {
+            break;
+        }
+    }
+
+    if (prev_clip.w > 0 && prev_clip.h > 0) {
+        backend_render_set_clip_rect(&prev_clip);
+    } else {
+        backend_render_set_clip_rect(NULL);
+    }
+
+    return rel_y;
+}
+
+static void dialog_component_handle_scroll_event(Layer* layer, int scroll_delta) {
     DialogComponent* component = (DialogComponent*)layer->component;
     if (!component || !component->is_opened) {
         return;
     }
-    
+
+    int max_scroll = component->message_content_height - component->message_area_height;
+    if (max_scroll <= 0) {
+        return;
+    }
+
+    component->message_scroll_offset += scroll_delta * 20;
+    if (component->message_scroll_offset < 0) {
+        component->message_scroll_offset = 0;
+    } else if (component->message_scroll_offset > max_scroll) {
+        component->message_scroll_offset = max_scroll;
+    }
+}
+
+// 处理键盘事件
+int dialog_component_handle_key_event(Layer* layer, KeyEvent* event) {
+    DialogComponent* component = (DialogComponent*)layer->component;
+    if (!component || !component->is_opened) {
+        return 0;
+    }
+
     if (event->type == KEY_EVENT_DOWN) {
         switch (event->data.key.key_code) {
             case 13: // 回车键
@@ -388,7 +860,7 @@ void dialog_component_handle_key_event(Layer* layer, KeyEvent* event) {
                             component->on_close(component, i);
                         }
                         dialog_component_hide(component);
-                        return;
+                        return 0;
                     }
                 }
                 // 如果没有默认按钮，触发第一个按钮
@@ -414,7 +886,7 @@ void dialog_component_handle_key_event(Layer* layer, KeyEvent* event) {
                             component->on_close(component, i);
                         }
                         dialog_component_hide(component);
-                        return;
+                        return 0;
                     }
                 }
                 // 如果没有取消按钮，直接关闭对话框
@@ -435,21 +907,105 @@ void dialog_component_handle_key_event(Layer* layer, KeyEvent* event) {
                 break;
         }
     }
+    return 0;
 }
 
 // 处理鼠标事件
-void dialog_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
+int dialog_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     DialogComponent* component = (DialogComponent*)layer->component;
-    if (!component || !component->is_opened) {
-        return;
+    if (!component || !component->is_opened || !event) {
+        return 0;
     }
-    
-    if (event->state == 0) { // 鼠标移动
-        int old_selected = component->selected_button;
-        component->selected_button = dialog_get_button_at_position(component, event->x, event->y);
-        
-    } else if (event->state == 1 && event->button == 1) { // 左键点击
-        int clicked_button = dialog_get_button_at_position(component, event->x, event->y);
+
+    Rect thumb = {0};
+    Rect track = {0};
+    int has_scrollbar = dialog_get_scrollbar_thumb(component, layer, &thumb, &track);
+    int message_area_height = component->message_area_height;
+    if (message_area_height <= 0) {
+        int message_top = 0;
+        dialog_get_message_area(component, layer, &message_top, &message_area_height);
+    }
+
+    if (event->phase == POINTER_MOVE) {
+        if (component->dragging) {
+            layer->rect.x = event->x - component->drag_offset_x;
+            layer->rect.y = event->y - component->drag_offset_y;
+            dialog_clamp_to_window(layer);
+            return 0;
+        }
+        if (component->scrollbar_dragging && has_scrollbar) {
+            int max_scroll = component->message_content_height - message_area_height;
+            if (max_scroll > 0) {
+                int thumb_h = thumb.h;
+                int track_range = track.h - thumb_h;
+                int new_thumb_y = event->y - component->scrollbar_drag_offset;
+                if (new_thumb_y < track.y) {
+                    new_thumb_y = track.y;
+                }
+                if (new_thumb_y > track.y + track_range) {
+                    new_thumb_y = track.y + track_range;
+                }
+                if (track_range > 0) {
+                    component->message_scroll_offset =
+                        (int)((float)(new_thumb_y - track.y) / track_range * max_scroll);
+                }
+            }
+            return 0;
+        }
+        component->selected_button = dialog_get_button_at_position(component, layer, event->x, event->y);
+        component->close_hovered = dialog_point_in_close_button(component, layer, event->x, event->y);
+    } else if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
+        if (dialog_point_in_close_button(component, layer, event->x, event->y)) {
+            if (component->on_close) {
+                component->on_close(component, -1);
+            }
+            dialog_component_hide(component);
+            return 0;
+        }
+        if (dialog_point_in_drag_area(component, layer, event->x, event->y)) {
+            component->dragging = 1;
+            component->drag_offset_x = event->x - layer->rect.x;
+            component->drag_offset_y = event->y - layer->rect.y;
+            return 0;
+        }
+        if (has_scrollbar &&
+            event->x >= thumb.x && event->x < thumb.x + thumb.w &&
+            event->y >= thumb.y && event->y < thumb.y + thumb.h) {
+            component->scrollbar_dragging = 1;
+            component->scrollbar_drag_offset = event->y - thumb.y;
+            return 0;
+        }
+        if (has_scrollbar &&
+            event->x >= track.x && event->x < track.x + track.w &&
+            event->y >= track.y && event->y < track.y + track.h) {
+            int max_scroll = component->message_content_height - message_area_height;
+            if (max_scroll > 0) {
+                int thumb_h = thumb.h;
+                int page = message_area_height;
+                if (event->y < thumb.y) {
+                    component->message_scroll_offset -= page;
+                } else if (event->y >= thumb.y + thumb_h) {
+                    component->message_scroll_offset += page;
+                }
+                if (component->message_scroll_offset < 0) {
+                    component->message_scroll_offset = 0;
+                } else if (component->message_scroll_offset > max_scroll) {
+                    component->message_scroll_offset = max_scroll;
+                }
+            }
+            return 0;
+        }
+    } else if (event->phase == POINTER_UP && event->button == SDL_BUTTON_LEFT) {
+        if (component->dragging) {
+            component->dragging = 0;
+            return 0;
+        }
+        if (component->scrollbar_dragging) {
+            component->scrollbar_dragging = 0;
+            return 0;
+        }
+
+        int clicked_button = dialog_get_button_at_position(component, layer, event->x, event->y);
         
         if (clicked_button >= 0 && clicked_button < component->button_count) {
             DialogButton* button = &component->buttons[clicked_button];
@@ -465,6 +1021,7 @@ void dialog_component_handle_mouse_event(Layer* layer, MouseEvent* event) {
             dialog_component_hide(component);
         }
     }
+    return 0;
 }
 
 // 渲染对话框组件
@@ -474,6 +1031,11 @@ void dialog_component_render(Layer* layer) {
     }
     
     DialogComponent* component = (DialogComponent*)layer->component;
+    if (!component->is_opened) {
+        return;
+    }
+
+    Layer* text_layer = component->layer ? component->layer : layer;
     Rect* rect = &layer->rect;
     
     // 绘制背景
@@ -497,18 +1059,46 @@ void dialog_component_render(Layer* layer) {
     
     int current_y = rect->y + 20;
     
+    // 绘制标题栏关闭按钮
+    {
+        Rect close_rect = {0};
+        Color close_bg = component->close_hovered ? (Color){200, 200, 200, 60}
+                                                  : (Color){0, 0, 0, 0};
+        Color close_color = component->close_hovered ? component->title_color
+                                                     : (Color){component->title_color.r,
+                                                               component->title_color.g,
+                                                               component->title_color.b, 180};
+        dialog_get_close_button_rect(layer, &close_rect);
+        if (close_bg.a > 0) {
+            backend_render_fill_rect(&close_rect, close_bg);
+        }
+        Texture* close_tex = render_text(text_layer, "×", close_color);
+        if (close_tex) {
+            int cw = 0, ch = 0;
+            backend_query_texture(close_tex, NULL, NULL, &cw, &ch);
+            Rect close_text = {
+                close_rect.x + (close_rect.w - cw / yui_density) / 2,
+                close_rect.y + (close_rect.h - ch / yui_density) / 2,
+                cw / yui_density,
+                ch / yui_density
+            };
+            backend_render_text_copy(close_tex, NULL, &close_text);
+            backend_render_text_destroy(close_tex);
+        }
+    }
+    
     // 绘制标题
     if (strlen(component->title) > 0) {
-        Texture* title_texture = render_text(layer, component->title, component->title_color);
+        Texture* title_texture = render_text(text_layer, component->title, component->title_color);
         if (title_texture) {
             int title_width, title_height;
             backend_query_texture(title_texture, NULL, NULL, &title_width, &title_height);
             
             Rect title_rect = {
-                rect->x + (rect->w - title_width / scale) / 2,
+                rect->x + (rect->w - title_width / yui_density) / 2,
                 current_y,
-                title_width / scale,
-                title_height / scale
+                title_width / yui_density,
+                title_height / yui_density
             };
             
             backend_render_text_copy(title_texture, NULL, &title_rect);
@@ -517,75 +1107,64 @@ void dialog_component_render(Layer* layer) {
         current_y += 40;
     }
     
-    // 绘制消息
-    if (strlen(component->message) > 0) {
-        Texture* message_texture = render_text(layer, component->message, component->text_color);
-        if (message_texture) {
-            int message_width, message_height;
-            backend_query_texture(message_texture, NULL, NULL, &message_width, &message_height);
-            
-            // 自动换行处理
-            int max_width = rect->w - 40;
-            if (message_width / scale > max_width) {
-                // 简单的截断处理，实际应用中可以实现更复杂的文本换行
-                Rect message_rect = {
-                    rect->x + 20,
-                    current_y,
-                    max_width,
-                    message_height / scale
-                };
-                backend_render_text_copy(message_texture, NULL, &message_rect);
-            } else {
-                Rect message_rect = {
-                    rect->x + (rect->w - message_width / scale) / 2,
-                    current_y,
-                    message_width / scale,
-                    message_height / scale
-                };
-                backend_render_text_copy(message_texture, NULL, &message_rect);
-            }
-            
-            backend_render_text_destroy(message_texture);
+    int message_top = 0;
+    int message_area_height = 0;
+    dialog_get_message_area(component, layer, &message_top, &message_area_height);
+    component->message_area_height = message_area_height;
+
+    // 绘制消息（支持 \n 换行、自动折行与滚动）
+    if (strlen(component->message) > 0 && message_area_height > 0) {
+        component->message_content_height = dialog_render_wrapped_message(
+            text_layer, component, rect, message_top, message_area_height,
+            component->message_scroll_offset);
+
+        int max_scroll = component->message_content_height - message_area_height;
+        if (max_scroll < 0) {
+            max_scroll = 0;
         }
-        current_y += 100;
+        if (component->message_scroll_offset > max_scroll) {
+            component->message_scroll_offset = max_scroll;
+        }
+
+        if (max_scroll > 0) {
+            dialog_render_message_scrollbar(component, layer, message_top, message_area_height);
+        }
+    } else {
+        component->message_content_height = 0;
     }
     
     // 绘制按钮
     if (component->button_count > 0) {
-        int button_area_y = rect->y + rect->h - 50;
-        int button_height = 35;
-        int button_width = 80;
-        int button_spacing = 20;
-        int total_width = component->button_count * button_width + (component->button_count - 1) * button_spacing;
-        int start_x = rect->x + (rect->w - total_width) / 2;
-        
         for (int i = 0; i < component->button_count; i++) {
             DialogButton* button = &component->buttons[i];
-            int button_x = start_x + i * (button_width + button_spacing);
-            Rect button_rect = {button_x, button_area_y, button_width, button_height};
-            
-            // 选择按钮颜色
-            Color button_color = component->button_color;
-            if (i == component->selected_button) {
-                button_color = component->button_hover_color;
+            Rect button_rect = {0};
+            if (!dialog_layout_button_rect(component, layer, i, &button_rect)) {
+                continue;
             }
-            
-            // 绘制按钮背景
-            backend_render_fill_rect(&button_rect, button_color);
-            
-            // 绘制按钮文本
-            Texture* button_texture = render_text(layer, button->text, component->button_text_color);
+
+            Color button_color = {0};
+            Color button_text_color = {0};
+            dialog_get_button_colors(component, button, i == component->selected_button,
+                                     &button_color, &button_text_color);
+
+            if (button->radius > 0) {
+                backend_render_rounded_rect(&button_rect, button_color, button->radius);
+            } else {
+                backend_render_fill_rect(&button_rect, button_color);
+            }
+
+            Texture* button_texture = render_text(text_layer, button->text, button_text_color);
             if (button_texture) {
                 int text_width, text_height;
                 backend_query_texture(button_texture, NULL, NULL, &text_width, &text_height);
-                
+
                 Rect text_rect = {
-                    button_x + (button_width - text_width / scale) / 2,
-                    button_area_y + (button_height - text_height / scale) / 2,
-                    text_width / scale,
-                    text_height / scale
+                    button_rect.x + (button_rect.w - text_width / yui_density) / 2,
+                    button_rect.y + (button_rect.h - text_height / yui_density) / 2,
+                    text_width / yui_density,
+                    text_height / yui_density
                 };
-                
+
                 backend_render_text_copy(button_texture, NULL, &text_rect);
                 backend_render_text_destroy(button_texture);
             }
@@ -630,6 +1209,11 @@ DialogComponent* dialog_component_create_from_json(Layer* layer, cJSON* json) {
     if (!component) {
         return NULL;
     }
+
+    // 未配置 visible 时默认隐藏，通过 show 弹出显示
+    if (!cJSON_HasObjectItem(json, "visible")) {
+        layer->visible = IN_VISIBLE;
+    }
     
     // 解析标题
     if (cJSON_HasObjectItem(json, "title")) {
@@ -641,9 +1225,18 @@ DialogComponent* dialog_component_create_from_json(Layer* layer, cJSON* json) {
         dialog_component_set_message(component, cJSON_GetObjectItem(json, "message")->valuestring);
     }
     
-    // 解析类型
-    if (cJSON_HasObjectItem(json, "type")) {
-        const char* type_str = cJSON_GetObjectItem(json, "type")->valuestring;
+    // 解析类型（dialogType 优先，避免与图层 type 字段冲突）
+    cJSON* type_item = cJSON_GetObjectItem(json, "dialogType");
+    if (!type_item) {
+        type_item = cJSON_GetObjectItem(json, "type");
+        if (type_item && type_item->valuestring &&
+            (strcmp(type_item->valuestring, "Dialog") == 0 ||
+             strcmp(type_item->valuestring, "dialog") == 0)) {
+            type_item = NULL;
+        }
+    }
+    if (type_item && type_item->valuestring) {
+        const char* type_str = type_item->valuestring;
         if (strcmp(type_str, "info") == 0) {
             dialog_component_set_type(component, DIALOG_TYPE_INFO);
         } else if (strcmp(type_str, "warning") == 0) {
@@ -660,6 +1253,10 @@ DialogComponent* dialog_component_create_from_json(Layer* layer, cJSON* json) {
     // 解析模态属性
     if (cJSON_HasObjectItem(json, "modal")) {
         dialog_component_set_modal(component, cJSON_IsTrue(cJSON_GetObjectItem(json, "modal")));
+    }
+
+    if (cJSON_HasObjectItem(json, "movable")) {
+        component->movable = cJSON_IsTrue(cJSON_GetObjectItem(json, "movable"));
     }
     
     // 解析按钮
@@ -684,6 +1281,13 @@ DialogComponent* dialog_component_create_from_json(Layer* layer, cJSON* json) {
                 }
                 
                 dialog_component_add_button(component, text, NULL, NULL, is_default, is_cancel);
+                if (component->button_count > 0) {
+                    DialogButton* btn = &component->buttons[component->button_count - 1];
+                    cJSON* btn_style = cJSON_GetObjectItem(button, "style");
+                    if (btn_style) {
+                        dialog_parse_button_style(btn, btn_style);
+                    }
+                }
             }
         }
     }
@@ -691,42 +1295,56 @@ DialogComponent* dialog_component_create_from_json(Layer* layer, cJSON* json) {
     // 解析样式
     cJSON* style = cJSON_GetObjectItem(json, "style");
     if (style) {
-        if (cJSON_HasObjectItem(style, "titleColor")) {
-            Color title_color;
-            parse_color(cJSON_GetObjectItem(style, "titleColor")->valuestring, &title_color);
-            component->title_color = title_color;
-        }
-        if (cJSON_HasObjectItem(style, "textColor")) {
-            Color text_color;
-            parse_color(cJSON_GetObjectItem(style, "textColor")->valuestring, &text_color);
-            component->text_color = text_color;
-        }
-        if (cJSON_HasObjectItem(style, "bgColor")) {
-            Color bg_color;
-            parse_color(cJSON_GetObjectItem(style, "bgColor")->valuestring, &bg_color);
-            component->bg_color = bg_color;
-        }
-        if (cJSON_HasObjectItem(style, "borderColor")) {
-            Color border_color;
-            parse_color(cJSON_GetObjectItem(style, "borderColor")->valuestring, &border_color);
-            component->border_color = border_color;
-        }
-        if (cJSON_HasObjectItem(style, "buttonColor")) {
-            Color button_color;
-            parse_color(cJSON_GetObjectItem(style, "buttonColor")->valuestring, &button_color);
-            component->button_color = button_color;
-        }
-        if (cJSON_HasObjectItem(style, "buttonHoverColor")) {
-            Color button_hover_color;
-            parse_color(cJSON_GetObjectItem(style, "buttonHoverColor")->valuestring, &button_hover_color);
-            component->button_hover_color = button_hover_color;
-        }
-        if (cJSON_HasObjectItem(style, "buttonTextColor")) {
-            Color button_text_color;
-            parse_color(cJSON_GetObjectItem(style, "buttonTextColor")->valuestring, &button_text_color);
-            component->button_text_color = button_text_color;
-        }
+        dialog_component_apply_theme_style(layer, style);
     }
     
     return component;
+}
+
+static void dialog_component_apply_theme_style(Layer* layer, cJSON* style) {
+    if (!layer || !style || !layer->component) {
+        return;
+    }
+
+    DialogComponent* component = (DialogComponent*)layer->component;
+
+    if (cJSON_HasObjectItem(style, "titleColor")) {
+        parse_color(cJSON_GetObjectItem(style, "titleColor")->valuestring, &component->title_color);
+    }
+    if (cJSON_HasObjectItem(style, "textColor")) {
+        parse_color(cJSON_GetObjectItem(style, "textColor")->valuestring, &component->text_color);
+    }
+    if (cJSON_HasObjectItem(style, "color")) {
+        parse_color(cJSON_GetObjectItem(style, "color")->valuestring, &component->text_color);
+    }
+    if (cJSON_HasObjectItem(style, "bgColor")) {
+        parse_color(cJSON_GetObjectItem(style, "bgColor")->valuestring, &component->bg_color);
+        layer->bg_color = component->bg_color;
+    }
+    if (cJSON_HasObjectItem(style, "borderColor")) {
+        parse_color(cJSON_GetObjectItem(style, "borderColor")->valuestring, &component->border_color);
+    }
+    if (cJSON_HasObjectItem(style, "buttonColor")) {
+        parse_color(cJSON_GetObjectItem(style, "buttonColor")->valuestring, &component->button_color);
+    }
+    if (cJSON_HasObjectItem(style, "buttonHoverColor")) {
+        parse_color(cJSON_GetObjectItem(style, "buttonHoverColor")->valuestring, &component->button_hover_color);
+    }
+    if (cJSON_HasObjectItem(style, "buttonTextColor")) {
+        parse_color(cJSON_GetObjectItem(style, "buttonTextColor")->valuestring, &component->button_text_color);
+    }
+    if (cJSON_HasObjectItem(style, "buttonWidth")) {
+        component->button_width = cJSON_GetObjectItem(style, "buttonWidth")->valueint;
+    }
+    if (cJSON_HasObjectItem(style, "buttonHeight")) {
+        component->button_height = cJSON_GetObjectItem(style, "buttonHeight")->valueint;
+    }
+    if (cJSON_HasObjectItem(style, "buttonSpacing")) {
+        component->button_spacing = cJSON_GetObjectItem(style, "buttonSpacing")->valueint;
+    }
+    if (cJSON_HasObjectItem(style, "buttonAreaBottom")) {
+        component->button_area_bottom = cJSON_GetObjectItem(style, "buttonAreaBottom")->valueint;
+    }
+
+    mark_layer_dirty(layer, DIRTY_COLOR | DIRTY_TEXT | DIRTY_LAYOUT);
 }

@@ -20,6 +20,9 @@ int js_module_init(void);
 // 清理 JS 引擎
 void js_module_cleanup(void);
 
+// 销毁 UI 树后解除 JS 对根图层的引用（destroy_layer 在 free 前调用）
+void js_module_detach_layer_root_if(Layer* layer);
+
 // 加载并执行 JS 文件
 int js_module_load_file(const char* filename);
 
@@ -27,7 +30,15 @@ int js_module_load_file(const char* filename);
 void js_module_register_api(void);
 
 // 从 JSON 中加载 JS 文件（json_file_path 用于相对路径解析）
-int js_module_load_from_json(cJSON* root_json, const char* json_file_path);
+// append=0: 清空事件表、初始化生命周期树（应用启动）
+// append=1: 仅追加 JS 与事件，不清空、不触发 onLoad（动态页面）
+int js_module_load_from_json(cJSON* root_json, const char* json_file_path, int append);
+
+// 应用退出：根 Layer onHide/onUnload
+void js_module_shutdown(void);
+
+// 初始化页面生命周期派发
+void js_module_init_layer_lifecycle(void);
 
 // 调用 JS 函数（通过事件名）
 int js_module_call_event(const char* event_name, Layer* layer);
@@ -78,7 +89,13 @@ const char* js_module_get_select_value(const char* layer_id);
 // 文件读取函数，用于JavaScript环境
 char* js_module_read_file(const char* file_path);
 
+// 按 layout_base 等比缩放根布局并调整窗口尺寸
+int js_module_resize_root(int width, int height);
+
 int js_module_set_event(const char* layer_id, const char* event_name, const char* event_func_name);
+
+// YUI.call 桥接函数
+void* js_module_get_context(void);
 
 #ifdef __cplusplus
 }

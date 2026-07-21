@@ -2,14 +2,33 @@
 #include "util.h"
 #include "backend.h"
 #include "popup_manager.h"
+#include "component_registry.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 // 全局事件处理数组
 int global_event_handers_size=MAX_EVENT;
 EventEntry global_event_handlers[MAX_EVENT];
 // 当前已注册事件数量
 int event_count = 0;
+static PointerEvent current_pointer_event;
+static int current_pointer_event_active = 0;
+static int pointer_gesture_scrolled = 0;
+
+void pointer_gesture_mark_scrolled(void) {
+    pointer_gesture_scrolled = 1;
+}
+
+static int pointer_gesture_did_scroll(void) {
+    return pointer_gesture_scrolled;
+}
+
+static void handler_virtical_scroll_event(Layer* layer, int scroll_delta);
+static void handle_horizontal_scroll_event(Layer* layer, int scroll_delta);
+static void process_layer_scrollbar(Layer* layer, int mouse_x, int mouse_y,
+                                    SDL_EventType event_type);
+static void reset_scrollbar_dragging_state(Layer* layer);
 
 // 注册事件处理函数
 int register_event_handler(const char* name, EventHandler handler) {
@@ -57,36 +76,27 @@ EventHandler find_event_by_name(const char* name) {
 
 
 // ====================== 事件处理器 ======================
-// 处理垂直滚动事件
-void handle_scroll_event(Layer* layer,int mouse_x,int mouse_y,int scroll_deltax,int scroll_deltay) {
-    // 优先处理popup层的滚动事件
-    if (popup_manager_handle_scroll_event(scroll_deltay)) {
-        return;
-    }
-    
-    // 检查鼠标是否在图层内
-    if (!is_point_in_rect(mouse_x, mouse_y, layer->rect)) {
-        return; // 鼠标不在图层内，不处理滚动事件
-    }
-    
-    handler_virtical_scroll_event(layer, scroll_deltay);
-    handle_horizontal_scroll_event(layer, scroll_deltay); // 水平滚动
+const PointerEvent* get_current_pointer_event(void) {
+    return current_pointer_event_active ? &current_pointer_event : NULL;
+}
 
-    // 递归处理子图层的键盘事件（但只有焦点图层会实际处理事件）
-    for (int i = 0; i < layer->child_count; i++) {
-        if (layer->children[i]) {
-            handle_scroll_event(layer->children[i],mouse_x,mouse_y, scroll_deltax,scroll_deltay);
-        }
-    }
-    
-    // 处理sub图层的键盘事件
-    if (layer->sub) {
-        handle_scroll_event(layer->sub,mouse_x,mouse_y, scroll_deltax,scroll_deltay);
+const char* pointer_phase_to_string(PointerPhase phase) {
+    switch (phase) {
+        case POINTER_DOWN: return "start";
+        case POINTER_MOVE: return "move";
+        case POINTER_UP: return "end";
+        case POINTER_CANCEL: return "cancel";
+        case POINTER_WHEEL: return "wheel";
+        case POINTER_SWIPE: return "swipe";
+        case POINTER_DOUBLE_TAP: return "doubleTap";
+        case POINTER_LONG_PRESS: return "longPress";
+        case POINTER_PINCH: return "pinch";
+        case POINTER_ROTATE: return "rotate";
+        default: return "unknown";
     }
 }
 
-// 处理垂直滚动事件
-void handler_virtical_scroll_event(Layer* layer, int scroll_delta) {
+static void handler_virtical_scroll_event(Layer* layer, int scroll_delta) {
     // 只有在垂直滚动或双向滚动模式下才处理垂直滚动
     if ((layer->scrollable == 1 || layer->scrollable == 3) && layer->scrollbar_v) {
         layer->scroll_offset += scroll_delta * 20; // 每次滚动20像素
@@ -113,15 +123,14 @@ void handler_virtical_scroll_event(Layer* layer, int scroll_delta) {
         
         // 触发滚动事件回调
         if (layer->event && layer->event->scroll) {
-            layer->event->scroll(layer);
+            EVENT_INVOKE(layer->event->scroll, layer);
         }
         // 重新布局子元素
         layout_layer(layer);
     }
 }
 
-// 处理水平滚动事件
-void handle_horizontal_scroll_event(Layer* layer, int scroll_delta) {
+static void handle_horizontal_scroll_event(Layer* layer, int scroll_delta) {
     // 只有在水平滚动或双向滚动模式下才处理水平滚动
     if ((layer->scrollable == 2 || layer->scrollable == 3) && layer->scrollbar_h) {
         layer->scroll_offset_x += scroll_delta * 20; // 每次滚动20像素
@@ -149,7 +158,7 @@ void handle_horizontal_scroll_event(Layer* layer, int scroll_delta) {
         
         // 触发滚动事件回调
         if (layer->event && layer->event->scroll) {
-            layer->event->scroll(layer);
+            EVENT_INVOKE(layer->event->scroll, layer);
         }
         // 重新布局子元素
         layout_layer(layer);
@@ -169,47 +178,225 @@ void handle_key_event(Layer* layer, KeyEvent* event) {
 
     // 如果当前图层就是焦点图层且有键盘事件处理函数，则处理事件
     if (focused_layer == layer && layer->handle_key_event) {
-        layer->handle_key_event(layer, event);
-        return;
+        if (layer->handle_key_event(layer, event)) return;
     }
-    
+
     // 递归处理子图层的键盘事件，寻找焦点图层
     for (int i = 0; i < layer->child_count; i++) {
         if (layer->children[i]) {
-            // 递归调用，不需要额外检查
             handle_key_event(layer->children[i], event);
         }
     }
-    
+
     // 处理sub图层的键盘事件
     if (layer->sub) {
         handle_key_event(layer->sub, event);
     }
 }
 
-// 处理鼠标事件
-void handle_mouse_event(Layer* layer, MouseEvent* event) {
-    if (!layer || !event) {
-        return;
+// 递归检查指定位置是否有子图层可以处理点击事件
+static bool has_child_handler_at_point(Layer* layer, Point point) {
+    if (!layer) return false;
+    for (int i = 0; i < layer->child_count; i++) {
+        Layer* child = layer->children[i];
+        if (!child) continue;
+        if (point_in_rect(point, child->rect)) {
+            if (child->handle_pointer_event) return true;
+            if (child->event && child->event->click) return true;
+            if (has_child_handler_at_point(child, point)) return true;
+        }
     }
+    if (layer->sub && point_in_rect(point, layer->sub->rect)) {
+        if (layer->sub->handle_pointer_event) return true;
+        if (layer->sub->event && layer->sub->event->click) return true;
+        if (has_child_handler_at_point(layer->sub, point)) return true;
+    }
+    return false;
+}
 
-    // 优先处理popup层的事件
-    if (popup_manager_handle_mouse_event(event)) {
-        return;
-    }
+// 默认指针事件处理（无自定义 handle_pointer_event 的图层）
+int default_layer_handle_pointer_event(Layer* layer, PointerEvent* event) {
+    if (!layer || !event) return 0;
 
     Point mouse_pos = {event->x, event->y};
 
-    // 先递归处理子图层的事件，让子图层优先响应
-    for (int i = 0; i < layer->child_count; i++) {
-        if (layer->children[i]) {
-            handle_mouse_event(layer->children[i], event);
+    if (point_in_rect(mouse_pos, layer->rect)) {
+        if (layer->state != LAYER_STATE_FOCUSED && layer->state != LAYER_STATE_DISABLED) {
+            if (event->phase == POINTER_DOWN) {
+                layer->state = LAYER_STATE_PRESSED;
+            } else if (event->phase == POINTER_MOVE) {
+                layer->state = LAYER_STATE_HOVER;
+            }
+        }
+    } else {
+        if (layer->state != LAYER_STATE_DISABLED && layer->state != LAYER_STATE_FOCUSED) {
+            layer->state = LAYER_STATE_NORMAL;
         }
     }
 
-    // 如果子图层已经获取了焦点，父图层不再处理焦点逻辑
+    if (layer->event && layer->event->click && !layer->handle_pointer_event) {
+        const YuiComponentOps* ops = yui_type_get_ops(layer->type);
+        if (ops && (ops->flags & YUI_COMP_NATIVE_RENDER) &&
+            event->phase == POINTER_UP && event->button == SDL_BUTTON_LEFT &&
+            point_in_rect(mouse_pos, layer->rect)) {
+            bool has_handler = has_child_handler_at_point(layer, mouse_pos);
+            if (!has_handler && layer->parent) {
+                for (int i = 0; i < layer->parent->child_count && !has_handler; i++) {
+                    Layer* sibling = layer->parent->children[i];
+                    if (sibling && sibling != layer && sibling->handle_pointer_event &&
+                        point_in_rect(mouse_pos, sibling->rect)) {
+                        has_handler = true;
+                    }
+                }
+            }
+            if (!has_handler) {
+                EVENT_INVOKE(layer->event->click, layer);
+            }
+        }
+    }
+    if (event->phase == POINTER_DOWN || event->phase == POINTER_UP) {
+        if (layer->child_count > 0) {
+            return 0;
+        }
+        return point_in_rect(mouse_pos, layer->rect) ? 1 : 0;
+    }
+    return 0;
+}
+
+/* 内容区拖动滚动（mouse / touch 共用） */
+static int apply_content_drag_scroll(Layer* layer, int dx, int dy) {
+    int adx;
+    int ady;
+    if (!layer) {
+        return 0;
+    }
+    if (layer->scrollable != 1 && layer->scrollable != 3) {
+        return 0;
+    }
+    adx = dx < 0 ? -dx : dx;
+    ady = dy < 0 ? -dy : dy;
+    if (adx < 2 && ady < 2) {
+        return 1;
+    }
+    if (adx > ady) {
+        return 0;
+    }
+    if (layout_scroll_vertical(layer, dy)) {
+        pointer_gesture_mark_scrolled();
+        return 1;
+    }
+    return 0;
+}
+
+static int layer_is_scrollable_container(const Layer* layer) {
+    return layer && (layer->type == VIEW || layer->type == GRID) &&
+           (layer->scrollable == 1 || layer->scrollable == 3);
+}
+
+static int layer_scrollbar_dragging(const Layer* layer) {
+    if (!layer) {
+        return 0;
+    }
+    return (layer->scrollbar_v && layer->scrollbar_v->is_dragging) ||
+           (layer->scrollbar_h && layer->scrollbar_h->is_dragging) ||
+           (layer->scrollbar && layer->scrollbar->is_dragging);
+}
+
+static int default_scrollable_pointer_handler(Layer* layer, PointerEvent* event) {
+    if (!layer || !event) {
+        return 0;
+    }
+    if (!layer_is_scrollable_container(layer)) {
+        return 0;
+    }
+
+    if (event->phase == POINTER_WHEEL) {
+        if (!is_point_in_rect(event->x, event->y, layer->rect)) {
+            return 0;
+        }
+        if (layer->handle_scroll_event) {
+            layer->handle_scroll_event(layer, event->delta_y);
+        }
+        handler_virtical_scroll_event(layer, event->delta_y);
+        handle_horizontal_scroll_event(layer, event->delta_x);
+        return layer->handle_scroll_event || layer->scrollable ? 1 : 0;
+    }
+
+    if (event->phase == POINTER_DOWN) {
+        return is_point_in_rect(event->x, event->y, layer->rect);
+    }
+
+    if (event->phase == POINTER_MOVE) {
+        if (event->delta_x == 0 && event->delta_y == 0) {
+            return 0;
+        }
+        if (event->device == POINTER_DEVICE_TOUCH && event->finger_count > 1) {
+            return 0;
+        }
+        if (layer_scrollbar_dragging(layer)) {
+            return 0;
+        }
+        return apply_content_drag_scroll(layer, event->delta_x, event->delta_y);
+    }
+
+    if (event->phase == POINTER_UP) {
+        return is_point_in_rect(event->x, event->y, layer->rect);
+    }
+
+    return 0;
+}
+
+static SDL_EventType pointer_phase_to_sdl_type(PointerPhase phase) {
+    if (phase == POINTER_DOWN) {
+        return SDL_MOUSEBUTTONDOWN;
+    }
+    if (phase == POINTER_UP) {
+        return SDL_MOUSEBUTTONUP;
+    }
+    return SDL_MOUSEMOTION;
+}
+
+int handle_pointer_event(Layer* layer, PointerEvent* event) {
+    PointerEvent scroll_cancel_event;
+    PointerEvent* pe = event;
+
+    if (!layer || !event) {
+        return 0;
+    }
+
+    if (layer->parent == NULL) {
+        if (event->phase == POINTER_DOWN) {
+            pointer_gesture_scrolled = 0;
+        }
+        if (event->phase == POINTER_WHEEL &&
+            popup_manager_handle_scroll_event(event->delta_y)) {
+            return 1;
+        }
+        if (popup_manager_handle_pointer_event(event)) {
+            return 1;
+        }
+        if (event->device == POINTER_DEVICE_MOUSE && event->phase == POINTER_UP) {
+            reset_scrollbar_dragging_state(layer);
+        }
+        /* 滚动过的手势：UP 统一改写为 CANCEL，子组件只收尾、不触发 click */
+        if (event->phase == POINTER_UP && pointer_gesture_did_scroll()) {
+            scroll_cancel_event = *event;
+            scroll_cancel_event.phase = POINTER_CANCEL;
+            pe = &scroll_cancel_event;
+        }
+    }
+
+    Point pos = {pe->x, pe->y};
+
+    for (int i = layer->child_count - 1; i >= 0; i--) {
+        if (layer->children[i] && layer->children[i]->visible == VISIBLE) {
+            int consumed = handle_pointer_event(layer->children[i], pe);
+            if (consumed) return 1;
+        }
+    }
+
     int child_has_focus = 0;
-    if (event->state == SDL_PRESSED && focused_layer) {
+    if (pe->phase == POINTER_DOWN && focused_layer) {
         for (int i = 0; i < layer->child_count; i++) {
             if (layer->children[i] == focused_layer) {
                 child_has_focus = 1;
@@ -218,47 +405,54 @@ void handle_mouse_event(Layer* layer, MouseEvent* event) {
         }
     }
 
-    // 处理当前图层的焦点切换逻辑
-    if (point_in_rect(mouse_pos, layer->rect)) {
-        // 处理焦点切换逻辑（只有当没有子图层获取焦点时）
-        if (!child_has_focus && layer->focusable && event->state == SDL_PRESSED) {
-            // 如果当前有焦点图层，将其状态设置为NORMAL
+    if (point_in_rect(pos, layer->rect)) {
+        if (!child_has_focus && layer->focusable && layer->visible == VISIBLE &&
+            pe->phase == POINTER_DOWN) {
             if (focused_layer && focused_layer != layer) {
                 focused_layer->state = LAYER_STATE_NORMAL;
             }
-            // 设置新的焦点图层
             focused_layer = layer;
             layer->state = LAYER_STATE_FOCUSED;
-            // 注意：这里不返回，继续处理自定义事件处理函数
-        }
-
-        // 如果没有自定义的事件处理函数，使用默认的状态管理
-        // 注意：如果已经设置了FOCUSED状态，不要覆盖它
-        if (!layer->handle_mouse_event && layer->state != LAYER_STATE_FOCUSED && layer->state != LAYER_STATE_DISABLED) {
-            if (event->state == SDL_PRESSED) {
-                // 鼠标按下时设置为PRESSED状态
-                layer->state = LAYER_STATE_PRESSED;
-            } else {
-                // 鼠标悬停时设置为HOVER状态
-                layer->state = LAYER_STATE_HOVER;
-            }
-        }
-    } else {
-        // 鼠标离开图层时，恢复为NORMAL状态（除非是DISABLED或FOCUSED状态）
-        if (!layer->handle_mouse_event && layer->state != LAYER_STATE_DISABLED && layer->state != LAYER_STATE_FOCUSED) {
-            layer->state = LAYER_STATE_NORMAL;
         }
     }
 
-    // 让各组件自己处理鼠标事件（包括点击）
-    if (layer->handle_mouse_event) {
-        layer->handle_mouse_event(layer, event);
+    if (layer->sub && layer->sub->visible == VISIBLE) {
+        int consumed = handle_pointer_event(layer->sub, pe);
+        if (consumed) return 1;
     }
 
-    // 递归处理子图层的事件
-    if (layer->sub) {
-        handle_mouse_event(layer->sub, event);
+    if (event->device == POINTER_DEVICE_MOUSE &&
+        pe->phase != POINTER_UP && pe->phase != POINTER_CANCEL) {
+        process_layer_scrollbar(layer, pe->x, pe->y,
+                                pointer_phase_to_sdl_type(pe->phase));
+        if (layer_scrollbar_dragging(layer)) {
+            return 1;
+        }
     }
+
+    if (layer->handle_pointer_event) {
+        int consumed = layer->handle_pointer_event(layer, pe);
+        if (consumed) return 1;
+    }
+
+    if (default_scrollable_pointer_handler(layer, pe)) {
+        return 1;
+    }
+
+    if (layer->event && layer->event->touch &&
+        (pe->device == POINTER_DEVICE_TOUCH ||
+         (pe->device == POINTER_DEVICE_MOUSE &&
+          (pe->phase == POINTER_DOWN || pe->phase == POINTER_MOVE ||
+           pe->phase == POINTER_UP || pe->phase == POINTER_CANCEL ||
+           pe->phase == POINTER_WHEEL)))) {
+        current_pointer_event = *pe;
+        current_pointer_event_active = 1;
+        EVENT_INVOKE(layer->event->touch, layer);
+        current_pointer_event_active = 0;
+        return 1;
+    }
+
+    return default_layer_handle_pointer_event(layer, pe);
 }
 
 // 处理滚动条拖动事件
@@ -308,9 +502,10 @@ static void process_layer_scrollbar(Layer* layer, int mouse_x, int mouse_y, SDL_
                 // 根据滚动条位置计算新的滚动偏移
                 float scroll_ratio = (float)(new_scrollbar_y - layer->rect.y) / (visible_height - scrollbar_height);
                 layer->scroll_offset = (int)(scroll_ratio * (content_height - visible_height));
-                
-                // 重新布局子元素
-                layout_layer(layer);
+
+                if (layer->layout_manager && layer->child_count > 0) {
+                    layout_layer(layer);
+                }
             }
         }
     }
@@ -358,9 +553,10 @@ static void process_layer_scrollbar(Layer* layer, int mouse_x, int mouse_y, SDL_
                 // 根据滚动条位置计算新的滚动偏移
                 float scroll_ratio = (float)(new_scrollbar_x - layer->rect.x) / (visible_width - scrollbar_width);
                 layer->scroll_offset_x = (int)(scroll_ratio * (content_width - visible_width));
-                
-                // 重新布局子元素
-                layout_layer(layer);
+
+                if (layer->layout_manager && layer->child_count > 0) {
+                    layout_layer(layer);
+                }
             }
         }
     }
@@ -411,9 +607,10 @@ static void process_layer_scrollbar(Layer* layer, int mouse_x, int mouse_y, SDL_
                 // 根据滚动条位置计算新的滚动偏移
                 float scroll_ratio = (float)(new_scrollbar_y - layer->rect.y) / (visible_height - scrollbar_height);
                 layer->scroll_offset = (int)(scroll_ratio * (content_height - visible_height));
-                
-                // 重新布局子元素
-                layout_layer(layer);
+
+                if (layer->layout_manager && layer->child_count > 0) {
+                    layout_layer(layer);
+                }
             }
         }
     }
@@ -448,30 +645,5 @@ static void reset_scrollbar_dragging_state(Layer* layer) {
     // 重置sub图层的滚动条拖动状态
     if (layer->sub) {
         reset_scrollbar_dragging_state(layer->sub);
-    }
-}
-
-void handle_scrollbar_drag_event(Layer* root, int mouse_x, int mouse_y, SDL_EventType event_type) {
-    if (!root) {
-        return;
-    }
-    
-    // 处理鼠标释放事件 - 单独处理，避免递归调用中的重复处理
-    if (event_type == SDL_MOUSEBUTTONUP) {
-        reset_scrollbar_dragging_state(root);
-        return;
-    }
-    
-    // 处理当前图层的滚动条
-    process_layer_scrollbar(root, mouse_x, mouse_y, event_type);
-    
-    // 递归处理所有子图层的滚动条
-    for (int i = 0; i < root->child_count; i++) {
-        handle_scrollbar_drag_event(root->children[i], mouse_x, mouse_y, event_type);
-    }
-    
-    // 处理sub图层的滚动条
-    if (root->sub) {
-        handle_scrollbar_drag_event(root->sub, mouse_x, mouse_y, event_type);
     }
 }

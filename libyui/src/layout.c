@@ -1,7 +1,192 @@
 #include "layout.h"
 #include "util.h"
+#include "layer_update.h"
 
 #define printf
+
+static int layout_scale_value(int value, float yui_density);
+
+static int layout_layer_is_grid(const Layer* layer)
+{
+    if (!layer) {
+        return 0;
+    }
+    if (layer->type == GRID) {
+        return 1;
+    }
+    return layer->layout_manager && layer->layout_manager->type == LAYOUT_GRID;
+}
+
+static void layout_apply_grid(Layer* layer)
+{
+    if (!layer || layer->child_count <= 0 || !layer->children) {
+        return;
+    }
+
+    int columns = layer->layout_manager ? layer->layout_manager->columns : 1;
+    if (columns <= 0) {
+        columns = 1;
+    }
+
+    int spacing = layer->layout_manager ? layer->layout_manager->spacing : 0;
+    int padding_top = layer_padding_get(layer, 0);
+    int padding_right = layer_padding_get(layer, 1);
+    int padding_bottom = layer_padding_get(layer, 2);
+    int padding_left = layer_padding_get(layer, 3);
+
+    int available_width = layer->rect.w - padding_left - padding_right;
+    int available_height = layer->rect.h - padding_top - padding_bottom;
+
+    int rows = (layer->child_count + columns - 1) / columns;
+    int cell_width = (available_width - (columns - 1) * spacing) / columns;
+    int cell_height = (rows > 0) ? (available_height - (rows - 1) * spacing) / rows : 0;
+    if (cell_width < 0) {
+        cell_width = 0;
+    }
+    if (cell_height < 0) {
+        cell_height = 0;
+    }
+
+    int max_col_width = 0;
+    int max_row_height = 0;
+    for (int i = 0; i < layer->child_count; i++) {
+        Layer* child = layer->children[i];
+        if (!child || child->visible == IN_VISIBLE) {
+            continue;
+        }
+        if (child->rect.w > max_col_width) {
+            max_col_width = child->rect.w;
+        }
+        if (child->rect.h > max_row_height) {
+            max_row_height = child->rect.h;
+        }
+    }
+
+    layer->content_width = padding_left + padding_right +
+                           columns * max_col_width + (columns - 1) * spacing;
+    layer->content_height = padding_top + padding_bottom +
+                            rows * max_row_height + (rows - 1) * spacing;
+
+    for (int i = 0; i < layer->child_count; i++) {
+        if (!layer->children[i] || layer->children[i]->visible == IN_VISIBLE) {
+            continue;
+        }
+        int row = i / columns;
+        int col = i % columns;
+        layer->children[i]->rect.x = layer->rect.x + padding_left + col * (cell_width + spacing);
+        layer->children[i]->rect.y = layer->rect.y + padding_top + row * (cell_height + spacing);
+        layer->children[i]->rect.w = cell_width;
+        layer->children[i]->rect.h = cell_height;
+    }
+}
+
+static int layout_grid_place_last_child(Layer* layer)
+{
+    if (!layer || layer->child_count <= 0 || !layer->children ||
+        !layout_layer_is_grid(layer)) {
+        return 0;
+    }
+
+    int index = layer->child_count - 1;
+    Layer* child = layer->children[index];
+    if (!child || child->visible == IN_VISIBLE) {
+        return 0;
+    }
+
+    int columns = layer->layout_manager ? layer->layout_manager->columns : 1;
+    if (columns <= 0) {
+        columns = 1;
+    }
+
+    int prev_count = layer->child_count - 1;
+    int old_rows = prev_count > 0 ? (prev_count + columns - 1) / columns : 0;
+    int new_rows = (layer->child_count + columns - 1) / columns;
+    if (prev_count > 0 && new_rows != old_rows) {
+        layout_apply_grid(layer);
+        return 2;
+    }
+
+    int spacing = layer->layout_manager ? layer->layout_manager->spacing : 0;
+    int padding_top = layer_padding_get(layer, 0);
+    int padding_right = layer_padding_get(layer, 1);
+    int padding_bottom = layer_padding_get(layer, 2);
+    int padding_left = layer_padding_get(layer, 3);
+
+    int available_width = layer->rect.w - padding_left - padding_right;
+    int available_height = layer->rect.h - padding_top - padding_bottom;
+
+    int cell_width = (available_width - (columns - 1) * spacing) / columns;
+    int cell_height = (new_rows > 0)
+        ? (available_height - (new_rows - 1) * spacing) / new_rows
+        : 0;
+    if (cell_width < 0) {
+        cell_width = 0;
+    }
+    if (cell_height < 0) {
+        cell_height = 0;
+    }
+
+    int row = index / columns;
+    int col = index % columns;
+    child->rect.x = layer->rect.x + padding_left + col * (cell_width + spacing);
+    child->rect.y = layer->rect.y + padding_top + row * (cell_height + spacing);
+    child->rect.w = cell_width;
+    child->rect.h = cell_height;
+
+    int max_col_width = 0;
+    int max_row_height = 0;
+    for (int i = 0; i < layer->child_count; i++) {
+        Layer* item = layer->children[i];
+        if (!item || item->visible == IN_VISIBLE) {
+            continue;
+        }
+        if (item->rect.w > max_col_width) {
+            max_col_width = item->rect.w;
+        }
+        if (item->rect.h > max_row_height) {
+            max_row_height = item->rect.h;
+        }
+    }
+
+    layer->content_width = padding_left + padding_right +
+                           columns * max_col_width + (columns - 1) * spacing;
+    layer->content_height = padding_top + padding_bottom +
+                            new_rows * max_row_height + (new_rows - 1) * spacing;
+    return 1;
+}
+
+int layout_after_append_child(Layer* layer)
+{
+    if (!layer) {
+        return 0;
+    }
+    if (layout_layer_is_grid(layer)) {
+        int placed = layout_grid_place_last_child(layer);
+        if (placed > 0) {
+            if (placed == 2 && layer->parent) {
+                layout_layer(layer->parent);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int layout_horizontal_child_width(Layer* child, int available_width, float total_flex, int no_width_count) {
+    if (!child) {
+        return 50;
+    }
+    if (child->flex_ratio > 0 && total_flex > 0) {
+        return (int)(available_width * (child->flex_ratio / total_flex));
+    }
+    if (child->fixed_width > 0) {
+        return child->fixed_width;
+    }
+    if (no_width_count > 0) {
+        return available_width / no_width_count;
+    }
+    return 50;
+}
 
 static LayoutManager* clone_layout_manager(const LayoutManager* src) {
     if (!src) {
@@ -56,25 +241,20 @@ void layout_layer(Layer* layer){
         fflush(stdout);
         return;
     }
-     // 计算layer的内容尺寸 - 通用算法
-     layer->content_width = layer->rect.w;
-     layer->content_height = layer->rect.h;
+     // 计算 layer 的内容尺寸 - 通用算法（List 由 list_component 维护 content 尺寸）
+     if (layer->type != LAYER_LIST) {
+         layer->content_width = layer->rect.w;
+         layer->content_height = layer->rect.h;
+     }
      
     // 应用布局管理器
     if (layer->layout_manager && layer->child_count > 0) {
         printf("layout_layer: applying layout manager for layer %s\n", layer->id ? layer->id : "(null)");
         fflush(stdout);
-        // 检查layout_manager的padding是否有效
-        if (!layer->layout_manager->padding) {
-            printf("layout_layer: ERROR: layer %s has invalid layout_manager padding!\n", layer->id ? layer->id : "(null)");
-            fflush(stdout);
-            return;
-        }
-        
-        int padding_top = layer->layout_manager->padding[0];
-        int padding_right = layer->layout_manager->padding[1];
-        int padding_bottom = layer->layout_manager->padding[2];
-        int padding_left = layer->layout_manager->padding[3];
+        int padding_top = layer_padding_get(layer, 0);
+        int padding_right = layer_padding_get(layer, 1);
+        int padding_bottom = layer_padding_get(layer, 2);
+        int padding_left = layer_padding_get(layer, 3);
         int spacing = layer->layout_manager->spacing;
         
         if(layer->parent!=NULL){
@@ -96,12 +276,15 @@ void layout_layer(Layer* layer){
         printf("layout_layer: content_size: %d x %d\n", content_width, content_height);
         fflush(stdout);
         
-        if (layer->layout_manager->type == LAYOUT_HORIZONTAL) {
+        if (layout_layer_is_grid(layer)) {
+            layout_apply_grid(layer);
+        } else if (layer->layout_manager->type == LAYOUT_HORIZONTAL) {
             printf("layout_layer: applying HORIZONTAL layout\n");
             fflush(stdout);
             // 计算总权重
             float total_flex = 0;
             int fixed_width_sum = 0;
+            int no_width_count = 0;
             int valid_child_count = 0;
 
             for (int i = 0; i < layer->child_count; i++) {
@@ -119,9 +302,10 @@ void layout_layer(Layer* layer){
 
                 if (layer->children[i]->flex_ratio > 0) {
                     total_flex += layer->children[i]->flex_ratio;
+                } else if (layer->children[i]->fixed_width > 0) {
+                    fixed_width_sum += layer->children[i]->fixed_width;
                 } else {
-                    fixed_width_sum += layer->children[i]->fixed_width > 0 ?
-                                      layer->children[i]->fixed_width : 50; // 默认宽度
+                    no_width_count++;
                 }
             }
 
@@ -150,11 +334,8 @@ void layout_layer(Layer* layer){
                 if (layer->children[i]->visible == IN_VISIBLE) continue;
                 if (!layer->children[i]) continue;
 
-                int child_width = 50; // 默认宽度
-                if (layer->children[i]->fixed_width > 0) {
-                    child_width = layer->children[i]->fixed_width;
-                }
-
+                int child_width = layout_horizontal_child_width(
+                    layer->children[i], available_width, total_flex, no_width_count);
                 total_children_width += child_width;
             }
 
@@ -207,13 +388,21 @@ void layout_layer(Layer* layer){
                                         (child->flex_ratio / total_flex));
                 } else if (child->fixed_width > 0) {
                     child->rect.w = child->fixed_width;
+                } else if (no_width_count > 0) {
+                    child->rect.w = available_width / no_width_count;
                 } else {
-                    child->rect.w = 50; // 默认宽度
+                    child->rect.w = 50;
                 }
 
                 child->rect.x = current_x;
                 child->rect.y = layer->rect.y + padding_top;
-                child->rect.h = content_height;
+                if (child->fixed_height > 0) {
+                    child->rect.h = child->fixed_height;
+                } else if (child->flex_ratio > 0) {
+                    child->rect.h = content_height;
+                } else {
+                    child->rect.h = content_height;
+                }
 
                 // 应用垂直方向对齐（align属性）
                 if (layer->layout_manager->align == LAYOUT_ALIGN_CENTER) {
@@ -289,8 +478,9 @@ void layout_layer(Layer* layer){
             }
             
             // 分配空间
-            int available_height = content_height - fixed_height_sum - 
+            int available_height = content_height - fixed_height_sum -
                                   (valid_child_count - 1) * spacing;
+            if (available_height < 0) available_height = 0; // 防止负高度
             int current_y = layer->rect.y + padding_top;
             
             // 初始化内容尺寸
@@ -347,17 +537,22 @@ void layout_layer(Layer* layer){
 
             printf("layout_layer: available_height: %d\n", available_height);
             fflush(stdout);
-            
+
             for (int i = 0; i < layer->child_count; i++) {
                 Layer* child = layer->children[i];
-                
-                // 添加NULL检查
+
                 if (!child) {
                     printf("layout_layer: WARNING: skipping NULL child[%d]\n", i);
                     fflush(stdout);
                     continue;
                 }
-                
+
+                if (child->visible == IN_VISIBLE) {
+                    printf("layout_layer: skipping invisible child[%d] of %s\n", i, layer->id ? layer->id : "(null)");
+                    fflush(stdout);
+                    continue;
+                }
+
                 if (child->flex_ratio > 0 && total_flex > 0) {
                     child->rect.h = (int)(available_height * 
                                         (child->flex_ratio / total_flex));
@@ -374,10 +569,16 @@ void layout_layer(Layer* layer){
                 
                 child->rect.x = layer->rect.x + padding_left;
                 child->rect.y = current_y;
-                
-                // 自动计算宽度以填充可用空间
-                if(child->rect.w<=0){
-                    child->rect.w = content_width;
+
+                // 垂直布局：有固定宽度的子项保持固有宽度，其余撑满
+                if (content_width > 0) {
+                    if (child->fixed_width > 0) {
+                        child->rect.w = child->fixed_width;
+                    } else {
+                        child->rect.w = content_width;
+                    }
+                } else if (child->rect.w <= 0) {
+                    child->rect.w = layer->rect.w;
                 }
                 
                 // 应用水平滚动偏移量
@@ -411,6 +612,57 @@ void layout_layer(Layer* layer){
                 }
                 current_y += child->rect.h + spacing;
             }
+        } else if (layer->layout_manager->type == LAYOUT_CENTER) {
+            for (int i = 0; i < layer->child_count; i++) {
+                Layer* child = layer->children[i];
+                if (!child || child->visible == IN_VISIBLE) {
+                    continue;
+                }
+                if (child->fixed_width > 0) {
+                    child->rect.w = child->fixed_width;
+                }
+                if (child->fixed_height > 0) {
+                    child->rect.h = child->fixed_height;
+                }
+                child->rect.x = layer->rect.x + padding_left + (content_width - child->rect.w) / 2;
+                child->rect.y = layer->rect.y + padding_top + (content_height - child->rect.h) / 2;
+            }
+        } else if (layer->layout_manager->type == LAYOUT_ABSOLUTE) {
+            float sx = 1.0f;
+            float sy = 1.0f;
+            if (layer->layout_base_valid && layer->layout_base_rect.w > 0) {
+                sx = (float)layer->rect.w / (float)layer->layout_base_rect.w;
+            }
+            if (layer->layout_base_valid && layer->layout_base_rect.h > 0) {
+                sy = (float)layer->rect.h / (float)layer->layout_base_rect.h;
+            }
+
+            for (int i = 0; i < layer->child_count; i++) {
+                Layer* child = layer->children[i];
+                int rel_x;
+                int rel_y;
+
+                if (!child || child->visible == IN_VISIBLE) {
+                    continue;
+                }
+
+                if (!child->layout_base_valid) {
+                    child->layout_base_rect = child->rect;
+                    child->layout_base_valid = 1;
+                }
+
+                rel_x = layout_scale_value(child->layout_base_rect.x, sx);
+                rel_y = layout_scale_value(child->layout_base_rect.y, sy);
+                child->rect.x = layer->rect.x + rel_x;
+                child->rect.y = layer->rect.y + rel_y;
+
+                if (layer->scrollable == 1 || layer->scrollable == 3) {
+                    child->rect.y -= layer->scroll_offset;
+                }
+                if (layer->scrollable == 2 || layer->scrollable == 3) {
+                    child->rect.x -= layer->scroll_offset_x;
+                }
+            }
         }
     } else if (layer->layout_manager) {
         printf("layout_layer: layer %s has layout_manager but no children\n", layer->id ? layer->id : "(null)");
@@ -420,211 +672,8 @@ void layout_layer(Layer* layer){
         fflush(stdout);
     }
 
-    //LIST 布局
-    if(layer->type==LIST){
-        printf("layout_layer: processing LIST layout\n");
-        fflush(stdout);
-        int padding_top = layer->layout_manager ? layer->layout_manager->padding[0] : 0;
-        int padding_left = layer->layout_manager ? layer->layout_manager->padding[3] : 0;
-        int spacing = layer->layout_manager ? layer->layout_manager->spacing : 5;
-        
-        int current_x = layer->rect.x + padding_left;
-        int current_y = layer->rect.y + padding_top;
-    
-        // 添加水平滚动偏移量
-        if (layer->scrollable == 2 || layer->scrollable == 3) {
-            current_x -= layer->scroll_offset_x;
-        }
-        
-        // 添加垂直滚动偏移量
-        if (layer->scrollable == 1 || layer->scrollable == 3) {
-            current_y -= layer->scroll_offset;
-        }
-    
-        //printf("layer %d %s %s %d,%d\n",layer->type,layer->id,layer->text,layer->rect.x,layer->rect.y);
-        
-        // 清理旧的子元素（如果有的话）
-        if (layer->children) {
-            for (int i = 0; i < layer->child_count; i++) {
-                if (layer->children[i]) {
-                    destroy_layer(layer->children[i]);
-                }
-            }
-            free(layer->children);
-            layer->children = NULL;
-            layer->child_count = 0;
-        }
-        
-        // 根据数据源和模板动态生成列表项
-        if (layer->item_template && layer->data) {
-            int item_count = layer->data->size;
-            //json 数据 todo 从接口获取
-            layer->child_count = item_count;
-            layer->children = malloc(item_count * sizeof(Layer*));
-            
-            for (int i = 0; i < item_count; i++) {
-                // 创建基于模板的新项
-                layer->children[i] = malloc(sizeof(Layer));
-                memcpy(layer->children[i], layer->item_template, sizeof(Layer));
-
-                Layer* child_layer = layer->children[i];
-                Layer* template_layer = layer->item_template;
-
-                // 重新绑定父节点，避免保留模板中的父指针
-                child_layer->parent = layer;
-
-                // 重建动态字符串，防止与模板共享
-                child_layer->label = NULL;
-                child_layer->text = NULL;
-                child_layer->text_size = 0;
-                layer_set_label(child_layer, layer_get_label(template_layer));
-                layer_set_text(child_layer, layer_get_text(template_layer));
-
-                // 克隆需要独立释放的结构，避免重复释放
-                child_layer->layout_manager = clone_layout_manager(template_layer->layout_manager);
-                child_layer->event = clone_event(template_layer->event);
-                child_layer->scrollbar = clone_scrollbar(template_layer->scrollbar);
-                child_layer->scrollbar_v = clone_scrollbar(template_layer->scrollbar_v);
-                child_layer->scrollbar_h = clone_scrollbar(template_layer->scrollbar_h);
-
-                // 清除不应共享的指针，防止销毁时误释放模板资源
-                child_layer->children = NULL;
-                child_layer->child_count = 0;
-                child_layer->item_template = NULL;
-                child_layer->sub = NULL;
-                child_layer->binding = NULL;
-                child_layer->data = NULL;
-                child_layer->animation = NULL;
-                
-                // 检查可见性（在创建之后）
-                if (layer->children[i]->visible == IN_VISIBLE) {
-                    printf("layout_layer: skipping invisible child[%d] of %s\n", i, layer->id ? layer->id : "(null)");
-                    fflush(stdout);
-                    destroy_layer(layer->children[i]);
-                    layer->children[i] = NULL;
-                    continue;
-                }
-                
-                // 设置位置和尺寸
-                layer->children[i]->rect.x = current_x;
-                layer->children[i]->rect.y = current_y;
-                layer->children[i]->rect.w = 300; // 固定宽度，可根据需要调整
-                layer->children[i]->rect.h = 30; // 固定高度
-                
-                // 简单替换${name}为实际数据
-                if (layer->children[i]->text!=NULL && strstr(layer->children[i]->text, "${")) {
-                    cJSON* item = cJSON_GetArrayItem(layer->data->json, i);
-                    if (!item) {
-                        printf("layout_layer: WARNING: invalid item data at index %d\n", i);
-                        fflush(stdout);
-                        continue;
-                    }
-              
-                    cJSON* it = item->child;
-                    char name[256];
-                    char val[256];
-    
-                    while(it!=NULL){
-                        if (!it->string) {
-                            printf("layout_layer: WARNING: null key in JSON data\n");
-                            fflush(stdout);
-                            it = it->next;
-                            continue;
-                        }
-                        sprintf(name,"${%s}",it->string);
-                        if(cJSON_IsString(it)){
-                            sprintf(val,"%s",it->valuestring);
-                        }else if(cJSON_IsNumber(it)){
-                            if(is_cjson_float(it)){
-                                sprintf(val,"%f",it->valuedouble);
-                            }else{
-                                sprintf(val,"%d",it->valueint);
-                            }
-                            
-                        }
-    
-                        char* result = replace_placeholder(layer->children[i]->text, name, val);
-                        if(result){
-                            strcpy(layer->children[i]->text, result);
-                            free(result);
-                        }
-                        it = it->next;
-                    }
-                    
-                }
-                
-                current_y += layer->children[i]->rect.h + spacing;
-            }
-            
-            // 计算LIST的内容尺寸
-            if (layer->data && layer->data->size > 0) {
-                int item_height = 30; // 默认项目高度
-                if (layer->item_template && layer->item_template->rect.h > 0) {
-                    item_height = layer->item_template->rect.h;
-                }
-                layer->content_height = layer->data->size * item_height + (layer->data->size - 1) * spacing;
-                layer->content_width = layer->rect.w;
-            }
-        }
-    }else if(layer->type == GRID){
-        // 获取Grid布局参数
-        int columns = layer->layout_manager ? layer->layout_manager->columns : 1;
-        if (columns <= 0) columns = 1;
-        
-        int spacing = layer->layout_manager ? layer->layout_manager->spacing : 0;
-        int padding_top = layer->layout_manager ? layer->layout_manager->padding[0] : 0;
-        int padding_right = layer->layout_manager ? layer->layout_manager->padding[1] : 0;
-        int padding_bottom = layer->layout_manager ? layer->layout_manager->padding[2] : 0;
-        int padding_left = layer->layout_manager ? layer->layout_manager->padding[3] : 0;
-        
-        // 计算可用空间
-        int available_width = layer->rect.w - padding_left - padding_right;
-        int available_height = layer->rect.h - padding_top - padding_bottom;
-        
-        printf("grid %d,%d\n",available_width, available_height);
-        // 计算每个网格单元的尺寸
-        int rows = (layer->child_count + columns - 1) / columns; // 向上取整计算行数
-        int cell_width = (available_width - (columns - 1) * spacing) / columns;
-        int cell_height = (rows > 0) ? (available_height - (rows - 1) * spacing) / rows : 0;
-        
-        // 计算最大列宽和行高
-        int max_col_width = 0, max_row_height = 0;
-        for (int i = 0; i < layer->child_count; i++) {
-            Layer* child = layer->children[i];
-            if (child->visible == IN_VISIBLE) {
-                printf("layout_layer: skipping invisible child[%d] of %s\n", i, layer->id ? layer->id : "(null)");
-                fflush(stdout);
-                continue;
-            }
-            if (!child) continue;
-            
-            if (child->rect.w > max_col_width) max_col_width = child->rect.w;
-            if (child->rect.h > max_row_height) max_row_height = child->rect.h;
-        }
-        
-        // 计算内容尺寸
-        layer->content_width = padding_left + padding_right + 
-                              columns * max_col_width + (columns - 1) * spacing;
-        layer->content_height = padding_top + padding_bottom + 
-                               rows * max_row_height + (rows - 1) * spacing;
-        
-        // 渲染子元素
-        for (int i = 0; i < layer->child_count; i++) {
-            if (!layer->children[i]) {
-                printf("layout_layer: WARNING: skipping NULL child[%d] in GRID layout\n", i);
-                fflush(stdout);
-                continue;
-            }
-            int row = i / columns;
-            int col = i % columns;
-            
-            // 设置子元素位置和尺寸
-            layer->children[i]->rect.x = layer->rect.x + padding_left + col * (cell_width + spacing);
-            layer->children[i]->rect.y = layer->rect.y + padding_top + row * (cell_height + spacing);
-            layer->children[i]->rect.w = cell_width;
-            layer->children[i]->rect.h = cell_height;
-            
-        }
+    if (layer->type == LAYER_LIST) {
+        // List 由 list_component 自行渲染与布局，不在 layout 阶段生成子 Layer
     }
 
     // 其他情况：如果没有计算过content尺寸，使用layer自身的尺寸
@@ -681,4 +730,193 @@ void layout_layer(Layer* layer){
     
     printf("layout_layer: finished processing layer %s\n", layer->id ? layer->id : "(null)");
     fflush(stdout);
+}
+
+static int layout_scale_value(int value, float yui_density) {
+    if (value <= 0) return value;
+    int scaled = (int)(value * yui_density + 0.5f);
+    return scaled > 0 ? scaled : 1;
+}
+
+static int layout_is_resizable_view(const Layer* layer) {
+    return layer && layer->type == VIEW && layer->layout_manager != NULL;
+}
+
+void layout_capture_base(Layer* layer) {
+    if (!layer) return;
+    layer->layout_base_rect = layer->rect;
+    layer->layout_base_fixed_w = layer->fixed_width;
+    layer->layout_base_fixed_h = layer->fixed_height;
+    layer->layout_base_valid = 1;
+
+    if (layer->children) {
+        for (int i = 0; i < layer->child_count; i++) {
+            if (layer->children[i]) {
+                layout_capture_base(layer->children[i]);
+            }
+        }
+    }
+    if (layer->sub) {
+        layout_capture_base(layer->sub);
+    }
+}
+
+static void layout_apply_scale(Layer* layer, float sx, float sy, int is_root) {
+    if (!layer) return;
+
+    if (!is_root && layout_is_resizable_view(layer) && layer->layout_base_valid) {
+        layer->rect.x = layout_scale_value(layer->layout_base_rect.x, sx);
+        layer->rect.y = layout_scale_value(layer->layout_base_rect.y, sy);
+        layer->rect.w = layout_scale_value(layer->layout_base_rect.w, sx);
+        layer->rect.h = layout_scale_value(layer->layout_base_rect.h, sy);
+
+        if (layer->layout_base_fixed_w > 0) {
+            layer->fixed_width = layout_scale_value(layer->layout_base_fixed_w, sx);
+        }
+        if (layer->layout_base_fixed_h > 0) {
+            layer->fixed_height = layout_scale_value(layer->layout_base_fixed_h, sy);
+        }
+    }
+
+    if (layer->children) {
+        for (int i = 0; i < layer->child_count; i++) {
+            if (layer->children[i]) {
+                layout_apply_scale(layer->children[i], sx, sy, 0);
+            }
+        }
+    }
+    if (layer->sub) {
+        layout_apply_scale(layer->sub, sx, sy, 0);
+    }
+}
+
+static void layout_restore_leaf_metrics(Layer* layer) {
+    if (!layer) return;
+    if (!layout_is_resizable_view(layer) && layer->layout_base_valid) {
+        if (layer->layout_base_fixed_w > 0) {
+            layer->fixed_width = layer->layout_base_fixed_w;
+        }
+        if (layer->layout_base_fixed_h > 0) {
+            layer->fixed_height = layer->layout_base_fixed_h;
+        }
+    }
+    if (layer->children) {
+        for (int i = 0; i < layer->child_count; i++) {
+            if (layer->children[i]) {
+                layout_restore_leaf_metrics(layer->children[i]);
+            }
+        }
+    }
+    if (layer->sub) {
+        layout_restore_leaf_metrics(layer->sub);
+    }
+}
+
+void layout_dispatch_resize_events(Layer* layer, const ResizeEvent* event) {
+    if (!layer || !event) return;
+
+    if (layer->handle_resize_event) {
+        layer->handle_resize_event(layer, event);
+    }
+        if (layer->event && layer->event->resize) {
+        layer->event->resize(layer, event);
+    } else if (layer->event && layer->event->resize_name[0] != '\0') {
+        EventHandler handler = find_event_by_name(layer->event->resize_name);
+        if (handler) {
+            handler((void*)event);
+        }
+    }
+
+    if (layer->children) {
+        for (int i = 0; i < layer->child_count; i++) {
+            if (layer->children[i]) {
+                layout_dispatch_resize_events(layer->children[i], event);
+            }
+        }
+    }
+    if (layer->sub) {
+        layout_dispatch_resize_events(layer->sub, event);
+    }
+}
+
+void layout_resize(Layer* layer, int width, int height) {
+    if (!layer || width <= 0 || height <= 0) return;
+    if (!layer->layout_base_valid) {
+        layout_capture_base(layer);
+    }
+    if (layer->layout_base_rect.w <= 0 || layer->layout_base_rect.h <= 0) return;
+
+    int old_width = layer->rect.w;
+    int old_height = layer->rect.h;
+    float sx = (float)width / (float)layer->layout_base_rect.w;
+    float sy = (float)height / (float)layer->layout_base_rect.h;
+    layout_apply_scale(layer, sx, sy, 1);
+    layer->rect.x = 0;
+    layer->rect.y = 0;
+    layer->rect.w = width;
+    layer->rect.h = height;
+    layout_restore_leaf_metrics(layer);
+    layout_layer(layer);
+
+    ResizeEvent resize_event = {
+        old_width, old_height, width, height, sx, sy
+    };
+    layout_dispatch_resize_events(layer, &resize_event);
+}
+
+void layer_dump(const Layer* layer, int depth)
+{
+    int i;
+    int pad;
+
+    if (!layer) {
+        return;
+    }
+
+    for (pad = 0; pad < depth; pad++) {
+        fprintf(stdout, "  ");
+    }
+    fprintf(stdout, "[%s] type=%d rect=(x=%d y=%d w=%d h=%d) fixed=(w=%d h=%d) visible=%d\n",
+            layer->id ? layer->id : "(null)",
+            layer->type,
+            layer->rect.x, layer->rect.y, layer->rect.w, layer->rect.h,
+            layer->fixed_width, layer->fixed_height,
+            layer->visible);
+
+    if (layer->children) {
+        for (i = 0; i < layer->child_count; i++) {
+            if (layer->children[i]) {
+                layer_dump(layer->children[i], depth + 1);
+            }
+        }
+    }
+    if (layer->sub) {
+        layer_dump(layer->sub, depth + 1);
+    }
+}
+
+int layout_scroll_vertical(Layer* layer, int delta_y) {
+    if (!layer || delta_y == 0) return 0;
+
+    int content_height = layer->content_height;
+    int visible_height = layer->rect.h;
+    if (layer->layout_manager) {
+        visible_height -= layer->layout_manager->padding[0] + layer->layout_manager->padding[2];
+    }
+    if (content_height <= visible_height) return 0;
+
+    int old_offset = layer->scroll_offset;
+    layer->scroll_offset -= delta_y;
+    if (layer->scroll_offset < 0) {
+        layer->scroll_offset = 0;
+    } else if (layer->scroll_offset > content_height - visible_height) {
+        layer->scroll_offset = content_height - visible_height;
+    }
+
+    if (layer->scroll_offset != old_offset) {
+        layout_layer(layer);
+        mark_layer_dirty(layer, DIRTY_LAYOUT);
+        return 1;
+    }
+    return 0;
 }

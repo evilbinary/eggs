@@ -6,16 +6,15 @@
 # ********************************************************************
 
 target("jsmodule-quickjs")
-add_packages(get_config('default_libc'))
-
 add_deps("quickjs","cjson","yui","socket")
-add_cflags(' -DBUILD_NO_MAIN=1  -I. -I../../lib/quickjs -g ')
-
+add_cflags('-DBUILD_NO_MAIN=1', '-I.', '-I../../lib/quickjs', '-g')
 
 set_kind("static")
 add_files(
     'js_module.c',
     'js_socket.c',
+    'js_timer.c',
+    'js_perf.c',
     '../jsmodule/js_common.c'
 ) 
-add_includedirs('.', public=true)
+add_includedirs('.', '../..', '../jsmodule', public=true)

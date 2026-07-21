@@ -10,9 +10,14 @@
 
 
 cJSON* parse_json(char* json_path);
+cJSON* parse_json_string(const char* json_str);
 Layer* layer_create_from_json(cJSON* json_obj,Layer* parent);
 Layer* parse_layer_from_string(const char* json_str, Layer* parent);
 Layer* find_layer_by_id(Layer* root, const char* id);
+Layer* layer_resolve_path(Layer* root, const char* path);
+int layer_show(Layer* layer);
+int layer_hide(Layer* layer);
+void layer_set_visible(Layer* layer, int visible);
 Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent);
 Layer* layer_create_from_json(cJSON* json_obj, Layer* parent) ;
 Layer* layer_create(Layer* root_layer, int x, int y, int width, int height);
@@ -25,5 +30,12 @@ void layer_set_text(Layer* layer, const char* value);
 const char* layer_get_label(const Layer* layer);
 const char* layer_get_text(const Layer* layer);
 
+/** Parse [t,r,b,l], [v,h], or [all] padding array into padding[4]. Returns 1 on success. */
+int layer_padding_apply_from_json(int padding[4], cJSON* value);
+/** Effective padding: layout.padding wins when non-zero, else style.padding. */
+int layer_padding_get(const Layer* layer, int index);
+
+/** Apply or merge layout fields from JSON object. Returns 1 on success. */
+int layer_apply_layout_from_json(Layer* layer, cJSON* layout);
 
 #endif

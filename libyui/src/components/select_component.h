@@ -3,7 +3,6 @@
 
 #include "../ytype.h"
 #include "../render.h"
-#include <SDL.h>
 
 // 前向声明
 typedef struct PopupLayer PopupLayer;
@@ -51,6 +50,7 @@ typedef struct {
     Color scrollbar_bg_color;        // 滚动条背景颜色
     Color focus_border_color;         // 焦点边框颜色
     Color hover_border_color;         // 悬停边框颜色
+    Color divider_color;              // 下拉选项分割线颜色
     
     // 样式配置
     int border_width;                 // 边框宽度
@@ -119,16 +119,16 @@ void select_component_collapse(SelectComponent* component);
 void select_component_toggle(SelectComponent* component);
 
 // 事件处理
-void select_component_handle_mouse_event(Layer* layer, MouseEvent* event);
-void select_component_handle_key_event(Layer* layer, KeyEvent* event);
+int select_component_handle_pointer_event(Layer* layer, PointerEvent* event);
+int select_component_handle_key_event(Layer* layer, KeyEvent* event);
 void select_component_handle_scroll_event(Layer* layer, int scroll_delta);
 void select_component_scroll_callback(Layer* layer);
 void select_component_render(Layer* layer);
 
 // 弹出层专用函数
 void select_component_render_dropdown_only(Layer* layer);
-void select_component_handle_dropdown_mouse_event(Layer* layer, MouseEvent* event);
-void select_component_handle_dropdown_key_event(Layer* layer, KeyEvent* event);
+int select_component_handle_dropdown_mouse_event(Layer* layer, PointerEvent* event);
+int select_component_handle_dropdown_key_event(Layer* layer, KeyEvent* event);
 void select_component_handle_dropdown_scroll_event(Layer* layer, int scroll_delta);
 void select_component_popup_close_callback(PopupLayer* popup);
 
