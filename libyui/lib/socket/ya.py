@@ -6,6 +6,7 @@
 # ********************************************************************
 target("socket")
 set_kind("static")
+add_packages(get_config('default_libc'))
 add_files(
     'socket.c',
 ) 
