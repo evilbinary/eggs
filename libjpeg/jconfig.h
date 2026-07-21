@@ -16,7 +16,7 @@
 #include "stdio.h"
 
 
-#ifdef ARM
+#if defined(ARM) || defined(ARM64)
 #define HAVE_PROTOTYPES 1
 // typedef unsigned char boolean;
 // #define HAVE_BOOLEAN

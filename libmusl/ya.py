@@ -8,8 +8,18 @@ target("musl")
 set_kind('static')
 set_sourcedir(os.scriptdir())
 
+musl_arch = {
+    'arm64': 'aarch64',
+    'arm': 'arm',
+    'riscv': 'riscv64',
+    'x86': 'i386',
+}.get(get_arch_type(), 'arm')
+
 add_includedirs(
     "include",
+    "obj/include",
+    "arch/generic",
+    "arch/" + musl_arch,
     "eggs/include",
     public = true
 )

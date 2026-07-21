@@ -487,7 +487,7 @@ void screen_draw_char(i32 x, i32 y, u16 ch) {
 void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
                                   u32 bgcolor) {
   if (y < 0 || y >= (gscreen.height - 16)) {
-    return 0;
+    return ;
   }
   u32 i, j;
   u16 code, z;

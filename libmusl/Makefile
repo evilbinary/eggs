@@ -164,7 +164,8 @@ lib/libc.so: $(LOBJS) $(LDSO_OBJS)
 
 lib/libc.a: $(AOBJS)
 	rm -f $@
-	$(AR) rc $@ $(AOBJS)
+	$(file >obj/libc_objs.rsp,$(AOBJS))
+	$(AR) rc $@ @obj/libc_objs.rsp
 	$(RANLIB) $@
 
 $(EMPTY_LIBS):
