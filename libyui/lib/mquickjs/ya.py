@@ -7,6 +7,7 @@
 
 target("mquickjs")
 set_kind("static")
+add_packages(get_config('default_libc'))
 add_files(
     'readline_tty.c',
     'readline.c',

@@ -6,6 +6,7 @@
 # ********************************************************************
 target("quickjs")
 set_kind("static")
+add_packages(get_config('default_libc'))
 
 add_files(
     'quickjs.c',
