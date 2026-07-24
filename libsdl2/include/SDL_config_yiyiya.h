@@ -100,6 +100,9 @@ typedef unsigned long uintptr_t;
 /* Enable the dummy video driver (src/video/dummy/\*.c) */
 #define SDL_VIDEO_DRIVER_DUMMY  1
 
+/* Software renderer over libgui framebuffer (no OpenGL on YiYiYa) */
+#define SDL_VIDEO_RENDER_SW 1
+
 /* Enable the dummy filesystem driver (src/filesystem/dummy/\*.c) */
 #define SDL_FILESYSTEM_DUMMY  1
 

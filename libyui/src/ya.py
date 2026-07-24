@@ -40,3 +40,6 @@ else:
     add_cflags("-DYUI_USE_SDL_BACKEND")
     add_cflags("-DSDL2")
     add_deps("sdl2", "sdl2-ttf", "sdl2-image")
+    # Match eggs/libsdl2: select yiyiya video config / no-GL window path
+    if get_plat() not in ("linux", "macos", "windows", "wasm", "emscripten"):
+        add_cflags("-D__YIYIYA__")
