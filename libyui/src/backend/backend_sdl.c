@@ -16,6 +16,20 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Older SDL_ttf only has TTF_GlyphIsProvided(Uint16); emulate *32. */
+#ifndef TTF_GlyphIsProvided32
+static int TTF_GlyphIsProvided32(const TTF_Font* font, Uint32 ch)
+{
+    if (font == NULL) {
+        return 0;
+    }
+    if (ch > 0xFFFFu) {
+        return 0;
+    }
+    return TTF_GlyphIsProvided(font, (Uint16)ch);
+}
+#endif
+
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #define YUI_WIN32_NATIVE 1
 #include <windows.h>

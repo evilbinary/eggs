@@ -38,3 +38,5 @@ elif get_plat() in ("android", "ios"):
 else:
     add_files("backend/backend_sdl.c")
     add_cflags("-DYUI_USE_SDL_BACKEND")
+    add_cflags("-DSDL2")
+    add_deps("sdl2", "sdl2-ttf", "sdl2-image")
