@@ -28,7 +28,7 @@ configure(
         'CROSS_COMPILE='+corss_compile,
         # '--target='+toolchains,
         '--host=arm',
-        'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
+        'CFLAGS=-DSYSCALL_NO_TLS ' + ' '.join(cflags),
         '--disable-newlib-supplied-syscalls',
         '--disable-nls',
         '--disable-optimize',

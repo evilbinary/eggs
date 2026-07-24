@@ -33,10 +33,14 @@ cflags=get_cflags()
 
 automake("c")
 
+# argv list is not shell-parsed: do not wrap CFLAGS value in quotes
+cflags_str = ' '.join(
+    ['-DSYSCALL_NO_TLS'] + [c for c in cflags if c != '-DSYSCALL_NO_TLS']
+)
 configure(
         '--target='+compile,
         'CROSS_COMPILE='+compile,
-        'CFLAGS="-DSYSCALL_NO_TLS '+ ' '.join(cflags)+'"' ,
+        'CFLAGS=' + cflags_str,
         '--disable-optimize',
         '--enable-debug=yes',
         #'--enable-shared=yes',
