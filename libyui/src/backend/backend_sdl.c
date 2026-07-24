@@ -1396,7 +1396,7 @@ int backend_init(){
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
 #endif
 
-    // Emscripten 不需要 OPENGL；开启 HIGH DPI 以高清渲染
+    // Emscripten / YiYiYa 无 OpenGL；开启 HIGH DPI 以高清渲染
     // Headless / auto-test: create hidden window (still renderable for screenshot)
     Uint32 window_flags = SDL_WINDOW_ALLOW_HIGHDPI;
     if (backend_is_headless()) {
@@ -1405,7 +1405,7 @@ int backend_init(){
     } else {
         window_flags |= SDL_WINDOW_SHOWN;
     }
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__YIYIYA__)
     window_flags |= SDL_WINDOW_OPENGL;
 #endif
     
@@ -1414,7 +1414,23 @@ int backend_init(){
                                         SDL_WINDOWPOS_CENTERED,
                                         800, 600, window_flags);
 
-    if (window && backend_is_headless()) {
+    /* YiYiYa SDL 驱动无 GL：带 OPENGL 会直接返回 NULL（Invalid window 连锁失败） */
+    if (!window && (window_flags & SDL_WINDOW_OPENGL)) {
+        printf("Warning: OpenGL window failed: %s, retrying without OpenGL\n",
+               SDL_GetError());
+        window_flags &= ~SDL_WINDOW_OPENGL;
+        window = SDL_CreateWindow("YUI",
+                                  SDL_WINDOWPOS_CENTERED,
+                                  SDL_WINDOWPOS_CENTERED,
+                                  800, 600, window_flags);
+    }
+
+    if (!window) {
+        printf("Error: Failed to create window: %s\n", SDL_GetError());
+        return -1;
+    }
+
+    if (backend_is_headless()) {
         SDL_HideWindow(window);
     }
 
@@ -1422,6 +1438,10 @@ int backend_init(){
     // Emscripten 环境下不使用 PRESENTVSYNC，因为主循环控制帧率
     printf("Emscripten: Creating renderer without PRESENTVSYNC\n");
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+#elif defined(__YIYIYA__)
+    /* libgui framebuffer 软件渲染，无加速驱动 */
+    printf("YiYiYa: Creating software renderer\n");
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
 #else
     // 桌面环境下尝试使用垂直同步
     printf("Desktop: Creating renderer with PRESENTVSYNC\n");
@@ -1437,7 +1457,7 @@ int backend_init(){
     }
 
     // 如果成功创建渲染器，禁用交换间隔（Emscripten 使用 rAF 主循环，勿调用 GL API）
-    if (renderer) {
+    if (renderer && (window_flags & SDL_WINDOW_OPENGL)) {
 #ifndef __EMSCRIPTEN__
         SDL_GL_SetSwapInterval(0);
 #endif
@@ -1493,7 +1513,11 @@ int backend_init(){
     // 初始化SDL_image库，支持多种图片格式
 #ifndef __EMSCRIPTEN__
     {
+#ifdef __YIYIYA__
+        int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+#else
         int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP;
+#endif
         int imgReady = IMG_Init(imgFlags);
         int imgRequired = IMG_INIT_PNG | IMG_INIT_JPG;
         if ((imgReady & imgRequired) != imgRequired) {
