@@ -32,28 +32,130 @@ static int table_point_in_header(TableComponent* component, Layer* layer, int x,
 static int table_resize_column_at(TableComponent* component, Layer* layer, int x, int y);
 static char* table_json_value_to_string(cJSON* item);
 static void table_tooltip_schedule_show(TableComponent* component, Layer* layer);
+static int table_measure_text_width(Layer* layer, const char* text);
+
+#define TABLE_TOOLTIP_PAD 6
+#define TABLE_TOOLTIP_MAX_W 420
+
+static int table_tooltip_line_height(Layer* layer) {
+    int h = 16;
+    if (layer && layer->font && layer->font->size > 0) {
+        h = layer->font->size + 4;
+    }
+    return h > 14 ? h : 14;
+}
+
+/* 返回不超过 max_w 的最长 UTF-8 前缀字节数 */
+static int table_tooltip_fit_bytes(Layer* layer, const char* text, int max_w) {
+    int pos = 0;
+    int fit = 0;
+    int len;
+
+    if (!text || !text[0] || max_w <= 0) {
+        return 0;
+    }
+    len = (int)strlen(text);
+    if (table_measure_text_width(layer, text) <= max_w) {
+        return len;
+    }
+    while (pos < len) {
+        int clen = utf8_char_len_at(text + pos);
+        char buf[1024];
+        if (clen <= 0) {
+            clen = 1;
+        }
+        if (pos + clen >= (int)sizeof(buf)) {
+            break;
+        }
+        memcpy(buf, text, (size_t)(pos + clen));
+        buf[pos + clen] = '\0';
+        if (table_measure_text_width(layer, buf) > max_w) {
+            break;
+        }
+        pos += clen;
+        fit = pos;
+    }
+    if (fit <= 0) {
+        fit = utf8_char_len_at(text);
+        if (fit <= 0) {
+            fit = 1;
+        }
+    }
+    return fit;
+}
+
+static int table_tooltip_count_lines(Layer* layer, const char* text, int max_w) {
+    int lines = 0;
+    const char* p = text;
+    if (!p || !p[0]) {
+        return 0;
+    }
+    while (*p) {
+        int fit = table_tooltip_fit_bytes(layer, p, max_w);
+        if (fit <= 0) {
+            fit = 1;
+        }
+        p += fit;
+        lines++;
+    }
+    return lines > 0 ? lines : 1;
+}
 
 static void table_tooltip_layer_render(Layer* layer) {
-    if (!layer) return;
-
     Color bg = {50, 50, 60, 230};
     Color text_color = {220, 220, 220, 255};
+    int max_w;
+    int line_h;
+    int y;
+    const char* p;
+
+    if (!layer) {
+        return;
+    }
 
     backend_render_fill_rect(&layer->rect, bg);
 
-    Texture* tex = render_text(layer, layer->text, text_color);
-    if (!tex) return;
+    if (!layer->text || !layer->text[0]) {
+        return;
+    }
 
-    int tw = 0, th = 0;
-    backend_query_texture(tex, NULL, NULL, &tw, &th);
-    Rect text_rect = {
-        layer->rect.x + 6,
-        layer->rect.y + 4,
-        tw / yui_density,
-        th / yui_density
-    };
-    backend_render_text_copy(tex, NULL, &text_rect);
-    backend_render_text_destroy(tex);
+    max_w = layer->rect.w - TABLE_TOOLTIP_PAD * 2;
+    if (max_w < 8) {
+        max_w = 8;
+    }
+    line_h = table_tooltip_line_height(layer);
+    y = layer->rect.y + TABLE_TOOLTIP_PAD;
+    p = layer->text;
+
+    while (*p) {
+        char buf[1024];
+        int fit = table_tooltip_fit_bytes(layer, p, max_w);
+        Texture* tex;
+        if (fit <= 0) {
+            fit = 1;
+        }
+        if (fit >= (int)sizeof(buf)) {
+            fit = (int)sizeof(buf) - 1;
+        }
+        memcpy(buf, p, (size_t)fit);
+        buf[fit] = '\0';
+
+        tex = render_text(layer, buf, text_color);
+        if (tex) {
+            int tw = 0, th = 0;
+            Rect text_rect;
+            backend_query_texture(tex, NULL, NULL, &tw, &th);
+            text_rect.x = layer->rect.x + TABLE_TOOLTIP_PAD;
+            text_rect.y = y;
+            text_rect.w = tw / yui_density;
+            text_rect.h = th / yui_density;
+            backend_render_text_copy(tex, NULL, &text_rect);
+            backend_render_text_destroy(tex);
+        }
+
+        p += fit;
+        y += line_h;
+    }
 }
 
 static void table_hide_tooltip(TableComponent* component) {
@@ -147,31 +249,73 @@ static const char* table_get_tooltip_text(TableComponent* component, int row, in
 
 static void table_show_tooltip(TableComponent* component, Layer* layer,
                                const char* text, int mouse_x, int mouse_y) {
+    int tw;
+    int sw = 800, sh = 600;
+    int max_box_w;
+    int content_max;
+    int box_w;
+    int line_h;
+    int lines;
+    Layer* tl;
+
     if (!component || !layer || !text || !text[0] || component->tooltip_popup) return;
     if (!layer->font || !layer->font->default_font) return;
 
-    int tw = table_measure_text_width(layer, text);
+    tw = table_measure_text_width(layer, text);
     if (tw <= 0) return;
 
-    Layer* tl = calloc(1, sizeof(Layer));
+    tl = calloc(1, sizeof(Layer));
     if (!tl) return;
 
     tl->type = LABEL;
     tl->visible = VISIBLE;
     tl->font = layer->font;
 
-    int pad = 6;
-    int sw = 800, sh = 600;
     backend_get_windowsize(&sw, &sh);
+    max_box_w = sw - 24;
+    if (max_box_w > TABLE_TOOLTIP_MAX_W) {
+        max_box_w = TABLE_TOOLTIP_MAX_W;
+    }
+    if (max_box_w < 80) {
+        max_box_w = 80;
+    }
+    content_max = max_box_w - TABLE_TOOLTIP_PAD * 2;
+    if (content_max < 8) {
+        content_max = 8;
+    }
 
+    box_w = tw + TABLE_TOOLTIP_PAD * 2;
+    if (box_w > max_box_w) {
+        box_w = max_box_w;
+    }
+
+    line_h = table_tooltip_line_height(layer);
+    lines = table_tooltip_count_lines(layer, text, content_max);
+    if (lines < 1) {
+        lines = 1;
+    }
+
+    tl->rect.w = box_w;
+    tl->rect.h = lines * line_h + TABLE_TOOLTIP_PAD * 2;
+    if (tl->rect.h < 24) {
+        tl->rect.h = 24;
+    }
+
+    /* 贴边夹紧，避免长文本往左翻导致左边截断 */
     tl->rect.x = mouse_x + 12;
     tl->rect.y = mouse_y + 12;
-    tl->rect.w = tw + pad * 2;
-    tl->rect.h = layer->font->size + pad * 2;
-    if (tl->rect.h < 24) tl->rect.h = 24;
-
-    if (tl->rect.x + tl->rect.w > sw) tl->rect.x = mouse_x - tl->rect.w - 4;
-    if (tl->rect.y + tl->rect.h > sh) tl->rect.y = mouse_y - tl->rect.h - 4;
+    if (tl->rect.x + tl->rect.w > sw - 8) {
+        tl->rect.x = sw - 8 - tl->rect.w;
+    }
+    if (tl->rect.x < 8) {
+        tl->rect.x = 8;
+    }
+    if (tl->rect.y + tl->rect.h > sh - 8) {
+        tl->rect.y = sh - 8 - tl->rect.h;
+    }
+    if (tl->rect.y < 8) {
+        tl->rect.y = 8;
+    }
 
     tl->text = strdup(text);
     if (!tl->text) {
@@ -718,6 +862,10 @@ static int table_handle_vertical_scrollbar_mouse(TableComponent* component, Laye
         return 1;
     }
 
+    if (event->phase == POINTER_WHEEL) {
+        return 0;
+    }
+
     if (event->button != SDL_BUTTON_LEFT) {
         return table_point_in_scrollbar(component, layer, event->x, event->y);
     }
@@ -736,6 +884,71 @@ static int table_handle_vertical_scrollbar_mouse(TableComponent* component, Laye
     }
 
     return table_point_in_scrollbar(component, layer, event->x, event->y);
+}
+
+static void table_component_handle_scroll_event(Layer* layer, int scroll_delta) {
+    TableComponent* component;
+    int old_offset;
+
+    if (!layer || !layer->component || scroll_delta == 0) {
+        return;
+    }
+    component = (TableComponent*)layer->component;
+    table_component_update_content_size(component);
+    if (!table_needs_vertical_scroll(component, layer)) {
+        return;
+    }
+
+    old_offset = layer->scroll_offset;
+    layer->scroll_offset += scroll_delta * 20;
+    table_clamp_scroll(component, layer);
+    if (layer->scroll_offset != old_offset) {
+        mark_layer_dirty(layer, DIRTY_TEXT);
+    }
+}
+
+static int table_component_apply_wheel(TableComponent* component, Layer* layer, PointerEvent* event) {
+    int old_y;
+    int old_x;
+    int changed = 0;
+
+    if (!component || !layer || !event) {
+        return 0;
+    }
+
+    table_component_update_content_size(component);
+
+    if (event->delta_y != 0 &&
+        (layer->scrollable == 1 || layer->scrollable == 3) &&
+        table_needs_vertical_scroll(component, layer)) {
+        old_y = layer->scroll_offset;
+        layer->scroll_offset += event->delta_y * 20;
+        table_clamp_scroll(component, layer);
+        if (layer->scroll_offset != old_y) {
+            changed = 1;
+        }
+    }
+
+    if (event->delta_x != 0 &&
+        (layer->scrollable == 2 || layer->scrollable == 3) &&
+        layer->scrollbar_h) {
+        int viewport_w = table_viewport_width(component, layer);
+        int max_scroll_x = layer->content_width - viewport_w;
+        if (max_scroll_x > 0) {
+            old_x = layer->scroll_offset_x;
+            layer->scroll_offset_x += event->delta_x * 20;
+            table_clamp_scroll(component, layer);
+            if (layer->scroll_offset_x != old_x) {
+                changed = 1;
+            }
+        }
+    }
+
+    if (changed) {
+        mark_layer_dirty(layer, DIRTY_TEXT);
+        return 1;
+    }
+    return 0;
 }
 
 static void table_compute_column_widths(TableComponent* component, int viewport_width) {
@@ -1372,6 +1585,7 @@ TableComponent* table_component_create(Layer* layer) {
     layer->component = component;
     layer->render = table_component_render;
     layer->handle_pointer_event = table_component_handle_pointer_event;
+    layer->handle_scroll_event = table_component_handle_scroll_event;
     layer->handle_key_event = table_component_handle_key_event;
     layer->focusable = 1;
     layer->on_data_update = table_data_update;
@@ -1433,6 +1647,21 @@ static void table_component_apply_theme_style(Layer* layer, cJSON* style) {
     cJSON* row_selected = cJSON_GetObjectItem(style, "rowSelectedColor");
     if (row_selected && cJSON_IsString(row_selected)) {
         parse_color(row_selected->valuestring, &component->row_selected_color);
+    }
+
+    cJSON* scrollbar_color = cJSON_GetObjectItem(style, "scrollbarColor");
+    if (scrollbar_color && cJSON_IsString(scrollbar_color)) {
+        Color sc;
+        parse_color(scrollbar_color->valuestring, &sc);
+        if (layer->scrollbar_v) layer->scrollbar_v->color = sc;
+        if (layer->scrollbar_h) layer->scrollbar_h->color = sc;
+    }
+    cJSON* scrollbar_track = cJSON_GetObjectItem(style, "scrollbarTrackColor");
+    if (scrollbar_track && cJSON_IsString(scrollbar_track)) {
+        Color sc;
+        parse_color(scrollbar_track->valuestring, &sc);
+        if (layer->scrollbar_v) layer->scrollbar_v->track_color = sc;
+        if (layer->scrollbar_h) layer->scrollbar_h->track_color = sc;
     }
 
     mark_layer_dirty(layer, DIRTY_COLOR | DIRTY_TEXT);
@@ -1789,11 +2018,20 @@ int table_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
         return 1;
     }
 
+    if (event->phase == POINTER_WHEEL) {
+        Point pt = {event->x, event->y};
+        if (!point_in_rect(pt, layer->rect)) {
+            return 0;
+        }
+        return table_component_apply_wheel(component, layer, event);
+    }
+
     if (component->editing_row >= 0) {
         if (table_handle_edit_mouse(component, layer, event)) {
             return 1;
         }
-        if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
+        if ((event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) &&
+            event->button == SDL_BUTTON_LEFT) {
             int row = table_row_at_point(component, layer, event->x, event->y);
             int col = table_column_at_point(component, layer, event->x, event->y);
             if (row != component->editing_row || col != component->editing_col) {
@@ -1830,11 +2068,11 @@ int table_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
         return row >= 0;
     }
 
-    if (event->phase == POINTER_DOWN) {
+    if (event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) {
         table_tooltip_reset(component);
     }
 
-    if (in_header && event->button == SDL_BUTTON_LEFT) {
+    if (in_header && event->button == SDL_BUTTON_LEFT && event->phase != POINTER_WHEEL) {
         if (event->phase == POINTER_DOWN && resize_col >= 0) {
             component->resizing_column = resize_col;
             component->resize_drag_start_x = event->x;
@@ -1852,13 +2090,21 @@ int table_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
         return in_body;
     }
 
-    if (event->phase == POINTER_DOWN) {
+    if (event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) {
         component->pressed_row = in_body ? row : -1;
         component->hovered_row = in_body ? row : -1;
         if (in_body && component->editing_row < 0) {
             int col = table_column_at_point(component, layer, event->x, event->y);
             component->selected_row = row;
             component->selected_col = col;
+            /* SDL 连点第二次为 DOUBLE_TAP；直接进编辑，避免只认 DOWN 时丢双击 */
+            if (event->phase == POINTER_DOUBLE_TAP && component->editable) {
+                if (col < 0 && component->last_click_col >= 0) {
+                    col = component->last_click_col;
+                    component->selected_col = col;
+                }
+                table_begin_edit(component, row, col);
+            }
             mark_layer_dirty(layer, DIRTY_TEXT);
         }
         return in_body;

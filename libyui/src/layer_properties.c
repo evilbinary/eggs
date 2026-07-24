@@ -73,6 +73,24 @@ static int handle_bg_color(Layer* layer, cJSON* value, int is_creating) {
     return 1;
 }
 
+static int handle_shadow(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_shadow(value, &layer->shadow)) {
+        return 0;
+    }
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    return 1;
+}
+
+static int handle_bg_gradient(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_gradient(value, &layer->bg_gradient)) {
+        return 0;
+    }
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    return 1;
+}
+
 // 字体相关处理器
 static int handle_font(Layer* layer, cJSON* value, int is_creating) {
     if (!cJSON_IsString(value)) return 0;
@@ -133,6 +151,34 @@ static int handle_border_radius(Layer* layer, cJSON* value, int is_creating) {
     if (!is_creating) {
         mark_layer_dirty(layer, DIRTY_STYLE);
     }
+    return 1;
+}
+
+static int handle_border(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_border(value, &layer->border)) return 0;
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    return 1;
+}
+
+static int handle_border_width(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_border_width(value, &layer->border)) return 0;
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    return 1;
+}
+
+static int handle_border_style(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_border_style(value, &layer->border)) return 0;
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    return 1;
+}
+
+static int handle_border_color(Layer* layer, cJSON* value, int is_creating) {
+    (void)is_creating;
+    if (!parse_layer_border_color(value, &layer->border)) return 0;
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
     return 1;
 }
 
@@ -328,6 +374,15 @@ static void layer_apply_scrollbar_config(Layer* layer, cJSON* scrollbar) {
         if (layer->scrollbar_v) layer->scrollbar_v->color = parsed;
         if (layer->scrollbar_h) layer->scrollbar_h->color = parsed;
     }
+
+    cJSON* track_color = cJSON_GetObjectItem(scrollbar, "trackColor");
+    if (track_color && cJSON_IsString(track_color)) {
+        Color parsed;
+        parse_color(track_color->valuestring, &parsed);
+        if (layer->scrollbar) layer->scrollbar->track_color = parsed;
+        if (layer->scrollbar_v) layer->scrollbar_v->track_color = parsed;
+        if (layer->scrollbar_h) layer->scrollbar_h->track_color = parsed;
+    }
 }
 
 static int handle_scrollbar(Layer* layer, cJSON* value, int is_creating) {
@@ -445,6 +500,8 @@ static const PropertyHandlerEntry property_handlers[] = {
     {"color", handle_color},
     {"bgColor", handle_bg_color},
     {"opacity", handle_opacity},
+    {"shadow", handle_shadow},
+    {"bgGradient", handle_bg_gradient},
     
     // 字体属性
     {"font", handle_font},
@@ -453,6 +510,14 @@ static const PropertyHandlerEntry property_handlers[] = {
     
     // 样式属性
     {"borderRadius", handle_border_radius},
+    {"border", handle_border},
+    {"borderWidth", handle_border_width},
+    {"borderSize", handle_border_width},
+    {"border-width", handle_border_width},
+    {"borderStyle", handle_border_style},
+    {"border-style", handle_border_style},
+    {"borderColor", handle_border_color},
+    {"border-color", handle_border_color},
     {"source", handle_source},
     
     // 尺寸和位置属性
@@ -674,7 +739,7 @@ cJSON* layer_get_property_as_json(Layer* layer, const char* key) {
         return cJSON_CreateNumber(layer->rotation);
     }
     else if (strcmp(key, "visible") == 0) {
-        return cJSON_CreateBool(layer->visible);
+        return cJSON_CreateBool(layer->visible == VISIBLE);
     }
     else if (strcmp(key, "focusable") == 0) {
         return cJSON_CreateBool(layer->focusable);

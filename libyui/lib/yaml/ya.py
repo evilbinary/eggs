@@ -5,8 +5,8 @@
 # * 邮箱: rootntsd@gmail.com
 # ********************************************************************
 target("yaml")
-add_packages(get_config('default_libc'))
 set_kind("static")
+add_flags()
 add_files(
     '*.c',
 ) 

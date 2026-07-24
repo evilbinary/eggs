@@ -7,9 +7,11 @@
 #include "../../src/layer_lifecycle.h"
 #include "../../src/render.h"
 #include "../../src/theme_manager.h"
+#include "../../src/components/text_component.h"
 #include "js_socket.h"
 #include "js_timer.h"
 #include "js_perf.h"
+#include "js_game.h"
 #include "../../src/event.h"
 #include "../../src/backend.h"
 #include "../../src/log.h"
@@ -45,6 +47,11 @@ JSValue js_read_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
 JSValue js_write_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_resize_root(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_screenshot(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_click(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_click_at(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_send_key(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_get_clipboard(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+JSValue js_set_clipboard(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_focus(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
@@ -62,8 +69,11 @@ static JSValue js_set_text(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     if (layer_id && text && g_layer_root) {
         struct Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer_set_text(layer, text); //
-        
+            if (layer->type == TEXT && layer->component) {
+                text_component_set_text((TextComponent*)layer->component, text);
+            } else {
+                layer_set_text(layer, text);
+            }
         }
     }
 
@@ -103,66 +113,111 @@ static JSValue js_get_property(JSContext *ctx, JSValueConst this_val, int argc, 
     const char* property_name = JS_ToCStringLen(ctx, &len2, argv[1]);
 
     if (layer_id && property_name && g_layer_root) {
-        // 调用 js_common.c 中的函数
-        extern const char* js_module_get_property_value(const char* layer_id, const char* property_name);
-        const char* value = js_module_get_property_value(layer_id, property_name);
-        
-        if (value) {
-            JS_FreeCString(ctx, layer_id);
-            JS_FreeCString(ctx, property_name);
-            JSValue result = JS_NewString(ctx, value);
-            // 释放返回的字符串
-            free((void*)value);
-            return result;
+        // 直接调用 layer_get_property_as_json，避免字符串中转
+        extern cJSON* layer_get_property_as_json(Layer* layer, const char* key);
+        Layer* layer = find_layer_by_id(g_layer_root, layer_id);
+        JSValue result = JS_UNDEFINED;
+
+        if (!layer) {
+            printf("JS: Layer '%s' not found\n", layer_id);
+        } else {
+            cJSON* json_value = layer_get_property_as_json(layer, property_name);
+            if (!json_value) {
+                printf("JS: Property '%s' not found for layer '%s'\n", property_name, layer_id);
+            } else if (cJSON_IsString(json_value)) {
+                result = JS_NewString(ctx, json_value->valuestring);
+                cJSON_Delete(json_value);
+            } else if (cJSON_IsNumber(json_value)) {
+                result = JS_NewFloat64(ctx, json_value->valuedouble);
+                cJSON_Delete(json_value);
+            } else if (cJSON_IsBool(json_value)) {
+                result = cJSON_IsTrue(json_value) ? JS_TRUE : JS_FALSE;
+                cJSON_Delete(json_value);
+            } else if (cJSON_IsNull(json_value)) {
+                result = JS_NULL;
+                cJSON_Delete(json_value);
+            } else if (cJSON_IsArray(json_value) || cJSON_IsObject(json_value)) {
+                // 数组和对象转为 JSON 字符串
+                char* json_str = cJSON_PrintUnformatted(json_value);
+                result = JS_NewString(ctx, json_str ? json_str : "null");
+                free(json_str);
+                cJSON_Delete(json_value);
+            } else {
+                cJSON_Delete(json_value);
+            }
         }
+
+        JS_FreeCString(ctx, layer_id);
+        JS_FreeCString(ctx, property_name);
+        return result;
     }
 
-    JS_FreeCString(ctx, layer_id);
-    JS_FreeCString(ctx, property_name);
+    if (layer_id) JS_FreeCString(ctx, layer_id);
+    if (property_name) JS_FreeCString(ctx, property_name);
     return JS_UNDEFINED;
 }
 
 // 设置属性
 static JSValue js_set_property(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    const char* layer_id;
+    const char* property_name;
+    cJSON* json_value = NULL;
+    int result = 0;
+
     if (argc < 3) {
         return JS_ThrowTypeError(ctx, "Expected 3 arguments: layer_id, property_name, value");
     }
 
-    const char* layer_id = JS_ToCString(ctx, argv[0]);
-    const char* property_name = JS_ToCString(ctx, argv[1]);
-    const char* value = JS_ToCString(ctx, argv[2]);
-
-    if (!layer_id || !property_name || !value) {
+    layer_id = JS_ToCString(ctx, argv[0]);
+    property_name = JS_ToCString(ctx, argv[1]);
+    if (!layer_id || !property_name) {
         if (layer_id) JS_FreeCString(ctx, layer_id);
         if (property_name) JS_FreeCString(ctx, property_name);
-        if (value) JS_FreeCString(ctx, value);
         return JS_ThrowTypeError(ctx, "Invalid arguments");
     }
 
-    if (g_layer_root) {
+    if (JS_IsNumber(argv[2])) {
+        double d = 0;
+        JS_ToFloat64(ctx, &d, argv[2]);
+        json_value = cJSON_CreateNumber(d);
+    } else if (JS_IsBool(argv[2])) {
+        json_value = cJSON_CreateBool(JS_ToBool(ctx, argv[2]));
+    } else if (JS_IsNull(argv[2]) || JS_IsUndefined(argv[2])) {
+        json_value = cJSON_CreateNull();
+    } else {
+        const char* value = JS_ToCString(ctx, argv[2]);
+        if (!value) {
+            JS_FreeCString(ctx, layer_id);
+            JS_FreeCString(ctx, property_name);
+            return JS_ThrowTypeError(ctx, "Invalid value");
+        }
+        /* Allow JSON object/array encoded as string, else plain string */
+        if ((value[0] == '{' || value[0] == '[') && value[1] != '\0') {
+            json_value = cJSON_Parse(value);
+        }
+        if (!json_value) {
+            json_value = cJSON_CreateString(value);
+        }
+        JS_FreeCString(ctx, value);
+    }
+
+    if (g_layer_root && json_value) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            // 创建 JSON 对象来存储字符串值
-            extern cJSON* cJSON_CreateString(const char* string);
-            extern void cJSON_Delete(cJSON* item);
-            extern int layer_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating);
-            
-            cJSON* json_value = cJSON_CreateString(value);
-            if (json_value) {
-                int result = layer_set_property_from_json(layer, property_name, json_value, 0);
-                printf("JS(QuickJS): Set property '%s' to '%s' on layer '%s', result=%d\n", 
-                       property_name, value, layer_id, result);
-                cJSON_Delete(json_value);
-            }
+            result = layer_set_property_from_json(layer, property_name, json_value, 0);
+            printf("JS(QuickJS): Set property '%s' on layer '%s', result=%d\n",
+                   property_name, layer_id, result);
         } else {
             printf("JS(QuickJS): Layer '%s' not found\n", layer_id);
         }
     }
 
+    if (json_value) {
+        cJSON_Delete(json_value);
+    }
     JS_FreeCString(ctx, layer_id);
     JS_FreeCString(ctx, property_name);
-    JS_FreeCString(ctx, value);
-    return JS_UNDEFINED;
+    return JS_NewBool(ctx, result);
 }
 
 // 设置背景颜色
@@ -294,12 +349,16 @@ static JSValue js_render_from_json(JSContext *ctx, JSValueConst this_val, int ar
         return JS_NewInt32(ctx, -4);
     }
 
-    Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
-    if (!parent_layer) {
-        LOGE("js", "renderFromJson: layer '%s' not found", layer_id);
-        JS_FreeCString(ctx, layer_id);
-        JS_FreeCString(ctx, json_str);
-        return JS_NewInt32(ctx, -1);
+    Layer* parent_layer = NULL;
+    if (layer_id[0] == '\0') {
+        parent_layer = g_layer_root;
+    } else {
+        parent_layer = find_layer_by_id(g_layer_root, layer_id);
+        if (!parent_layer) {
+            LOGW("js", "renderFromJson: layer '%s' not found, fallback to root '%s'",
+                 layer_id, g_layer_root->id);
+            parent_layer = g_layer_root;
+        }
     }
 
     if (!append && parent_layer->children) {
@@ -342,6 +401,7 @@ static JSValue js_render_from_json(JSContext *ctx, JSValueConst this_val, int ar
     }
 
     layout_layer(parent_layer);
+    load_all_fonts(new_layer);
     theme_manager_apply_to_tree(new_layer);
 
     cJSON* page_json = parse_json_string(json_str);
@@ -630,6 +690,108 @@ static JSValue js_set_event(JSContext *ctx, JSValueConst this_val, int argc, JSV
     return JS_NewBool(ctx, result == 0 ? 1 : 0);
 }
 
+static int js_dump_bool(JSContext* ctx, JSValueConst val)
+{
+    return JS_ToBool(ctx, val);
+}
+
+static int js_dump_parse_flags(JSContext* ctx, JSValueConst opts)
+{
+    int flags = 0;
+    JSValue v;
+
+    if (!JS_IsObject(opts)) {
+        return 0;
+    }
+
+    v = JS_GetPropertyStr(ctx, opts, "style");
+    if (!JS_IsUndefined(v) && !JS_IsNull(v) && js_dump_bool(ctx, v)) {
+        flags |= LAYER_JSON_STYLE;
+    }
+    JS_FreeValue(ctx, v);
+
+    v = JS_GetPropertyStr(ctx, opts, "events");
+    if (!JS_IsUndefined(v) && !JS_IsNull(v) && js_dump_bool(ctx, v)) {
+        flags |= LAYER_JSON_EVENTS;
+    }
+    JS_FreeValue(ctx, v);
+
+    return flags;
+}
+
+/* YUI.dump(id?, opts?) — dump layer tree as JSON string (also prints to stdout) */
+static JSValue js_dump(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+{
+    const char* layer_id = NULL;
+    int flags = 0;
+    int argi = 0;
+    Layer* layer;
+    cJSON* json;
+    char* printed;
+    JSValue result;
+
+    (void)this_val;
+
+    if (argc >= 1 && JS_IsString(argv[0])) {
+        layer_id = JS_ToCString(ctx, argv[0]);
+        argi = 1;
+    } else if (argc >= 1 && JS_IsObject(argv[0])) {
+        flags = js_dump_parse_flags(ctx, argv[0]);
+        argi = 1;
+    }
+
+    if (argi < argc && JS_IsObject(argv[argi])) {
+        flags |= js_dump_parse_flags(ctx, argv[argi]);
+    }
+
+    if (!g_layer_root) {
+        if (layer_id) JS_FreeCString(ctx, layer_id);
+        return JS_NULL;
+    }
+
+    if (layer_id && layer_id[0]) {
+        layer = find_layer_by_id(g_layer_root, layer_id);
+        if (!layer) {
+            printf("YUI.dump: layer '%s' not found\n", layer_id);
+            JS_FreeCString(ctx, layer_id);
+            return JS_NULL;
+        }
+    } else {
+        layer = g_layer_root;
+    }
+
+    json = layer_to_json(layer, flags);
+    if (layer_id) JS_FreeCString(ctx, layer_id);
+    if (!json) {
+        return JS_NULL;
+    }
+
+    printed = cJSON_Print(json);
+    cJSON_Delete(json);
+    if (!printed) {
+        return JS_NULL;
+    }
+
+    puts(printed);
+    fflush(stdout);
+    result = JS_NewString(ctx, printed);
+    free(printed);
+    return result;
+}
+
+static JSValue js_exit(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+{
+    int code = 0;
+    (void)this_val;
+    if (argc >= 1) {
+        if (JS_ToInt32(ctx, &code, argv[0])) {
+            code = 1;
+        }
+    }
+    backend_request_quit(code);
+    return JS_UNDEFINED;
+}
+
 /* ====================== 初始化和清理 ====================== */
 
 // 初始化 JS 引擎（使用 QuickJS）
@@ -672,10 +834,21 @@ void js_module_cleanup(void)
 
     if (g_js_ctx) {
         js_timer_clear_all(g_js_ctx);
+        js_module_clear_events();
+#if YUI_WITH_GAME
+        js_game_shutdown();
+        js_game_set_context(NULL);
+#endif
+
+        if (g_js_rt) {
+            JS_RunGC(g_js_rt);
+        }
+
         JS_FreeContext(g_js_ctx);
         g_js_ctx = NULL;
     }
     if (g_js_rt) {
+        JS_RunGC(g_js_rt);
         JS_FreeRuntime(g_js_rt);
         g_js_rt = NULL;
     }
@@ -1221,6 +1394,8 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "show", JS_NewCFunction(g_js_ctx, js_show, "show", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "renderFromJson", JS_NewCFunction(g_js_ctx, js_render_from_json, "renderFromJson", 3));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "update", JS_NewCFunction(g_js_ctx, js_update, "update", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "dump", JS_NewCFunction(g_js_ctx, js_dump, "dump", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "exit", JS_NewCFunction(g_js_ctx, js_exit, "exit", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "log", JS_NewCFunction(g_js_ctx, js_log, "log", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "themeLoad", JS_NewCFunction(g_js_ctx, js_theme_load, "themeLoad", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "themeSetCurrent", JS_NewCFunction(g_js_ctx, js_theme_set_current, "themeSetCurrent", 1));
@@ -1232,6 +1407,11 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "writeFile", JS_NewCFunction(g_js_ctx, js_write_file, "writeFile", 2));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "resizeRoot", JS_NewCFunction(g_js_ctx, js_resize_root, "resizeRoot", 2));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "screenshot", JS_NewCFunction(g_js_ctx, js_screenshot, "screenshot", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "click", JS_NewCFunction(g_js_ctx, js_click, "click", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "clickAt", JS_NewCFunction(g_js_ctx, js_click_at, "clickAt", 3));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "sendKey", JS_NewCFunction(g_js_ctx, js_send_key, "sendKey", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "getClipboard", JS_NewCFunction(g_js_ctx, js_get_clipboard, "getClipboard", 0));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "setClipboard", JS_NewCFunction(g_js_ctx, js_set_clipboard, "setClipboard", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "listDir", JS_NewCFunction(g_js_ctx, js_list_dir, "listDir", 1));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "focus", JS_NewCFunction(g_js_ctx, js_focus, "focus", 1));
 
@@ -1245,6 +1425,9 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "inspect", inspect_obj);
 
     js_module_register_perf_api(g_js_ctx, yui_obj);
+#if YUI_WITH_GAME
+    js_game_register_api(g_js_ctx);
+#endif
     
     // 添加 setEvent 到 YUI 对象
     JS_SetPropertyStr(g_js_ctx, yui_obj, "setEvent", JS_NewCFunction(g_js_ctx, js_set_event, "setEvent", 3));
@@ -1408,32 +1591,55 @@ static int is_js_identifier_name(const char* name)
     return 1;
 }
 
-static int call_js_function_value(JSContext* ctx, JSValue func, const char* event_name, Layer* layer)
+static int event_name_is_layer_touch(const Layer* layer, const char* event_name)
+{
+    const char* tn;
+    const char* en;
+    if (!layer || !layer->event || !event_name || !event_name[0]) {
+        return 0;
+    }
+    tn = layer->event->touch_name;
+    if (!tn[0]) {
+        return 0;
+    }
+    /* Same string (named @fn or inline source stored on the layer). */
+    if (strcmp(tn, event_name) == 0) {
+        return 1;
+    }
+    en = event_name[0] == '@' ? event_name + 1 : event_name;
+    tn = tn[0] == '@' ? tn + 1 : tn;
+    return strcmp(tn, en) == 0;
+}
+
+/* One calling convention for all JS event functions:
+ * - onTouch / gesture: (layerId, event)
+ *     event = { type, deltaX, deltaY, pointerId, fingerCount, x, y }
+ * - everything else:   (layerId)
+ */
+static int js_invoke_event_function(JSContext* ctx, JSValue func, Layer* layer, int is_gesture)
 {
     const PointerEvent* pe = get_current_pointer_event();
     JSValue result;
-    if (pe && pe->device == POINTER_DEVICE_TOUCH) {
-        JSValue args[5];
-        args[0] = JS_NewString(ctx, pointer_phase_to_string(pe->phase));
-        args[1] = JS_NewInt32(ctx, pe->delta_x);
-        args[2] = JS_NewInt32(ctx, pe->delta_y);
-        args[3] = JS_NewInt32(ctx, pe->pointer_id);
-        args[4] = JS_NewInt32(ctx, pe->finger_count);
-        result = JS_Call(ctx, func, JS_UNDEFINED, 5, args);
+
+    if (is_gesture && pe) {
+        JSValue args[2];
+        JSValue ev = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, ev, "type",
+                          JS_NewString(ctx, pointer_phase_to_string(pe->phase)));
+        JS_SetPropertyStr(ctx, ev, "deltaX", JS_NewInt32(ctx, pe->delta_x));
+        JS_SetPropertyStr(ctx, ev, "deltaY", JS_NewInt32(ctx, pe->delta_y));
+        JS_SetPropertyStr(ctx, ev, "pointerId", JS_NewInt32(ctx, pe->pointer_id));
+        JS_SetPropertyStr(ctx, ev, "fingerCount",
+                          JS_NewInt32(ctx, pe->device == POINTER_DEVICE_TOUCH
+                                              ? pe->finger_count
+                                              : 1));
+        JS_SetPropertyStr(ctx, ev, "x", JS_NewInt32(ctx, pe->x));
+        JS_SetPropertyStr(ctx, ev, "y", JS_NewInt32(ctx, pe->y));
+        args[0] = layer ? JS_NewString(ctx, layer->id) : JS_NULL;
+        args[1] = ev;
+        result = JS_Call(ctx, func, JS_UNDEFINED, 2, args);
         JS_FreeValue(ctx, args[0]);
         JS_FreeValue(ctx, args[1]);
-        JS_FreeValue(ctx, args[2]);
-        JS_FreeValue(ctx, args[3]);
-        JS_FreeValue(ctx, args[4]);
-    } else if (pe) {
-        JSValue args[3];
-        args[0] = JS_NewString(ctx, pointer_phase_to_string(pe->phase));
-        args[1] = JS_NewInt32(ctx, pe->delta_x);
-        args[2] = JS_NewInt32(ctx, pe->delta_y);
-        result = JS_Call(ctx, func, JS_UNDEFINED, 3, args);
-        JS_FreeValue(ctx, args[0]);
-        JS_FreeValue(ctx, args[1]);
-        JS_FreeValue(ctx, args[2]);
     } else {
         JSValue args[1];
         args[0] = layer ? JS_NewString(ctx, layer->id) : JS_NULL;
@@ -1443,16 +1649,19 @@ static int call_js_function_value(JSContext* ctx, JSValue func, const char* even
 
     if (JS_IsException(result)) {
         JSValue exc = JS_GetException(ctx);
-        char err_prefix[256];
-        snprintf(err_prefix, sizeof(err_prefix), "event '%s'", event_name ? event_name : "<unknown>");
-        print_quickjs_exception(ctx, exc, err_prefix);
+        print_quickjs_exception(ctx, exc, "event callback");
         JS_FreeValue(ctx, exc);
         JS_FreeValue(ctx, result);
         return -1;
     }
-
     JS_FreeValue(ctx, result);
     return 0;
+}
+
+static int call_js_function_value(JSContext* ctx, JSValue func, const char* event_name, Layer* layer)
+{
+    return js_invoke_event_function(ctx, func, layer,
+                                    event_name_is_layer_touch(layer, event_name));
 }
 
 int js_module_call_event(const char* event_name, Layer* layer)
@@ -1497,9 +1706,14 @@ int js_module_call_event(const char* event_name, Layer* layer)
         }
         JS_FreeValue(g_js_ctx, global_obj);
         JS_FreeValue(g_js_ctx, func);
+        if (js_module_trigger_event(event_name, layer) == 0) {
+            return 0;
+        }
+        return -1;
     }
 
-    if (strchr(event_name, '.') != NULL) {
+    if (strncmp(event_name, "function", 8) != 0 &&
+        strchr(event_name, '.') != NULL) {
         return -1;
     }
 
@@ -1532,46 +1746,10 @@ int js_module_call_event(const char* event_name, Layer* layer)
 
     // 如果求值结果是函数则调用它
     if (JS_IsFunction(g_js_ctx, val)) {
-        const PointerEvent* pe = get_current_pointer_event();
-        JSValue result;
-        if (pe && pe->device == POINTER_DEVICE_TOUCH) {
-            JSValue args[5];
-            args[0] = JS_NewString(g_js_ctx, pointer_phase_to_string(pe->phase));
-            args[1] = JS_NewInt32(g_js_ctx, pe->delta_x);
-            args[2] = JS_NewInt32(g_js_ctx, pe->delta_y);
-            args[3] = JS_NewInt32(g_js_ctx, pe->pointer_id);
-            args[4] = JS_NewInt32(g_js_ctx, pe->finger_count);
-            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 5, args);
-            JS_FreeValue(g_js_ctx, args[0]);
-            JS_FreeValue(g_js_ctx, args[1]);
-            JS_FreeValue(g_js_ctx, args[2]);
-            JS_FreeValue(g_js_ctx, args[3]);
-            JS_FreeValue(g_js_ctx, args[4]);
-        } else if (pe) {
-            JSValue args[3];
-            args[0] = JS_NewString(g_js_ctx, pointer_phase_to_string(pe->phase));
-            args[1] = JS_NewInt32(g_js_ctx, pe->delta_x);
-            args[2] = JS_NewInt32(g_js_ctx, pe->delta_y);
-            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 3, args);
-            JS_FreeValue(g_js_ctx, args[0]);
-            JS_FreeValue(g_js_ctx, args[1]);
-            JS_FreeValue(g_js_ctx, args[2]);
-        } else {
-            JSValue args[1];
-            args[0] = layer ? JS_NewString(g_js_ctx, layer->id) : JS_NULL;
-            result = JS_Call(g_js_ctx, val, JS_UNDEFINED, 1, args);
-            JS_FreeValue(g_js_ctx, args[0]);
-        }
-
-        if (JS_IsException(result)) {
-            JSValue exc = JS_GetException(g_js_ctx);
-            print_quickjs_exception(g_js_ctx, exc, "<event>");
-            JS_FreeValue(g_js_ctx, exc);
-            JS_FreeValue(g_js_ctx, result);
-            JS_FreeValue(g_js_ctx, val);
-            return -1;
-        }
-        JS_FreeValue(g_js_ctx, result);
+        int ret = js_invoke_event_function(
+            g_js_ctx, val, layer, event_name_is_layer_touch(layer, event_name));
+        JS_FreeValue(g_js_ctx, val);
+        return ret;
     }
     JS_FreeValue(g_js_ctx, val);
     return 0;
@@ -1662,6 +1840,256 @@ JSValue js_screenshot(JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     int rc = backend_screenshot(file_path);
     JS_FreeCString(ctx, file_path);
     return JS_NewInt32(ctx, rc);
+}
+
+/* Synthesize mouse click at layer center — for e2e / auto tests. */
+JSValue js_click(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    const char* layer_id;
+    Layer* layer;
+    PointerEvent pe;
+    int x;
+    int y;
+
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Expected 1 argument: layer_id");
+    }
+    if (!g_layer_root) {
+        return JS_NewBool(ctx, 0);
+    }
+
+    layer_id = JS_ToCString(ctx, argv[0]);
+    if (!layer_id) {
+        return JS_ThrowTypeError(ctx, "Invalid layer id");
+    }
+
+    layer = find_layer_by_id(g_layer_root, layer_id);
+    if (!layer || layer->rect.w <= 0 || layer->rect.h <= 0) {
+        printf("YUI.click: layer '%s' not found or has empty rect\n", layer_id);
+        JS_FreeCString(ctx, layer_id);
+        return JS_NewBool(ctx, 0);
+    }
+
+    x = layer->rect.x + layer->rect.w / 2;
+    y = layer->rect.y + layer->rect.h / 2;
+
+    memset(&pe, 0, sizeof(pe));
+    pe.device = POINTER_DEVICE_MOUSE;
+    pe.button = BUTTON_LEFT;
+    pe.x = x;
+    pe.y = y;
+    pe.phase = POINTER_DOWN;
+    handle_pointer_event(g_layer_root, &pe);
+
+    pe.phase = POINTER_UP;
+    handle_pointer_event(g_layer_root, &pe);
+
+    printf("YUI.click: '%s' at (%d,%d)\n", layer_id, x, y);
+    JS_FreeCString(ctx, layer_id);
+    return JS_NewBool(ctx, 1);
+}
+
+/* clickAt(id, localX, localY) — local coords relative to layer rect */
+JSValue js_click_at(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    const char* layer_id;
+    Layer* layer;
+    PointerEvent pe;
+    int local_x = 0;
+    int local_y = 0;
+    int x;
+    int y;
+
+    (void)this_val;
+    if (argc < 3) {
+        return JS_ThrowTypeError(ctx, "Expected 3 arguments: layer_id, localX, localY");
+    }
+    if (!g_layer_root) {
+        return JS_NewBool(ctx, 0);
+    }
+    layer_id = JS_ToCString(ctx, argv[0]);
+    if (!layer_id || JS_ToInt32(ctx, &local_x, argv[1]) || JS_ToInt32(ctx, &local_y, argv[2])) {
+        if (layer_id) JS_FreeCString(ctx, layer_id);
+        return JS_ThrowTypeError(ctx, "Invalid arguments");
+    }
+    layer = find_layer_by_id(g_layer_root, layer_id);
+    if (!layer) {
+        JS_FreeCString(ctx, layer_id);
+        return JS_NewBool(ctx, 0);
+    }
+    x = layer->rect.x + local_x;
+    y = layer->rect.y + local_y;
+    memset(&pe, 0, sizeof(pe));
+    pe.device = POINTER_DEVICE_MOUSE;
+    pe.button = BUTTON_LEFT;
+    pe.x = x;
+    pe.y = y;
+    pe.phase = POINTER_DOWN;
+    handle_pointer_event(g_layer_root, &pe);
+    pe.phase = POINTER_UP;
+    handle_pointer_event(g_layer_root, &pe);
+    printf("YUI.clickAt: '%s' local(%d,%d) -> (%d,%d)\n", layer_id, local_x, local_y, x, y);
+    JS_FreeCString(ctx, layer_id);
+    return JS_NewBool(ctx, 1);
+}
+
+/*
+ * sendKey(opts):
+ *   { id?, key: "Backspace"|"Delete"|"Enter"|"Left"|"Right"|"a"|...,
+ *     mod?: "ctrl"|"shift"|"ctrl+shift"|number,
+ *     type?: "down"|"text",
+ *     text?: "你好" }  // for type:"text"
+ */
+JSValue js_send_key(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    JSValue opts;
+    JSValue v;
+    KeyEvent ke;
+    Layer* target = NULL;
+    const char* key_name = NULL;
+    const char* text = NULL;
+    const char* mod_str = NULL;
+    int key_code = 0;
+    int mod = 0;
+    int is_text = 0;
+
+    (void)this_val;
+    if (argc < 1 || !JS_IsObject(argv[0])) {
+        return JS_ThrowTypeError(ctx, "Expected options object");
+    }
+    if (!g_layer_root) {
+        return JS_NewBool(ctx, 0);
+    }
+    opts = argv[0];
+    memset(&ke, 0, sizeof(ke));
+
+    v = JS_GetPropertyStr(ctx, opts, "id");
+    if (JS_IsString(v)) {
+        const char* id = JS_ToCString(ctx, v);
+        if (id) {
+            target = find_layer_by_id(g_layer_root, id);
+            if (target) {
+                extern Layer* focused_layer;
+                if (focused_layer && focused_layer != target) {
+                    CLEAR_STATE(focused_layer, LAYER_STATE_FOCUSED);
+                }
+                focused_layer = target;
+                SET_STATE(target, LAYER_STATE_FOCUSED);
+            }
+            JS_FreeCString(ctx, id);
+        }
+    }
+    JS_FreeValue(ctx, v);
+    if (!target) {
+        extern Layer* focused_layer;
+        target = focused_layer ? focused_layer : g_layer_root;
+    }
+
+    v = JS_GetPropertyStr(ctx, opts, "type");
+    if (JS_IsString(v)) {
+        const char* t = JS_ToCString(ctx, v);
+        if (t && strcmp(t, "text") == 0) {
+            is_text = 1;
+        }
+        if (t) JS_FreeCString(ctx, t);
+    }
+    JS_FreeValue(ctx, v);
+
+    v = JS_GetPropertyStr(ctx, opts, "mod");
+    if (JS_IsNumber(v)) {
+        JS_ToInt32(ctx, &mod, v);
+    } else if (JS_IsString(v)) {
+        mod_str = JS_ToCString(ctx, v);
+        if (mod_str) {
+            if (strstr(mod_str, "ctrl") || strstr(mod_str, "CTRL")) mod |= KMOD_CTRL;
+            if (strstr(mod_str, "shift") || strstr(mod_str, "SHIFT")) mod |= KMOD_SHIFT;
+            if (strstr(mod_str, "alt") || strstr(mod_str, "ALT")) mod |= KMOD_ALT;
+            JS_FreeCString(ctx, mod_str);
+        }
+    }
+    JS_FreeValue(ctx, v);
+
+    if (is_text) {
+        v = JS_GetPropertyStr(ctx, opts, "text");
+        if (!JS_IsString(v)) {
+            JS_FreeValue(ctx, v);
+            return JS_ThrowTypeError(ctx, "type:text requires text string");
+        }
+        text = JS_ToCString(ctx, v);
+        JS_FreeValue(ctx, v);
+        if (!text) {
+            return JS_NewBool(ctx, 0);
+        }
+        ke.type = KEY_EVENT_TEXT_INPUT;
+        strncpy(ke.data.text.text, text, sizeof(ke.data.text.text) - 1);
+        ke.data.text.text[sizeof(ke.data.text.text) - 1] = '\0';
+        JS_FreeCString(ctx, text);
+        handle_key_event(target, &ke);
+        return JS_NewBool(ctx, 1);
+    }
+
+    v = JS_GetPropertyStr(ctx, opts, "key");
+    if (JS_IsNumber(v)) {
+        JS_ToInt32(ctx, &key_code, v);
+    } else if (JS_IsString(v)) {
+        key_name = JS_ToCString(ctx, v);
+        if (key_name) {
+            if (strcmp(key_name, "Backspace") == 0) key_code = SDLK_BACKSPACE;
+            else if (strcmp(key_name, "Delete") == 0) key_code = SDLK_DELETE;
+            else if (strcmp(key_name, "Enter") == 0 || strcmp(key_name, "Return") == 0) key_code = SDLK_RETURN;
+            else if (strcmp(key_name, "Left") == 0) key_code = SDLK_LEFT;
+            else if (strcmp(key_name, "Right") == 0) key_code = SDLK_RIGHT;
+            else if (strcmp(key_name, "Up") == 0) key_code = SDLK_UP;
+            else if (strcmp(key_name, "Down") == 0) key_code = SDLK_DOWN;
+            else if (strcmp(key_name, "Home") == 0) key_code = SDLK_HOME;
+            else if (strcmp(key_name, "End") == 0) key_code = SDLK_END;
+            else if (strlen(key_name) == 1) key_code = (unsigned char)key_name[0];
+            else key_code = 0;
+            JS_FreeCString(ctx, key_name);
+        }
+    }
+    JS_FreeValue(ctx, v);
+
+    if (key_code == 0) {
+        return JS_ThrowTypeError(ctx, "Unknown key");
+    }
+
+    ke.type = KEY_EVENT_DOWN;
+    ke.data.key.key_code = key_code;
+    ke.data.key.mod = mod;
+    ke.data.key.repeat = 0;
+    handle_key_event(target, &ke);
+    return JS_NewBool(ctx, 1);
+}
+
+JSValue js_get_clipboard(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    char* text;
+    JSValue result;
+
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    text = backend_get_clipboard_text();
+    if (!text) {
+        return JS_NewString(ctx, "");
+    }
+    result = JS_NewString(ctx, text);
+    free(text);
+    return result;
+}
+
+JSValue js_set_clipboard(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    const char* text;
+
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Expected 1 argument: text");
+    }
+    text = JS_ToCString(ctx, argv[0]);
+    if (!text) {
+        return JS_ThrowTypeError(ctx, "Invalid text");
+    }
+    backend_set_clipboard_text(text);
+    JS_FreeCString(ctx, text);
+    return JS_TRUE;
 }
 
 // 列出目录内容

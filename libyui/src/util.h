@@ -20,6 +20,20 @@ int point_in_rect(Point pt, Rect rect);
 
 void parse_color(char* valuestring, Color* color);
 
+Color layer_gradient_sample(const LayerGradient* g, float t);
+
+/* shadow: "ox oy blur spread #color" 或对象 {x,y,blur,spread,color} */
+int parse_layer_shadow(cJSON* value, LayerShadow* out);
+/* bgGradient: "linear vertical|#to-bottom c1 c2" / linear-gradient(...) / 对象 */
+int parse_layer_gradient(cJSON* value, LayerGradient* out);
+
+int layer_border_visible(const LayerBorder* b);
+/* border: "3px solid #ff6600" / 对象 / none */
+int parse_layer_border(cJSON* value, LayerBorder* out);
+int parse_layer_border_width(cJSON* value, LayerBorder* out);
+int parse_layer_border_style(cJSON* value, LayerBorder* out);
+int parse_layer_border_color(cJSON* value, LayerBorder* out);
+
 // UTF-8 字符处理
 int utf8_char_len(unsigned char c);
 int utf8_char_len_at(const char* s);

@@ -33,7 +33,6 @@ _EXTRA_CORE = [
 
 target("lvgl")
 set_kind("static")
-add_packages(get_config('default_libc'))
 
 add_files(
     'src/core/*.c',
@@ -54,14 +53,12 @@ if get_plat() == "yiyiya":
     add_files('port_yiyiya/*.c')
     add_cflags('-DYUI_LVGL_PORT_YIYIYA', public=True)
 else:
-    add_deps("sdl2")
     add_files('port_sdl/*.c')
     add_cflags('-DYUI_LVGL_PORT_SDL', public=True)
 
 target("lvgl_extra")
 set_kind("static")
 add_deps("lvgl")
-add_packages(get_config('default_libc'))
 add_files(*_extra_widget_sources())
 add_cflags('-DLV_CONF_INCLUDE_SIMPLE')
 add_includedirs('.', './src', public=True)

@@ -3,6 +3,12 @@
 #include <float.h> // 添加这个头文件以定义 DBL_EPSILON
 #include "ytype.h"
 
+#ifdef _WIN32
+#ifndef strtok_r
+#define strtok_r strtok_s
+#endif
+#endif
+
 int is_cjson_float(const cJSON *item) {
     if (item == NULL || !cJSON_IsNumber(item)) {
         return 0;
@@ -164,20 +170,60 @@ int point_in_rect(Point pt, Rect rect) {
 }
 
 void parse_color(char* valuestring, Color* color) {
+    static const struct { const char* name; unsigned char r, g, b; } named[] = {
+        {"black", 0, 0, 0},
+        {"white", 255, 255, 255},
+        {"red", 255, 0, 0},
+        {"green", 0, 128, 0},
+        {"blue", 0, 0, 255},
+        {"orange", 255, 165, 0},
+        {"yellow", 255, 255, 0},
+        {"purple", 128, 0, 128},
+        {"gray", 128, 128, 128},
+        {"grey", 128, 128, 128},
+        {"pink", 255, 192, 203},
+        {"cyan", 0, 255, 255},
+        {"magenta", 255, 0, 255},
+        {"indigo", 99, 102, 241},
+    };
+    int i;
+
+    if (!valuestring || !color) return;
+
     // 支持多种颜色格式
     if (strcmp(valuestring, "transparent") == 0) {
         color->r = 0;
         color->g = 0;
         color->b = 0;
         color->a = 0;
-    } else if (strncmp(valuestring, "rgba(", 5) == 0) {
-      // 解析 rgba(r, g, b, a) 格式，支持空格
-      int r, g, b, a;
-      sscanf(valuestring, "rgba(%d,%d,%d,%d)", &r, &g, &b, &a);
-      color->r = (unsigned char)r;
-      color->g = (unsigned char)g;
-      color->b = (unsigned char)b;
-      color->a = (unsigned char)a;  // 直接使用0-255的值
+        return;
+    }
+
+    for (i = 0; i < (int)(sizeof(named) / sizeof(named[0])); i++) {
+        if (strcmp(valuestring, named[i].name) == 0) {
+            color->r = named[i].r;
+            color->g = named[i].g;
+            color->b = named[i].b;
+            color->a = 255;
+            return;
+        }
+    }
+
+    if (strncmp(valuestring, "rgba(", 5) == 0) {
+      // 解析 rgba(r, g, b, a) 格式，支持空格；a 可为 0-1 或 0-255
+      int r, g, b;
+      float af = 255.0f;
+      if (sscanf(valuestring, "rgba(%d ,%d ,%d ,%f)", &r, &g, &b, &af) == 4 ||
+          sscanf(valuestring, "rgba(%d,%d,%d,%f)", &r, &g, &b, &af) == 4) {
+        color->r = (unsigned char)r;
+        color->g = (unsigned char)g;
+        color->b = (unsigned char)b;
+        if (af <= 1.0f) {
+          color->a = (unsigned char)(af * 255.0f + 0.5f);
+        } else {
+          color->a = (unsigned char)af;
+        }
+      }
     } else if (strncmp(valuestring, "rgb(", 4) == 0) {
       // 解析 rgb(r, g, b) 格式，支持空格
       int r, g, b;
@@ -195,6 +241,364 @@ void parse_color(char* valuestring, Color* color) {
       sscanf(valuestring, "#%02hhx%02hhx%02hhx", &color->r, &color->g, &color->b);
       color->a = 255;  // 默认不透明
     }
+}
+
+static int parse_shadow_length_token(const char* tok, int* out) {
+    char buf[64];
+    size_t n;
+    char* end = NULL;
+    long v;
+    if (!tok || !out) return 0;
+    n = strlen(tok);
+    if (n == 0 || n >= sizeof(buf)) return 0;
+    memcpy(buf, tok, n + 1);
+    if (n > 2 && (buf[n - 1] == 'x' || buf[n - 1] == 'X') &&
+        (buf[n - 2] == 'p' || buf[n - 2] == 'P')) {
+        buf[n - 2] = '\0';
+    }
+    v = strtol(buf, &end, 10);
+    if (end == buf) return 0;
+    *out = (int)v;
+    return 1;
+}
+
+static int token_looks_like_color(const char* tok) {
+    static const char* named[] = {
+        "transparent", "black", "white", "red", "green", "blue", "orange",
+        "yellow", "purple", "gray", "grey", "pink", "cyan", "magenta", "indigo",
+        NULL
+    };
+    int i;
+    if (!tok || !tok[0]) return 0;
+    if (tok[0] == '#') return 1;
+    if (strncmp(tok, "rgb", 3) == 0) return 1;
+    for (i = 0; named[i]; i++) {
+        if (strcmp(tok, named[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+int parse_layer_shadow(cJSON* value, LayerShadow* out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    out->color.a = 64;
+
+    if (!value) return 0;
+
+    if (cJSON_IsObject(value)) {
+        cJSON* x = cJSON_GetObjectItem(value, "offsetX");
+        if (!x) x = cJSON_GetObjectItem(value, "x");
+        cJSON* y = cJSON_GetObjectItem(value, "offsetY");
+        if (!y) y = cJSON_GetObjectItem(value, "y");
+        cJSON* blur = cJSON_GetObjectItem(value, "blur");
+        if (!blur) blur = cJSON_GetObjectItem(value, "blurRadius");
+        cJSON* spread = cJSON_GetObjectItem(value, "spread");
+        cJSON* color = cJSON_GetObjectItem(value, "color");
+        if (x && cJSON_IsNumber(x)) out->offset_x = x->valueint;
+        if (y && cJSON_IsNumber(y)) out->offset_y = y->valueint;
+        if (blur && cJSON_IsNumber(blur)) out->blur = blur->valueint;
+        if (spread && cJSON_IsNumber(spread)) out->spread = spread->valueint;
+        if (color && cJSON_IsString(color)) parse_color(color->valuestring, &out->color);
+        out->enabled = 1;
+        return 1;
+    }
+
+    if (cJSON_IsString(value) && value->valuestring) {
+        char* dup = strdup(value->valuestring);
+        char* tokens[16];
+        int n = 0;
+        char* p = dup;
+        char* save = NULL;
+        char* tok;
+        int nums[4];
+        int num_count = 0;
+        if (!dup) return 0;
+
+        /* rgba(...) 可能含空格：先把 rgba( 整段合并较麻烦，要求颜色无空格或用 #hex */
+        for (tok = strtok_r(p, " \t", &save); tok && n < 16; tok = strtok_r(NULL, " \t", &save)) {
+            tokens[n++] = tok;
+        }
+        if (n < 5) {
+            free(dup);
+            return 0;
+        }
+        /* 末尾为颜色，前面最多 4 个长度值 */
+        if (!token_looks_like_color(tokens[n - 1])) {
+            free(dup);
+            return 0;
+        }
+        parse_color(tokens[n - 1], &out->color);
+        for (int i = 0; i < n - 1 && num_count < 4; i++) {
+            int v = 0;
+            if (!parse_shadow_length_token(tokens[i], &v)) {
+                free(dup);
+                return 0;
+            }
+            nums[num_count++] = v;
+        }
+        if (num_count != 4) {
+            free(dup);
+            return 0;
+        }
+        out->offset_x = nums[0];
+        out->offset_y = nums[1];
+        out->blur = nums[2];
+        out->spread = nums[3];
+        out->enabled = 1;
+        free(dup);
+        return 1;
+    }
+
+    return 0;
+}
+
+static Color gradient_lerp(Color a, Color b, float t) {
+    Color c;
+    if (t < 0.f) t = 0.f;
+    if (t > 1.f) t = 1.f;
+    c.r = (unsigned char)(a.r + (b.r - a.r) * t + 0.5f);
+    c.g = (unsigned char)(a.g + (b.g - a.g) * t + 0.5f);
+    c.b = (unsigned char)(a.b + (b.b - a.b) * t + 0.5f);
+    c.a = (unsigned char)(a.a + (b.a - a.a) * t + 0.5f);
+    return c;
+}
+
+Color layer_gradient_sample(const LayerGradient* g, float t) {
+    if (!g || g->count <= 0) {
+        Color z = {0, 0, 0, 0};
+        return z;
+    }
+    if (g->count == 1 || t <= 0.f) return g->colors[0];
+    if (t >= 1.f) return g->colors[g->count - 1];
+    float scaled = t * (float)(g->count - 1);
+    int i = (int)scaled;
+    float f = scaled - (float)i;
+    if (i >= g->count - 1) return g->colors[g->count - 1];
+    return gradient_lerp(g->colors[i], g->colors[i + 1], f);
+}
+
+int parse_layer_gradient(cJSON* value, LayerGradient* out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    out->vertical = 1;
+
+    if (!value) return 0;
+
+    if (cJSON_IsObject(value)) {
+        cJSON* dir = cJSON_GetObjectItem(value, "direction");
+        if (!dir) dir = cJSON_GetObjectItem(value, "orient");
+        cJSON* colors = cJSON_GetObjectItem(value, "colors");
+        if (dir && cJSON_IsString(dir)) {
+            if (strcmp(dir->valuestring, "horizontal") == 0 ||
+                strcmp(dir->valuestring, "to-right") == 0 ||
+                strcmp(dir->valuestring, "right") == 0) {
+                out->vertical = 0;
+            }
+        }
+        if (colors && cJSON_IsArray(colors)) {
+            int n = cJSON_GetArraySize(colors);
+            for (int i = 0; i < n && out->count < LAYER_GRADIENT_MAX_STOPS; i++) {
+                cJSON* c = cJSON_GetArrayItem(colors, i);
+                if (c && cJSON_IsString(c)) {
+                    parse_color(c->valuestring, &out->colors[out->count++]);
+                }
+            }
+        }
+        if (out->count >= 2) {
+            out->enabled = 1;
+            return 1;
+        }
+        return 0;
+    }
+
+    if (cJSON_IsString(value) && value->valuestring) {
+        char* dup = strdup(value->valuestring);
+        char* tokens[24];
+        int n = 0;
+        char* save = NULL;
+        char* tok;
+        int i = 0;
+        if (!dup) return 0;
+
+        /* 简化 linear-gradient(to bottom, #a, #b) */
+        if (strncmp(dup, "linear-gradient(", 16) == 0) {
+            char* body = dup + 16;
+            char* end = strrchr(body, ')');
+            if (end) *end = '\0';
+            if (strstr(body, "to right") || strstr(body, "90deg") || strstr(body, "to left")) {
+                out->vertical = 0;
+            } else {
+                out->vertical = 1;
+            }
+            for (tok = strtok_r(body, ",", &save); tok && out->count < LAYER_GRADIENT_MAX_STOPS;
+                 tok = strtok_r(NULL, ",", &save)) {
+                while (*tok == ' ' || *tok == '\t') tok++;
+                if (strncmp(tok, "to ", 3) == 0 || strstr(tok, "deg")) continue;
+                parse_color(tok, &out->colors[out->count++]);
+            }
+            free(dup);
+            if (out->count >= 2) {
+                out->enabled = 1;
+                return 1;
+            }
+            return 0;
+        }
+
+        for (tok = strtok_r(dup, " \t", &save); tok && n < 24; tok = strtok_r(NULL, " \t", &save)) {
+            tokens[n++] = tok;
+        }
+        if (n >= 1 && (strcmp(tokens[0], "linear") == 0 || strcmp(tokens[0], "linear-gradient") == 0)) {
+            i = 1;
+        }
+        if (i < n) {
+            if (strcmp(tokens[i], "vertical") == 0 || strcmp(tokens[i], "to-bottom") == 0 ||
+                strcmp(tokens[i], "bottom") == 0) {
+                out->vertical = 1;
+                i++;
+            } else if (strcmp(tokens[i], "horizontal") == 0 || strcmp(tokens[i], "to-right") == 0 ||
+                       strcmp(tokens[i], "right") == 0) {
+                out->vertical = 0;
+                i++;
+            }
+        }
+        for (; i < n && out->count < LAYER_GRADIENT_MAX_STOPS; i++) {
+            if (!token_looks_like_color(tokens[i])) continue;
+            parse_color(tokens[i], &out->colors[out->count++]);
+        }
+        free(dup);
+        if (out->count >= 2) {
+            out->enabled = 1;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int layer_border_visible(const LayerBorder* b) {
+    return b && b->width > 0 && b->style != LAYER_BORDER_NONE && b->color.a > 0;
+}
+
+static LayerBorderStyle parse_border_style_token(const char* tok) {
+    if (!tok) return LAYER_BORDER_NONE;
+    if (strcmp(tok, "solid") == 0) return LAYER_BORDER_SOLID;
+    if (strcmp(tok, "dashed") == 0) return LAYER_BORDER_DASHED;
+    if (strcmp(tok, "dotted") == 0) return LAYER_BORDER_DOTTED;
+    if (strcmp(tok, "none") == 0 || strcmp(tok, "hidden") == 0) return LAYER_BORDER_NONE;
+    return LAYER_BORDER_NONE;
+}
+
+static int token_is_border_style(const char* tok) {
+    return tok && (strcmp(tok, "solid") == 0 || strcmp(tok, "dashed") == 0 ||
+                   strcmp(tok, "dotted") == 0 || strcmp(tok, "none") == 0 ||
+                   strcmp(tok, "hidden") == 0);
+}
+
+int parse_layer_border_width(cJSON* value, LayerBorder* out) {
+    int w = 0;
+    if (!out || !value) return 0;
+    if (cJSON_IsNumber(value)) {
+        w = value->valueint;
+    } else if (cJSON_IsString(value) && value->valuestring) {
+        if (!parse_shadow_length_token(value->valuestring, &w)) return 0;
+    } else {
+        return 0;
+    }
+    if (w < 0) w = 0;
+    out->width = w;
+    if (w > 0 && out->style == LAYER_BORDER_NONE) {
+        out->style = LAYER_BORDER_SOLID;
+    }
+    if (w == 0) {
+        out->style = LAYER_BORDER_NONE;
+    }
+    return 1;
+}
+
+int parse_layer_border_style(cJSON* value, LayerBorder* out) {
+    if (!out || !value || !cJSON_IsString(value) || !value->valuestring) return 0;
+    out->style = parse_border_style_token(value->valuestring);
+    if (out->style != LAYER_BORDER_NONE && out->width <= 0) {
+        out->width = 3; /* CSS medium ≈ 3px when style set without width */
+    }
+    if (out->style == LAYER_BORDER_NONE) {
+        out->width = 0;
+    }
+    return 1;
+}
+
+int parse_layer_border_color(cJSON* value, LayerBorder* out) {
+    if (!out || !value || !cJSON_IsString(value) || !value->valuestring) return 0;
+    parse_color(value->valuestring, &out->color);
+    if (out->width > 0 && out->style == LAYER_BORDER_NONE) {
+        out->style = LAYER_BORDER_SOLID;
+    }
+    return 1;
+}
+
+int parse_layer_border(cJSON* value, LayerBorder* out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    out->color.a = 255;
+
+    if (!value) return 0;
+
+    if (cJSON_IsObject(value)) {
+        cJSON* w = cJSON_GetObjectItem(value, "width");
+        if (!w) w = cJSON_GetObjectItem(value, "borderWidth");
+        cJSON* s = cJSON_GetObjectItem(value, "style");
+        if (!s) s = cJSON_GetObjectItem(value, "borderStyle");
+        cJSON* c = cJSON_GetObjectItem(value, "color");
+        if (!c) c = cJSON_GetObjectItem(value, "borderColor");
+        if (w) parse_layer_border_width(w, out);
+        if (s) parse_layer_border_style(s, out);
+        if (c) parse_layer_border_color(c, out);
+        return layer_border_visible(out) || out->style == LAYER_BORDER_NONE;
+    }
+
+    if (cJSON_IsString(value) && value->valuestring) {
+        char* dup;
+        char* tokens[8];
+        int n = 0;
+        char* save = NULL;
+        char* tok;
+        int i;
+
+        if (strcmp(value->valuestring, "none") == 0 ||
+            strcmp(value->valuestring, "0") == 0) {
+            out->width = 0;
+            out->style = LAYER_BORDER_NONE;
+            return 1;
+        }
+
+        dup = strdup(value->valuestring);
+        if (!dup) return 0;
+        for (tok = strtok_r(dup, " \t", &save); tok && n < 8; tok = strtok_r(NULL, " \t", &save)) {
+            tokens[n++] = tok;
+        }
+        for (i = 0; i < n; i++) {
+            if (token_is_border_style(tokens[i])) {
+                out->style = parse_border_style_token(tokens[i]);
+            } else if (token_looks_like_color(tokens[i])) {
+                parse_color(tokens[i], &out->color);
+            } else {
+                int w = 0;
+                if (parse_shadow_length_token(tokens[i], &w)) {
+                    out->width = w;
+                }
+            }
+        }
+        free(dup);
+        if (out->style == LAYER_BORDER_NONE && out->width > 0) {
+            out->style = LAYER_BORDER_SOLID;
+        }
+        if (out->style == LAYER_BORDER_NONE) {
+            out->width = 0;
+        }
+        return 1;
+    }
+
+    return 0;
 }
 
 // 获取 UTF-8 字符的字节长度（仅根据首字节判断）

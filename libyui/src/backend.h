@@ -13,6 +13,8 @@ void backend_quit();
 Texture* backend_load_texture(char* path);
 Texture* backend_load_texture_from_base64(const char* base64_data, size_t data_len);
 Texture* backend_render_texture(DFont* font,const char* text,Color color);
+/* Measure text width in layout pixels without creating a render texture. */
+int backend_measure_text_width(DFont* font, const char* text);
 void backend_render_fill_rect(Rect* rect,Color color);
 void backend_render_rect(Rect* rect,Color color);
 void backend_render_rect_color(Rect* rect,unsigned char r,unsigned char g,unsigned char b,unsigned char a);
@@ -36,6 +38,11 @@ void backend_render_text_destroy(Texture * texture);
 void backend_render_text_copy(Texture * texture,
                    const Rect * srcrect,
                    const Rect * dstrect);
+/* 带色调的纹理绘制（用于 SVG/图片图标 hover 变色） */
+void backend_render_texture_tinted(Texture* texture,
+                                   const Rect* srcrect,
+                                   const Rect* dstrect,
+                                   Color tint);
 
 void backend_render_fill_rect_color(Rect* rect,unsigned char r,unsigned char g,unsigned char b,unsigned char a);
 
@@ -48,6 +55,16 @@ void backend_run(Layer* ui_root);
 
 /* 单帧更新（移动端 / platform 宿主驱动；桌面 SDL 可用 backend_run） */
 void backend_tick(Layer* ui_root);
+
+/* Auto-test helpers: quit after N frames (-1 = forever), or request quit with exit code */
+void backend_set_auto_frames(int frames);
+void backend_request_quit(int exit_code);
+int backend_get_exit_code(void);
+int backend_should_quit(void);
+
+/* Hidden window for CI / auto tests (must call before backend_init) */
+void backend_set_headless(int on);
+int backend_is_headless(void);
 
 int backend_query_texture(Texture * texture,
                      Uint32 * format, int *access,
@@ -64,6 +81,14 @@ void backend_set_resize_callback(ResizeCallback callback);
 void backend_render_rounded_rect(Rect* rect, Color color, int radius);
 void backend_render_rounded_rect_color(Rect* rect, unsigned char r, unsigned char g, unsigned char b, unsigned char a, int radius);
 void backend_render_rounded_rect_with_border(Rect* rect, Color bg_color, int radius, int border_width, Color border_color);
+
+/* box-shadow: offset-x offset-y blur spread color */
+void backend_render_shadow(const Rect* rect, int radius,
+                           int offset_x, int offset_y, int blur, int spread, Color color);
+/* 圆角线性渐变；vertical=1 自上而下 */
+void backend_render_rounded_gradient(const Rect* rect, int radius, int vertical,
+                                     const Color* colors, int count);
+
 // Add this declaration in backend.h with the other function declarations
 void backend_render_line(int x1, int y1, int x2, int y2, Color color);
 void backend_render_bezier_cubic(int x0, int y0,

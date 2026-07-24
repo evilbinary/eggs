@@ -7,6 +7,7 @@
 target("yui-stdlib-host")
 add_deps("mquickjs","cjson","socket")
 set_kind("binary")
+add_flags()
 add_files('yui_stdlib_stubs.c',
           'yui_stdlib_build.c',
           '../mquickjs/mquickjs_build.c'
@@ -31,6 +32,7 @@ after_build(after_build_host)
 target("jsmodule")
 add_deps("mquickjs","cjson","yui","socket")
 add_cflags(' -DBUILD_NO_MAIN=1 -DHAS_JS_MODULE -DCONFIG_CLASS_SOCKET -DCONFIG_CLASS_YUI  -I. -I../mquickjs -g ')
+add_flags()
 
 set_kind("static")
 add_files(

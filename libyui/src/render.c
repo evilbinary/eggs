@@ -3,12 +3,15 @@
 #include "component_registry.h"
 #include "animate.h"
 #include "perf/perf.h"
+#include "util.h"
 #include <limits.h>
 #include <math.h>
 
 extern int yui_inspect_mode_enabled;
 extern int yui_inspect_show_bounds;
 extern int yui_inspect_show_info;
+
+static void render_rect_intersect(Rect* out, const Rect* a, const Rect* b);
 
 // ====================== 资源加载器 ======================
 void load_textures(Layer* root) {
@@ -179,6 +182,57 @@ Texture* render_text(Layer* layer,const char* text, Color color) {
     return texture;
 }
 
+void render_layer_background(Layer* layer, const Color* override_bg) {
+    Color fill;
+    Rect fill_rect;
+    int fill_radius;
+    if (!layer) return;
+
+    if (layer->shadow.enabled && layer->shadow.color.a > 0) {
+        backend_render_shadow(&layer->rect, layer->radius,
+                              layer->shadow.offset_x, layer->shadow.offset_y,
+                              layer->shadow.blur, layer->shadow.spread,
+                              layer->shadow.color);
+    }
+
+    fill_rect = layer->rect;
+    fill_radius = layer->radius;
+
+    /* 先画边框外环，再在内缩区域填背景（保留渐变不被边框覆盖） */
+    if (layer_border_visible(&layer->border)) {
+        int bw = layer->border.width;
+        if (layer->radius > 0) {
+            backend_render_rounded_rect(&layer->rect, layer->border.color, layer->radius);
+        } else {
+            backend_render_fill_rect(&layer->rect, layer->border.color);
+        }
+        fill_rect.x += bw;
+        fill_rect.y += bw;
+        fill_rect.w -= bw * 2;
+        fill_rect.h -= bw * 2;
+        fill_radius = layer->radius - bw;
+        if (fill_radius < 0) fill_radius = 0;
+        if (fill_rect.w <= 0 || fill_rect.h <= 0) return;
+    }
+
+    if (layer->bg_gradient.enabled && layer->bg_gradient.count >= 2) {
+        backend_render_rounded_gradient(&fill_rect, fill_radius,
+                                        layer->bg_gradient.vertical,
+                                        layer->bg_gradient.colors,
+                                        layer->bg_gradient.count);
+        return;
+    }
+
+    fill = override_bg ? *override_bg : layer->bg_color;
+    if (fill.a == 0) return;
+
+    if (fill_radius > 0) {
+        backend_render_rounded_rect(&fill_rect, fill, fill_radius);
+    } else {
+        backend_render_fill_rect(&fill_rect, fill);
+    }
+}
+
 // ====================== 渲染管线 ======================
 void render_layer(Layer* layer) {
     if (!layer) {
@@ -187,6 +241,17 @@ void render_layer(Layer* layer) {
     }
     if (layer->visible == IN_VISIBLE) {
         return;
+    }
+
+    /* Fully clipped layers must not render or replace the parent clip. */
+    Rect parent_clip;
+    backend_render_get_clip_rect(&parent_clip);
+    if (parent_clip.w > 0 && parent_clip.h > 0) {
+        Rect visible_rect;
+        render_rect_intersect(&visible_rect, &layer->rect, &parent_clip);
+        if (visible_rect.w <= 0 || visible_rect.h <= 0) {
+            return;
+        }
     }
 
     int perf_on = perf_is_enabled();
@@ -205,18 +270,12 @@ void render_layer(Layer* layer) {
     } else if (layer->render != NULL) {
         layer->render(layer);
     } else if (layer->type == VIEW) {
-        if (layer->bg_color.a > 0) {
-            if (layer->backdrop_filter) {
-                backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
-            }
-
-            if (layer->radius > 0) {
-                backend_render_rounded_rect(&layer->rect, layer->bg_color, layer->radius);
-            } else {
-                backend_render_fill_rect(&layer->rect, layer->bg_color);
-            }
-        } else if (layer->backdrop_filter) {
+        if (layer->backdrop_filter) {
             backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
+        }
+        if (layer->bg_gradient.enabled || layer->bg_color.a > 0 ||
+            layer->shadow.enabled || layer_border_visible(&layer->border)) {
+            render_layer_background(layer, NULL);
         }
     }
 
@@ -225,7 +284,9 @@ void render_layer(Layer* layer) {
     }
 
     Rect prev_clip;
-    render_clip_start(layer, &prev_clip);
+    if (!render_clip_start(layer, &prev_clip)) {
+        return;
+    }
 
     for (int i = 0; i < layer->child_count; i++) {
         if (!layer->children) {
@@ -420,7 +481,7 @@ static void render_rect_intersect(Rect* out, const Rect* a, const Rect* b) {
     }
 }
 
-void render_clip_start(Layer* layer,Rect* prev_clip){
+int render_clip_start(Layer* layer,Rect* prev_clip){
     backend_render_get_clip_rect(prev_clip);
     Rect clip_rect = layer->rect;
     Rect intersected;
@@ -429,8 +490,13 @@ void render_clip_start(Layer* layer,Rect* prev_clip){
         render_rect_intersect(&intersected, &clip_rect, prev_clip);
         clip_rect = intersected;
     }
-    
+
+    if (clip_rect.w <= 0 || clip_rect.h <= 0) {
+        return 0;
+    }
+
     backend_render_set_clip_rect(&clip_rect);
+    return 1;
 }
 
 void render_clip_end(Layer* layer,Rect* prev_clip){
@@ -500,7 +566,9 @@ void render_vertical_scrollbar(Layer* layer) {
         
         // 绘制滚动条轨道
         Rect track_rect = {scrollbar_x, layer->rect.y, scrollbar_width, visible_height};
-        Color track_color = {100, 100, 100, 50}; // 半透明灰色
+        Color track_color = layer->scrollbar_v->track_color.a
+            ? layer->scrollbar_v->track_color
+            : (Color){100, 100, 100, 50};
         backend_render_fill_rect(&track_rect, track_color);
         
         // 绘制滚动条
@@ -562,7 +630,9 @@ void render_horizontal_scrollbar(Layer* layer) {
         
         // 绘制滚动条轨道
         Rect track_rect = {layer->rect.x, scrollbar_y, visible_width, scrollbar_height};
-        Color track_color = {100, 100, 100, 50}; // 半透明灰色
+        Color track_color = layer->scrollbar_h->track_color.a
+            ? layer->scrollbar_h->track_color
+            : (Color){100, 100, 100, 50};
         // printf("DEBUG: Drawing horizontal scrollbar track at x=%d, y=%d, w=%d, h=%d\n", 
         //        track_rect.x, track_rect.y, track_rect.w, track_rect.h);
         backend_render_fill_rect(&track_rect, track_color);

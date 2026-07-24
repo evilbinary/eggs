@@ -151,7 +151,7 @@ static void* js_module_common_event(void* data)
     if (!layer || !layer->event) {
         return NULL;
     }
-    /* 指针手势（touch / mouse drag）优先走 touch_name，传递 phase + delta */
+    /* 指针手势（touch / mouse drag）优先走 touch_name → onTouch(layerId, event) */
     if (get_current_pointer_event() && layer->event->touch_name[0] != '\0') {
         const char* name = layer->event->touch_name;
         if (js_module_trigger_event(name, layer) != 0) {
@@ -267,10 +267,13 @@ static EventHandler get_event_handler_by_type(const char* event_type)
         return js_module_change_event;
     } else if (strcmp(event_type, "resize") == 0 || strcmp(event_type, "onResize") == 0) {
         return NULL;
+    } else if (strcmp(event_type, "onSelect") == 0 || strcmp(event_type, "onExpand") == 0 ||
+               strcmp(event_type, "onSelectionChanged") == 0) {
+        /* 组件自定义事件，由 register_js_event_mapping 注册全局 handler */
+        return NULL;
     } else if (layer_lifecycle_is_event(event_type)) {
         return NULL;
     }
-    printf("JS: Unknown event type: %s\n", event_type);
 
     return NULL;
 }
@@ -448,7 +451,7 @@ static void register_js_event_mapping(const char* event_name, const char* func_n
             } else if (layer != NULL &&
                        (strcmp(event_type, "onResize") == 0 || strcmp(event_type, "resize") == 0)) {
                 js_module_set_layer_event(layer, event_type, clean_func_name, NULL);
-            } else {
+            } else if (strncmp(clean_func_name, "function", 8) != 0) {
                 // 非标准事件类型（如 onSelect），注册为全局处理器
                 if (func_name[0] == '@') {
                     register_event_handler(clean_func_name, js_module_common_event);
@@ -457,7 +460,8 @@ static void register_js_event_mapping(const char* event_name, const char* func_n
                 }
             }
         }
-    } else if (!is_page_lifecycle_event(event_name)) {
+    } else if (!is_page_lifecycle_event(event_name) &&
+               strncmp(clean_func_name, "function", 8) != 0) {
         if (func_name[0] == '@') {
             register_event_handler(clean_func_name, js_module_common_event);
         } else {
@@ -466,9 +470,10 @@ static void register_js_event_mapping(const char* event_name, const char* func_n
     }
     g_js_event_count++;
 
-    // Also register unprefixed event type (e.g., "handleMenuClick" without "menuTestApp." prefix)
-    // Page lifecycle events must stay page-scoped and should not overwrite global handlers.
+    // Also register unprefixed handler aliases (e.g. "handleMenuClick" without page prefix).
+    // Skip standard layer events like onClick so shorthand does not overwrite them.
     if (dot_pos != NULL && event_type != NULL && !is_page_lifecycle_event(event_type) &&
+        get_event_handler_by_type(event_type) == NULL &&
         g_js_event_count < MAX_JS_EVENTS) {
         strncpy(g_js_event_map[g_js_event_count].event_name, event_type, 127);
         g_js_event_map[g_js_event_count].event_name[127] = '\0';
@@ -510,6 +515,23 @@ static void build_registered_event_name(const char* layer_id, const char* event_
         strncpy(full_event_name, event_key, full_event_name_size - 1);
         full_event_name[full_event_name_size - 1] = '\0';
         return;
+    }
+
+    /* Support "showMenuBtn:onClick" / "showMenuBtn@onClick" -> "showMenuBtn.onClick" */
+    const char* sep = strchr(event_key, ':');
+    if (!sep) {
+        sep = strchr(event_key, '@');
+    }
+    if (sep && sep != event_key && sep[1] != '\0') {
+        size_t layer_len = (size_t)(sep - event_key);
+        if (layer_len + 1 < full_event_name_size) {
+            memcpy(full_event_name, event_key, layer_len);
+            full_event_name[layer_len] = '.';
+            strncpy(full_event_name + layer_len + 1, sep + 1,
+                    full_event_name_size - layer_len - 2);
+            full_event_name[full_event_name_size - 1] = '\0';
+            return;
+        }
     }
 
     if (layer_id && layer_id[0] != '\0') {
@@ -708,6 +730,15 @@ void js_module_shutdown(void)
 {
     if (g_layer_root) {
         layer_lifecycle_before_destroy(g_layer_root);
+    }
+    layer_lifecycle_set_dispatch(NULL);
+    js_module_init_layer(NULL);
+}
+
+void js_module_detach_layer_root_if(Layer* layer)
+{
+    if (g_layer_root == layer) {
+        g_layer_root = NULL;
     }
 }
 

@@ -648,6 +648,7 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
         layer->scrollbar_v->visible = 1;
         layer->scrollbar_v->thickness = 10;
         layer->scrollbar_v->color = (Color){128, 128, 128, 200};
+        layer->scrollbar_v->track_color = (Color){100, 100, 100, 50};
         layer->scrollbar_v->direction = SCROLLBAR_DIRECTION_VERTICAL;
       }
 
@@ -658,6 +659,7 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
         layer->scrollbar_h->visible = 1;
         layer->scrollbar_h->thickness = 10;
         layer->scrollbar_h->color = (Color){128, 128, 128, 200};
+        layer->scrollbar_h->track_color = (Color){100, 100, 100, 50};
         layer->scrollbar_h->direction = SCROLLBAR_DIRECTION_HORIZONTAL;
         printf(
             "HORIZONTAL SCROLLBAR CREATED for layer '%s' with scrollable=%d, "
@@ -795,6 +797,33 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
         layer->brightness = 1.0f;  // 默认亮度
       }
     }
+
+    if (cJSON_HasObjectItem(style, "shadow")) {
+      parse_layer_shadow(cJSON_GetObjectItem(style, "shadow"), &layer->shadow);
+    }
+    if (cJSON_HasObjectItem(style, "bgGradient")) {
+      parse_layer_gradient(cJSON_GetObjectItem(style, "bgGradient"), &layer->bg_gradient);
+    }
+    if (cJSON_HasObjectItem(style, "border")) {
+      parse_layer_border(cJSON_GetObjectItem(style, "border"), &layer->border);
+    }
+    if (cJSON_HasObjectItem(style, "borderWidth") || cJSON_HasObjectItem(style, "borderSize") ||
+        cJSON_HasObjectItem(style, "border-width")) {
+      cJSON* bw = cJSON_GetObjectItem(style, "borderWidth");
+      if (!bw) bw = cJSON_GetObjectItem(style, "borderSize");
+      if (!bw) bw = cJSON_GetObjectItem(style, "border-width");
+      parse_layer_border_width(bw, &layer->border);
+    }
+    if (cJSON_HasObjectItem(style, "borderStyle") || cJSON_HasObjectItem(style, "border-style")) {
+      cJSON* bs = cJSON_GetObjectItem(style, "borderStyle");
+      if (!bs) bs = cJSON_GetObjectItem(style, "border-style");
+      parse_layer_border_style(bs, &layer->border);
+    }
+    if (cJSON_HasObjectItem(style, "borderColor") || cJSON_HasObjectItem(style, "border-color")) {
+      cJSON* bc = cJSON_GetObjectItem(style, "borderColor");
+      if (!bc) bc = cJSON_GetObjectItem(style, "border-color");
+      parse_layer_border_color(bc, &layer->border);
+    }
   }
 
   // 解析资源路径
@@ -805,6 +834,7 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
       cJSON* sub = parse_json(source->valuestring);
       if (sub != NULL) {
         layer->sub = parse_layer_from_json(NULL,sub, layer);
+        cJSON_Delete(sub);
       } else {
         printf("cannot load file %s\n", source->valuestring);
       }
@@ -1134,8 +1164,15 @@ void destroy_layer(Layer* layer) {
         layer->scrollbar_h = NULL;
     }
     
-    // 注意：不销毁 font 和 assets，因为它们可能是共享的
-    // 这些应该由全局资源管理器负责
+    // 释放自有 font/assets（与父层共享时不释放）
+    if (layer->font && (!layer->parent || layer->font != layer->parent->font)) {
+        free(layer->font);
+        layer->font = NULL;
+    }
+    if (layer->assets && (!layer->parent || layer->assets != layer->parent->assets)) {
+        free(layer->assets);
+        layer->assets = NULL;
+    }
 
     if (layer->on_destroy) {
         layer->on_destroy(layer);

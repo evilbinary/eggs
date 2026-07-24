@@ -3,6 +3,7 @@
 #include "backend.h"
 #include "popup_manager.h"
 #include "component_registry.h"
+#include "input/state.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -16,12 +17,188 @@ static PointerEvent current_pointer_event;
 static int current_pointer_event_active = 0;
 static int pointer_gesture_scrolled = 0;
 
+#define MAX_DEVICE_LISTENERS 32
+static PointerEventListener g_pointer_listeners[MAX_DEVICE_LISTENERS];
+static int g_pointer_listener_count = 0;
+static KeyEventListener g_key_listeners[MAX_DEVICE_LISTENERS];
+static int g_key_listener_count = 0;
+static WindowEventListener g_window_listeners[MAX_DEVICE_LISTENERS];
+static int g_window_listener_count = 0;
+
 void pointer_gesture_mark_scrolled(void) {
     pointer_gesture_scrolled = 1;
 }
 
 static int pointer_gesture_did_scroll(void) {
     return pointer_gesture_scrolled;
+}
+
+static void notify_pointer_listeners(const PointerEvent* event)
+{
+    int i;
+    if (!event) {
+        return;
+    }
+    for (i = 0; i < g_pointer_listener_count; i++) {
+        if (g_pointer_listeners[i]) {
+            g_pointer_listeners[i](event);
+        }
+    }
+}
+
+static void notify_key_listeners(const KeyEvent* event)
+{
+    int i;
+    if (!event) {
+        return;
+    }
+    for (i = 0; i < g_key_listener_count; i++) {
+        if (g_key_listeners[i]) {
+            g_key_listeners[i](event);
+        }
+    }
+}
+
+int register_pointer_event_listener(PointerEventListener listener)
+{
+    int i;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_pointer_listener_count; i++) {
+        if (g_pointer_listeners[i] == listener) {
+            return 0;
+        }
+    }
+    if (g_pointer_listener_count >= MAX_DEVICE_LISTENERS) {
+        fprintf(stderr, "error: pointer event listeners full\n");
+        return -1;
+    }
+    g_pointer_listeners[g_pointer_listener_count++] = listener;
+    return 0;
+}
+
+int unregister_pointer_event_listener(PointerEventListener listener)
+{
+    int i;
+    int j;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_pointer_listener_count; i++) {
+        if (g_pointer_listeners[i] == listener) {
+            for (j = i; j < g_pointer_listener_count - 1; j++) {
+                g_pointer_listeners[j] = g_pointer_listeners[j + 1];
+            }
+            g_pointer_listener_count--;
+            g_pointer_listeners[g_pointer_listener_count] = NULL;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int register_key_event_listener(KeyEventListener listener)
+{
+    int i;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_key_listener_count; i++) {
+        if (g_key_listeners[i] == listener) {
+            return 0;
+        }
+    }
+    if (g_key_listener_count >= MAX_DEVICE_LISTENERS) {
+        fprintf(stderr, "error: key event listeners full\n");
+        return -1;
+    }
+    g_key_listeners[g_key_listener_count++] = listener;
+    return 0;
+}
+
+int unregister_key_event_listener(KeyEventListener listener)
+{
+    int i;
+    int j;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_key_listener_count; i++) {
+        if (g_key_listeners[i] == listener) {
+            for (j = i; j < g_key_listener_count - 1; j++) {
+                g_key_listeners[j] = g_key_listeners[j + 1];
+            }
+            g_key_listener_count--;
+            g_key_listeners[g_key_listener_count] = NULL;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static void notify_window_listeners(const WindowEvent* event)
+{
+    int i;
+    if (!event) {
+        return;
+    }
+    for (i = 0; i < g_window_listener_count; i++) {
+        if (g_window_listeners[i]) {
+            g_window_listeners[i](event);
+        }
+    }
+}
+
+int register_window_event_listener(WindowEventListener listener)
+{
+    int i;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_window_listener_count; i++) {
+        if (g_window_listeners[i] == listener) {
+            return 0;
+        }
+    }
+    if (g_window_listener_count >= MAX_DEVICE_LISTENERS) {
+        fprintf(stderr, "error: window event listeners full\n");
+        return -1;
+    }
+    g_window_listeners[g_window_listener_count++] = listener;
+    return 0;
+}
+
+int unregister_window_event_listener(WindowEventListener listener)
+{
+    int i;
+    int j;
+    if (!listener) {
+        return -1;
+    }
+    for (i = 0; i < g_window_listener_count; i++) {
+        if (g_window_listeners[i] == listener) {
+            for (j = i; j < g_window_listener_count - 1; j++) {
+                g_window_listeners[j] = g_window_listeners[j + 1];
+            }
+            g_window_listener_count--;
+            g_window_listeners[g_window_listener_count] = NULL;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void handle_window_event(Layer* root, const WindowEvent* event)
+{
+    (void)root;
+    if (!event) {
+        return;
+    }
+    notify_window_listeners(event);
+    if (event->type == WINDOW_FOCUS_LOST || event->type == WINDOW_MINIMIZED) {
+        input_state_release_all_keys();
+    }
 }
 
 static void handler_virtical_scroll_event(Layer* layer, int scroll_delta);
@@ -166,7 +343,7 @@ static void handle_horizontal_scroll_event(Layer* layer, int scroll_delta) {
 }
 
 // 处理键盘事件
-void handle_key_event(Layer* layer, KeyEvent* event) {
+static void handle_key_event_tree(Layer* layer, KeyEvent* event) {
     if (!layer || !event) {
         return;
     }
@@ -184,14 +361,22 @@ void handle_key_event(Layer* layer, KeyEvent* event) {
     // 递归处理子图层的键盘事件，寻找焦点图层
     for (int i = 0; i < layer->child_count; i++) {
         if (layer->children[i]) {
-            handle_key_event(layer->children[i], event);
+            handle_key_event_tree(layer->children[i], event);
         }
     }
 
     // 处理sub图层的键盘事件
     if (layer->sub) {
-        handle_key_event(layer->sub, event);
+        handle_key_event_tree(layer->sub, event);
     }
+}
+
+void handle_key_event(Layer* layer, KeyEvent* event) {
+    if (!layer || !event) {
+        return;
+    }
+    notify_key_listeners(event);
+    handle_key_event_tree(layer, event);
 }
 
 // 递归检查指定位置是否有子图层可以处理点击事件
@@ -322,7 +507,7 @@ static int default_scrollable_pointer_handler(Layer* layer, PointerEvent* event)
         return layer->handle_scroll_event || layer->scrollable ? 1 : 0;
     }
 
-    if (event->phase == POINTER_DOWN) {
+    if (event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) {
         return is_point_in_rect(event->x, event->y, layer->rect);
     }
 
@@ -347,7 +532,7 @@ static int default_scrollable_pointer_handler(Layer* layer, PointerEvent* event)
 }
 
 static SDL_EventType pointer_phase_to_sdl_type(PointerPhase phase) {
-    if (phase == POINTER_DOWN) {
+    if (phase == POINTER_DOWN || phase == POINTER_DOUBLE_TAP) {
         return SDL_MOUSEBUTTONDOWN;
     }
     if (phase == POINTER_UP) {
@@ -365,7 +550,8 @@ int handle_pointer_event(Layer* layer, PointerEvent* event) {
     }
 
     if (layer->parent == NULL) {
-        if (event->phase == POINTER_DOWN) {
+        notify_pointer_listeners(event);
+        if (event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) {
             pointer_gesture_scrolled = 0;
         }
         if (event->phase == POINTER_WHEEL &&
@@ -396,7 +582,7 @@ int handle_pointer_event(Layer* layer, PointerEvent* event) {
     }
 
     int child_has_focus = 0;
-    if (pe->phase == POINTER_DOWN && focused_layer) {
+    if ((pe->phase == POINTER_DOWN || pe->phase == POINTER_DOUBLE_TAP) && focused_layer) {
         for (int i = 0; i < layer->child_count; i++) {
             if (layer->children[i] == focused_layer) {
                 child_has_focus = 1;
@@ -407,7 +593,7 @@ int handle_pointer_event(Layer* layer, PointerEvent* event) {
 
     if (point_in_rect(pos, layer->rect)) {
         if (!child_has_focus && layer->focusable && layer->visible == VISIBLE &&
-            pe->phase == POINTER_DOWN) {
+            (pe->phase == POINTER_DOWN || pe->phase == POINTER_DOUBLE_TAP)) {
             if (focused_layer && focused_layer != layer) {
                 focused_layer->state = LAYER_STATE_NORMAL;
             }

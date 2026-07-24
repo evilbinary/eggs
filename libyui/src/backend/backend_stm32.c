@@ -96,6 +96,13 @@ void backend_quit() {
     default_font = NULL;
 }
 
+void backend_set_auto_frames(int frames) { (void)frames; }
+void backend_request_quit(int exit_code) { (void)exit_code; }
+int backend_get_exit_code(void) { return 0; }
+int backend_should_quit(void) { return 0; }
+void backend_set_headless(int on) { (void)on; }
+int backend_is_headless(void) { return 0; }
+
 // ====================== 纹理和渲染函数 ======================
 Texture* backend_load_texture(char* path) {
     // STM32 平台实现 - 从文件系统加载图片
@@ -107,6 +114,13 @@ Texture* backend_load_texture_from_base64(const char* base64_data, size_t data_l
     // STM32 平台实现 - 从base64数据解码图片
     // 这里需要实现base64解码和图片解析
     return NULL;
+}
+
+int backend_measure_text_width(DFont* font, const char* text) {
+    if (!font || !text || !text[0]) {
+        return 0;
+    }
+    return (int)(strlen(text) * font->size / 2);
 }
 
 Texture* backend_render_texture(DFont* font, const char* text, Color color) {
@@ -228,6 +242,30 @@ void backend_render_rounded_rect_with_border(Rect* rect, Color bg_color, int rad
     
     border_rect.x = rect->x + rect->w - border_width;
     backend_render_fill_rect(&border_rect, border_color);
+}
+
+void backend_render_shadow(const Rect* rect, int radius,
+                           int offset_x, int offset_y, int blur, int spread, Color color) {
+    Rect r;
+    (void)radius;
+    (void)blur;
+    if (!rect || color.a == 0) return;
+    r = *rect;
+    r.x += offset_x - spread;
+    r.y += offset_y - spread;
+    r.w += spread * 2;
+    r.h += spread * 2;
+    if (r.w > 0 && r.h > 0) {
+        backend_render_fill_rect(&r, color);
+    }
+}
+
+void backend_render_rounded_gradient(const Rect* rect, int radius, int vertical,
+                                     const Color* colors, int count) {
+    (void)radius;
+    (void)vertical;
+    if (!rect || !colors || count <= 0) return;
+    backend_render_fill_rect((Rect*)rect, colors[0]);
 }
 
 void backend_render_line(int x1, int y1, int x2, int y2, Color color) {
@@ -411,6 +449,11 @@ void backend_render_text_copy(Texture* texture, const Rect* srcrect, const Rect*
         
         display_needs_update = true;
     }
+}
+
+void backend_render_texture_tinted(Texture* texture, const Rect* srcrect, const Rect* dstrect, Color tint) {
+    (void)tint;
+    backend_render_text_copy(texture, srcrect, dstrect);
 }
 
 // ====================== 裁剪区域函数 ======================

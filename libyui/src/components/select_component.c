@@ -3,12 +3,15 @@
 #include "../event.h"
 #include "../util.h"
 #include "../layer.h"
+#include "../layer_update.h"
 #include "../popup_manager.h"
 #include <stdlib.h>
 #include <string.h>
 
 // 外部变量声明
 
+static void select_layer_destroy(Layer* layer);
+static void select_component_apply_theme_style(Layer* layer, cJSON* style);
 
 // 创建 Select 组件
 SelectComponent* select_component_create(Layer* layer) {
@@ -70,6 +73,7 @@ SelectComponent* select_component_create(Layer* layer) {
     layer->handle_scroll_event = select_component_handle_scroll_event;
     layer->register_event = select_component_register_event;
     layer->get_property = select_component_get_property;
+    layer->set_style = select_component_apply_theme_style;
     
     // 设置滚动事件回调
     if (!layer->event) {
@@ -77,8 +81,23 @@ SelectComponent* select_component_create(Layer* layer) {
         memset(layer->event, 0, sizeof(Event));
     }
     layer->event->scroll = (EventHandler)(void*)select_component_scroll_callback;
+    layer->on_destroy = select_layer_destroy;
     
     return component;
+}
+
+static void select_layer_destroy(Layer* layer) {
+    if (!layer || !layer->component) return;
+    SelectComponent* component = (SelectComponent*)layer->component;
+    if (component->expanded) {
+        select_component_collapse(component);
+    }
+    if (layer->event) {
+        free(layer->event);
+        layer->event = NULL;
+    }
+    select_component_destroy(component);
+    layer->component = NULL;
 }
 
 static int select_color_key_set(cJSON* style, cJSON* colors, const char* key) {
@@ -202,6 +221,22 @@ static void select_apply_colors_from_json(SelectComponent* component,
     }
 
     select_sync_dropdown_colors_from_style(component, style, colors);
+}
+
+static void select_component_apply_theme_style(Layer* layer, cJSON* style) {
+    SelectComponent* component;
+    if (!layer || !layer->component || !style) return;
+    component = (SelectComponent*)layer->component;
+    select_apply_color_config(component, style);
+    select_apply_style_layout(component, style);
+    select_sync_dropdown_colors_from_style(component, style, NULL);
+    if (layer->bg_color.a == 0 || cJSON_HasObjectItem(style, "bgColor")) {
+        layer->bg_color = component->bg_color;
+    }
+    if (cJSON_HasObjectItem(style, "color") || cJSON_HasObjectItem(style, "textColor")) {
+        layer->color = component->text_color;
+    }
+    mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
 }
 
 // 从 JSON 创建 Select 组件
@@ -350,6 +385,10 @@ void select_component_destroy(SelectComponent* component) {
     select_component_clear_items(component);
     
     // 清理指针
+    if (component->change_name) {
+        free(component->change_name);
+        component->change_name = NULL;
+    }
     component->layer = NULL;
     component->dropdown_layer = NULL;
     component->user_data = NULL;
@@ -1655,6 +1694,9 @@ int select_component_register_event(Layer* layer, const char* event_name, const 
         component->on_change = event_handler;
         if (event_func_name && event_func_name[0] == '@') {
             event_func_name++;
+        }
+        if (component->change_name) {
+            free(component->change_name);
         }
         component->change_name = strdup(event_func_name);
         return 0;

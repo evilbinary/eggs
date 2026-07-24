@@ -127,6 +127,24 @@ static void list_fit_texture(Rect* item_rect, int* draw_w, int* draw_h, int avai
     (void)item_rect;
 }
 
+/* 文字保持原始字号，超出区域裁剪，不缩放（与 Text 组件一致） */
+static void list_clip_texture_size(int* draw_w, int* draw_h, int* src_w, int* src_h,
+                                   int avail_w, int avail_h, float density) {
+    int visible_w = *draw_w;
+    int visible_h = *draw_h;
+    if (visible_w > avail_w) visible_w = avail_w;
+    if (visible_h > avail_h) visible_h = avail_h;
+    if (visible_w < 1) visible_w = 1;
+    if (visible_h < 1) visible_h = 1;
+
+    *src_w = (int)(visible_w * density + 0.5f);
+    *src_h = (int)(visible_h * density + 0.5f);
+    if (*src_w < 1) *src_w = 1;
+    if (*src_h < 1) *src_h = 1;
+    *draw_w = visible_w;
+    *draw_h = visible_h;
+}
+
 static void list_get_item_rect(ListComponent* component, int index, Rect* out) {
     Layer* layer = component->layer;
     int spacing = list_get_spacing(component);
@@ -403,11 +421,14 @@ static void list_render_item(ListComponent* component, int index, int is_hovered
             int draw_h = th / (int)yui_density;
             int avail_w = item_rect.w - text_x_offset - 14;
             int avail_h = item_rect.h - 8;
-            list_fit_texture(&item_rect, &draw_w, &draw_h, avail_w, avail_h);
+            int src_w = tw;
+            int src_h = th;
+            list_clip_texture_size(&draw_w, &draw_h, &src_w, &src_h, avail_w, avail_h, yui_density);
             int text_x = content_x + text_x_offset;
             int text_y = text_y_center - draw_h / 2;
+            Rect src = {0, 0, src_w, src_h};
             Rect dst = {text_x, text_y, draw_w, draw_h};
-            backend_render_text_copy(text_tex, NULL, &dst);
+            backend_render_text_copy(text_tex, &src, &dst);
             backend_render_text_destroy(text_tex);
         }
     }
@@ -452,11 +473,19 @@ int list_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     int index = -1;
     int inside = list_point_in_item(component, event->x, event->y, &index);
     int can_pan = list_can_vertical_pan(layer);
+    int in_layer = event->x >= layer->rect.x && event->x < layer->rect.x + layer->rect.w &&
+                   event->y >= layer->rect.y && event->y < layer->rect.y + layer->rect.h;
+    int tracking = component->pressed_index >= 0 || component->touch_scrolled;
+
+    /* 未在列表内且无进行中的手势时不吞事件，否则上方工具栏按钮会被 can_pan 抢走 */
+    if (!in_layer && !tracking) {
+        return 0;
+    }
 
     if (event->phase == POINTER_MOVE) {
         if (event->device == POINTER_DEVICE_TOUCH && event->finger_count > 1) {
             component->hovered_index = inside ? index : -1;
-            return inside || can_pan;
+            return inside || can_pan || tracking;
         }
         int adx = event->delta_x < 0 ? -event->delta_x : event->delta_x;
         int ady = event->delta_y < 0 ? -event->delta_y : event->delta_y;
@@ -473,7 +502,7 @@ int list_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
         if (!inside || component->pressed_index < 0) {
             if (!inside) component->pressed_index = -1;
         }
-        return inside || can_pan;
+        return inside || can_pan || tracking;
     }
 
     if (event->device == POINTER_DEVICE_MOUSE && event->button != SDL_BUTTON_LEFT) {
@@ -481,26 +510,30 @@ int list_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     }
 
     if (event->phase == POINTER_DOWN) {
+        if (!in_layer) {
+            return 0;
+        }
         component->touch_scrolled = 0;
         component->pressed_index = inside ? index : -1;
         component->hovered_index = inside ? index : -1;
-        return inside || can_pan;
+        return 1;
     }
 
     if (event->phase == POINTER_CANCEL) {
         component->pressed_index = -1;
         component->touch_scrolled = 0;
-        return 1;
+        return tracking ? 1 : 0;
     }
 
     if (event->phase == POINTER_UP) {
         int clicked = inside && component->pressed_index == index && index >= 0;
+        int was_tracking = tracking;
         component->pressed_index = -1;
         component->touch_scrolled = 0;
         if (clicked) {
             list_dispatch_select(component, index);
         }
-        return inside || clicked;
+        return inside || clicked || was_tracking;
     }
 
     return inside;

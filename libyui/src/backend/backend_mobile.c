@@ -7,9 +7,11 @@
 #include "screenshot.h"
 #include "ytype.h"
 
-#ifdef __ANDROID__
+#ifdef YUI_BACKEND_MOBILE
 #include "mobile_text.h"
+#endif
 
+#ifdef __ANDROID__
 extern char* android_clipboard_get_text(void);
 extern void android_clipboard_set_text(const char* text);
 #endif
@@ -773,7 +775,7 @@ Texture* backend_load_texture_from_base64(const char* base64_data, size_t data_l
 }
 
 Texture* backend_render_texture(DFont* font, const char* text, Color color) {
-#ifdef __ANDROID__
+#ifdef YUI_BACKEND_MOBILE
     return mobile_render_text_texture(font, text, color);
 #else
     (void)font;
@@ -781,6 +783,10 @@ Texture* backend_render_texture(DFont* font, const char* text, Color color) {
     (void)color;
     return NULL;
 #endif
+}
+
+int backend_measure_text_width(DFont* font, const char* text) {
+    return mobile_measure_text_width(font, text);
 }
 
 void backend_render_fill_rect(Rect* rect, Color color) {
@@ -882,6 +888,28 @@ void backend_render_rounded_rect_with_border(Rect* rect, Color bg_color, int rad
         }
         backend_render_rounded_rect(&inner, bg_color, inner_r);
     }
+}
+
+void backend_render_shadow(const Rect* rect, int radius,
+                           int offset_x, int offset_y, int blur, int spread, Color color) {
+    Rect r;
+    (void)blur;
+    if (!rect || color.a == 0) return;
+    r = *rect;
+    r.x += offset_x - spread;
+    r.y += offset_y - spread;
+    r.w += spread * 2;
+    r.h += spread * 2;
+    if (r.w > 0 && r.h > 0) {
+        backend_render_rounded_rect(&r, color, radius + (spread > 0 ? spread : 0));
+    }
+}
+
+void backend_render_rounded_gradient(const Rect* rect, int radius, int vertical,
+                                     const Color* colors, int count) {
+    (void)vertical;
+    if (!rect || !colors || count <= 0) return;
+    backend_render_rounded_rect((Rect*)rect, colors[0], radius);
 }
 
 void backend_render_line(int x1, int y1, int x2, int y2, Color color) {
@@ -1061,7 +1089,7 @@ DFont* backend_load_font(char* font_path, int size) {
 }
 
 DFont* backend_load_font_with_weight(char* font_path, int size, const char* weight) {
-#ifdef __ANDROID__
+#ifdef YUI_BACKEND_MOBILE
     return mobile_load_font(font_path, size, weight);
 #else
     DFont* font;
@@ -1097,6 +1125,11 @@ void backend_render_text_copy(Texture* texture, const Rect* srcrect, const Rect*
     (void)srcrect;
     (void)dstrect;
 #endif
+}
+
+void backend_render_texture_tinted(Texture* texture, const Rect* srcrect, const Rect* dstrect, Color tint) {
+    (void)tint;
+    backend_render_text_copy(texture, srcrect, dstrect);
 }
 
 void backend_render_get_clip_rect(Rect* prev_clip) {
@@ -1176,6 +1209,13 @@ void backend_run(Layer* ui_root) {
     backend_tick(ui_root);
 }
 
+void backend_set_auto_frames(int frames) { (void)frames; }
+void backend_request_quit(int exit_code) { (void)exit_code; }
+int backend_get_exit_code(void) { return 0; }
+int backend_should_quit(void) { return 0; }
+void backend_set_headless(int on) { (void)on; }
+int backend_is_headless(void) { return 0; }
+
 int backend_query_texture(Texture* texture, Uint32* format, int* access, int* w, int* h) {
     if (!texture) {
         return -1;
@@ -1229,7 +1269,7 @@ void backend_set_window_icon(const char* path) {
 }
 
 void backend_texture_cache_invalidate(void) {
-#ifdef __ANDROID__
+#ifdef YUI_BACKEND_MOBILE
     mobile_text_cache_invalidate();
 #endif
 }

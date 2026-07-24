@@ -1,6 +1,8 @@
 #include "button_component.h"
 #include "../render.h"
 #include "../backend.h"
+#include "../layer_update.h"
+#include "../util.h"
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
@@ -57,6 +59,126 @@ ButtonComponent* button_component_create(Layer* layer) {
     return button_component_create_from_json(layer, NULL);
 }
 
+static void button_layer_destroy(Layer* layer) {
+    if (!layer || !layer->component) return;
+    button_component_destroy((ButtonComponent*)layer->component);
+    layer->component = NULL;
+}
+
+static Color button_shade_color(Color base, int delta) {
+    Color c = base;
+    int r = (int)base.r + delta;
+    int g = (int)base.g + delta;
+    int b = (int)base.b + delta;
+    if (r < 0) r = 0; else if (r > 255) r = 255;
+    if (g < 0) g = 0; else if (g > 255) g = 255;
+    if (b < 0) b = 0; else if (b > 255) b = 255;
+    c.r = (unsigned char)r;
+    c.g = (unsigned char)g;
+    c.b = (unsigned char)b;
+    return c;
+}
+
+static void button_sync_state_colors(ButtonComponent* component, Color base) {
+    if (!component) return;
+    component->colors[LAYER_STATE_NORMAL] = base;
+    component->colors[LAYER_STATE_HOVER] = button_shade_color(base, 18);
+    component->colors[LAYER_STATE_PRESSED] = button_shade_color(base, -28);
+    component->colors[LAYER_STATE_FOCUSED] = button_shade_color(base, 12);
+    component->colors[LAYER_STATE_DISABLED] = (Color){base.r, base.g, base.b, 150};
+}
+
+static void button_component_apply_theme_style(Layer* layer, cJSON* style) {
+    if (!layer || !layer->component || !style || !cJSON_IsObject(style)) {
+        return;
+    }
+
+    ButtonComponent* component = (ButtonComponent*)layer->component;
+    cJSON* bg = cJSON_GetObjectItem(style, "bgColor");
+    if (bg && cJSON_IsString(bg) && bg->valuestring) {
+        if (strcmp(bg->valuestring, "transparent") == 0) {
+            component->bg_transparent = 1;
+            layer->bg_color = (Color){0, 0, 0, 0};
+        } else {
+            Color c;
+            parse_color(bg->valuestring, &c);
+            component->bg_transparent = 0;
+            layer->bg_color = c;
+            button_sync_state_colors(component, c);
+        }
+        mark_layer_dirty(layer, DIRTY_COLOR);
+    }
+
+    cJSON* color = cJSON_GetObjectItem(style, "color");
+    if (color && cJSON_IsString(color) && color->valuestring) {
+        parse_color(color->valuestring, &layer->color);
+        mark_layer_dirty(layer, DIRTY_COLOR | DIRTY_TEXT);
+    }
+
+    cJSON* hover = cJSON_GetObjectItem(style, "hoverColor");
+    if (hover && cJSON_IsString(hover) && hover->valuestring) {
+        parse_color(hover->valuestring, &component->hover_text_color);
+        mark_layer_dirty(layer, DIRTY_COLOR);
+    }
+
+    cJSON* radius = cJSON_GetObjectItem(style, "borderRadius");
+    if (!radius) {
+        radius = cJSON_GetObjectItem(style, "radius");
+    }
+    if (radius && cJSON_IsNumber(radius)) {
+        layer->radius = radius->valueint;
+        mark_layer_dirty(layer, DIRTY_STYLE);
+    }
+
+    cJSON* font_size = cJSON_GetObjectItem(style, "fontSize");
+    if (font_size && cJSON_IsNumber(font_size)) {
+        if (!layer->font) {
+            layer->font = (Font*)malloc(sizeof(Font));
+            memset(layer->font, 0, sizeof(Font));
+            strcpy(layer->font->path, "Roboto-Regular.ttf");
+            strcpy(layer->font->weight, "normal");
+        }
+        if (layer->font->size != font_size->valueint) {
+            layer->font->size = font_size->valueint;
+            layer->font->default_font = NULL;
+            mark_layer_dirty(layer, DIRTY_TEXT | DIRTY_LAYOUT);
+        }
+    }
+
+    if (cJSON_HasObjectItem(style, "shadow")) {
+        parse_layer_shadow(cJSON_GetObjectItem(style, "shadow"), &layer->shadow);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+    if (cJSON_HasObjectItem(style, "bgGradient")) {
+        parse_layer_gradient(cJSON_GetObjectItem(style, "bgGradient"), &layer->bg_gradient);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+    if (cJSON_HasObjectItem(style, "border")) {
+        parse_layer_border(cJSON_GetObjectItem(style, "border"), &layer->border);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+    if (cJSON_HasObjectItem(style, "borderWidth") || cJSON_HasObjectItem(style, "borderSize") ||
+        cJSON_HasObjectItem(style, "border-width")) {
+        cJSON* bw = cJSON_GetObjectItem(style, "borderWidth");
+        if (!bw) bw = cJSON_GetObjectItem(style, "borderSize");
+        if (!bw) bw = cJSON_GetObjectItem(style, "border-width");
+        parse_layer_border_width(bw, &layer->border);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+    if (cJSON_HasObjectItem(style, "borderStyle") || cJSON_HasObjectItem(style, "border-style")) {
+        cJSON* bs = cJSON_GetObjectItem(style, "borderStyle");
+        if (!bs) bs = cJSON_GetObjectItem(style, "border-style");
+        parse_layer_border_style(bs, &layer->border);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+    if (cJSON_HasObjectItem(style, "borderColor") || cJSON_HasObjectItem(style, "border-color")) {
+        cJSON* bc = cJSON_GetObjectItem(style, "borderColor");
+        if (!bc) bc = cJSON_GetObjectItem(style, "border-color");
+        parse_layer_border_color(bc, &layer->border);
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
+    }
+}
+
 ButtonComponent* button_component_create_from_json(Layer* layer, cJSON* json_obj) {
     if (!layer) {
         return NULL;
@@ -94,12 +216,16 @@ ButtonComponent* button_component_create_from_json(Layer* layer, cJSON* json_obj
             }
         }
 
-        // 检测 bgColor 是否显式设为 transparent
+        // 检测 bgColor 是否显式设为 transparent；可选 hoverColor
         cJSON* style = cJSON_GetObjectItem(json_obj, "style");
         if (style) {
             cJSON* bg = cJSON_GetObjectItem(style, "bgColor");
             if (bg && bg->valuestring && strcmp(bg->valuestring, "transparent") == 0) {
                 component->bg_transparent = 1;
+            }
+            cJSON* hover = cJSON_GetObjectItem(style, "hoverColor");
+            if (hover && hover->valuestring) {
+                parse_color(hover->valuestring, &component->hover_text_color);
             }
         }
 
@@ -118,9 +244,12 @@ ButtonComponent* button_component_create_from_json(Layer* layer, cJSON* json_obj
 
     // 绑定键盘事件处理函数
     layer->handle_key_event = button_component_handle_key_event;
+
+    layer->set_style = button_component_apply_theme_style;
     
     // 设置组件为可聚焦
     layer->focusable = 1;
+    layer->on_destroy = button_layer_destroy;
     
     return component;
 }
@@ -215,11 +344,15 @@ int button_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     }
 
     int is_inside = button_point_inside(layer, event->x, event->y);
+    int was_hover = HAS_STATE(layer, LAYER_STATE_HOVER);
 
     if (is_inside) {
         SET_STATE(layer, LAYER_STATE_HOVER);
     } else {
         CLEAR_STATE(layer, LAYER_STATE_HOVER);
+    }
+    if (was_hover != HAS_STATE(layer, LAYER_STATE_HOVER)) {
+        mark_layer_dirty(layer, DIRTY_TEXT | DIRTY_COLOR);
     }
 
     if (event->phase == POINTER_DOWN) {
@@ -259,21 +392,38 @@ void button_component_render(Layer* layer) {
     Color bg_color;
     int has_bg = 1;
     if (component->bg_transparent) {
-        // 透明背景：正常态不画，交互态用中性半透明叠加色
-        if (HAS_STATE(layer, LAYER_STATE_HOVER) || HAS_STATE(layer, LAYER_STATE_PRESSED) || HAS_STATE(layer, LAYER_STATE_FOCUSED)) {
-            if (HAS_STATE(layer, LAYER_STATE_PRESSED)) {
-                bg_color = (Color){128, 128, 128, 50};
-            } else if (HAS_STATE(layer, LAYER_STATE_HOVER)) {
-                bg_color = (Color){128, 128, 128, 30};
+        /* 透明按钮：hover/press 只叠半透明底，不画边框 */
+        has_bg = 0;
+        if (HAS_STATE(layer, LAYER_STATE_PRESSED)) {
+            if (component->hover_text_color.a > 0) {
+                bg_color = component->hover_text_color;
+                bg_color.a = 64;
             } else {
-                bg_color = (Color){128, 128, 128, 20};
+                bg_color = (Color){255, 255, 255, 56};
+            }
+        } else if (HAS_STATE(layer, LAYER_STATE_HOVER) || HAS_STATE(layer, LAYER_STATE_FOCUSED)) {
+            if (component->hover_text_color.a > 0) {
+                bg_color = component->hover_text_color;
+                bg_color.a = 40;
+            } else {
+                bg_color = (Color){255, 255, 255, 36};
             }
         } else {
-            bg_color = (Color){0, 0, 0, 0};  // 正常态透明
-            has_bg = 0;
+            bg_color = (Color){0, 0, 0, 0};
         }
     } else if (layer->bg_color.a > 0) {
-        bg_color = layer->bg_color;
+        /* 主题/样式写入 layer->bg_color 后，hover/press 用同步过的状态色 */
+        if (HAS_STATE(layer, LAYER_STATE_PRESSED)) {
+            bg_color = component->colors[LAYER_STATE_PRESSED];
+        } else if (HAS_STATE(layer, LAYER_STATE_HOVER)) {
+            bg_color = component->colors[LAYER_STATE_HOVER];
+        } else if (HAS_STATE(layer, LAYER_STATE_FOCUSED)) {
+            bg_color = component->colors[LAYER_STATE_FOCUSED];
+        } else if (HAS_STATE(layer, LAYER_STATE_DISABLED)) {
+            bg_color = component->colors[LAYER_STATE_DISABLED];
+        } else {
+            bg_color = layer->bg_color;
+        }
     } else {
         // 根据状态使用组件默认色
         if (HAS_STATE(layer, LAYER_STATE_PRESSED)) {
@@ -289,42 +439,23 @@ void button_component_render(Layer* layer) {
         }
     }
 
-    // 绘制背景
-    if (bg_color.a > 0) {
-        int drew_rounded_fill = 0;
-        if (has_bg && layer->radius > 0) {
-            /* 带边框路径会一并绘制圆角填充，避免重复叠加圆角纹理 */
-            drew_rounded_fill = 1;
-        }
-        if (!drew_rounded_fill) {
+    // 绘制阴影 + 背景（支持 bgGradient / shadow）
+    if (component->bg_transparent) {
+        if (bg_color.a > 0) {
             if (layer->radius > 0) {
                 backend_render_rounded_rect(&layer->rect, bg_color, layer->radius);
             } else {
                 backend_render_fill_rect(&layer->rect, bg_color);
             }
         }
+    } else if (bg_color.a > 0 || layer->bg_gradient.enabled || layer->shadow.enabled ||
+               layer_border_visible(&layer->border)) {
+        /* Soft UI / border-0：默认无硬边；显式 borderWidth/border 时由 render_layer_background 画 */
+        (void)has_bg;
+        render_layer_background(layer, layer->bg_gradient.enabled ? NULL : &bg_color);
 
-        // 如果启用了毛玻璃效果，在背景色上应用效果（混合模式）
         if (layer->backdrop_filter) {
             backend_render_backdrop_filter(&layer->rect, layer->blur_radius, layer->saturation, layer->brightness);
-        }
-    }
-    
-    // 绘制边框（仅当有背景色时）
-    if (has_bg) {
-        Color border_color = (Color){200, 200, 200, 255};
-        if (HAS_STATE(layer, LAYER_STATE_PRESSED)) {
-            border_color = (Color){100, 100, 100, 255};
-        } else if (HAS_STATE(layer, LAYER_STATE_HOVER)) {
-            border_color = (Color){150, 150, 150, 255};
-        } else if (HAS_STATE(layer, LAYER_STATE_FOCUSED)) {
-            border_color = (Color){50, 150, 255, 255}; // 聚焦状态使用高亮边框
-        }
-        
-        if (layer->radius > 0) {
-            backend_render_rounded_rect_with_border(&layer->rect, bg_color, layer->radius, 1, border_color);
-        } else {
-            backend_render_rect_color(&layer->rect, border_color.r, border_color.g, border_color.b, border_color.a);
         }
     }
     
@@ -339,6 +470,8 @@ void button_component_render(Layer* layer) {
     Color text_color = layer->color;
     if (HAS_STATE(layer, LAYER_STATE_DISABLED)) {
         text_color = (Color){255, 255, 255, 150};
+    } else if (HAS_STATE(layer, LAYER_STATE_HOVER) && component->hover_text_color.a > 0) {
+        text_color = component->hover_text_color;
     }
 
     int text_y_center = layer->rect.y + layer->rect.h / 2;
@@ -400,7 +533,11 @@ void button_component_render(Layer* layer) {
         int icon_x = has_text ? layer->rect.x + pad_h : layer->rect.x + (layer->rect.w - icon_w) / 2;
         int icon_y = text_y_center - icon_h / 2;
         Rect icon_rect = {icon_x, icon_y, icon_w, icon_h};
-        backend_render_text_copy(icon_tex, NULL, &icon_rect);
+        if (component->icon_path) {
+            backend_render_texture_tinted(icon_tex, NULL, &icon_rect, text_color);
+        } else {
+            backend_render_text_copy(icon_tex, NULL, &icon_rect);
+        }
         if (icon_tex_owned) backend_render_text_destroy(icon_tex);
     }
 

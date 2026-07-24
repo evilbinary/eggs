@@ -3,6 +3,8 @@
 
 #include "../ytype.h"
 #include "text_syntax.h"
+#include "text_edit_history.h"
+#include "text_style_runs.h"
 
 typedef struct Layer Layer;
 typedef struct KeyEvent KeyEvent;
@@ -13,6 +15,7 @@ typedef struct {
     // 注意：文本内容现在存储在 layer->text 中，不再使用固定大小的数组
     char placeholder[MAX_TEXT];  // 占位文本
     int cursor_pos;        // 光标位置
+    int cursor_visual_line; // 光标所在视觉行，消除自动换行边界位置歧义
     int selection_start;   // 选择起始位置
     int selection_end;     // 选择结束位置
     int max_length;        // 最大输入长度
@@ -21,6 +24,7 @@ typedef struct {
     int scroll_y;          // 垂直滚动位置
     int line_height;       // 行高
     int multiline;         // 是否为多行模式
+    int wrap;              // 多行时是否按宽度自动换行
     int editable;          // 是否可编辑
     int show_line_numbers; // 是否显示行号
     int line_number_width; // 行号区域宽度
@@ -28,6 +32,7 @@ typedef struct {
     Color line_number_bg_color; // 行号背景颜色
     Color selection_color; // 选中背景颜色
     int is_selecting;       // 是否正在选择文本
+    int pending_line_select; /* 双击：任意拖动则改拖选，抬起未拖才选行 */
     EventHandler on_change; // onChange 回调函数
     char* change_name;        // 用户数据
     int cached_line_height; // 缓存的行高（用于性能优化）
@@ -39,6 +44,13 @@ typedef struct {
     int layout_cache_revision; // 布局缓存对应的文本版本
     int layout_cache_max_width; // 布局缓存对应的最大宽度
     int layout_cache_text_len;  // 布局缓存对应的文本长度
+    TextEditHistory history;
+    int history_suppress;
+    TextStyleRun* style_runs;
+    int style_run_count;
+    uint32_t typing_style;
+    DFont* bold_font_cache;
+    int bold_font_size_cache;
 } TextComponent;
 
 // 函数声明
@@ -50,6 +62,7 @@ void text_component_set_placeholder(TextComponent* component, const char* placeh
 void text_component_set_max_length(TextComponent* component, int max_length);
 void text_component_set_cursor_color(TextComponent* component, Color cursor_color);
 void text_component_set_multiline(TextComponent* component, int multiline);
+void text_component_set_wrap(TextComponent* component, int wrap);
 void text_component_set_editable(TextComponent* component, int editable);
 void text_component_set_show_line_numbers(TextComponent* component, int show_line_numbers);
 void text_component_set_line_number_width(TextComponent* component, int width);
@@ -67,8 +80,9 @@ int text_component_register_event(Layer* layer, const char* event_name, const ch
 void text_component_trigger_on_change(TextComponent* component);
 void text_component_update_scroll_for_cursor(TextComponent* component);
 
-// 通用属性获取函数
+// 通用属性获取 / 设置
 cJSON* text_component_get_property(Layer* layer, const char* property_name);
+int text_component_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating);
 // 辅助函数声明
 int get_line_start(TextComponent* component, int pos);
 int get_line_end(TextComponent* component, int pos);

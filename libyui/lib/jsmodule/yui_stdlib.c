@@ -22,6 +22,7 @@
 
 #include "theme_manager.h"
 #include "layer.h"
+#include "layout.h"
 #include "layer_lifecycle.h"
 #include "cJSON.h"
 
@@ -171,7 +172,7 @@ static JSValue js_set_text(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     if (layer_id && text && g_layer_root ) {
         Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         if (layer) {
-            layer_set_text(layer, text); // 修改为传递 layer 和 text
+            layer_set_text(layer, text);
             printf("YUI: Set text for layer '%s': %s\n", layer_id, text);
             fflush(stdout);
         }
@@ -208,17 +209,45 @@ static JSValue js_get_property(JSContext *ctx, JSValue *this_val, int argc, JSVa
     const char* layer_id = JS_ToCString(ctx, argv[0], &buf1);
     const char* property_name = JS_ToCString(ctx, argv[1], &buf2);
 
-    if (layer_id && property_name) {
-        // 调用 js_common.c 中的函数
-        extern const char* js_module_get_property_value(const char* layer_id, const char* property_name);
-        const char* value = js_module_get_property_value(layer_id, property_name);
+    if (layer_id && property_name && g_layer_root) {
+        // 直接调用 layer_get_property_as_json，避免字符串中转
+        extern cJSON* layer_get_property_as_json(Layer* layer, const char* key);
+        Layer* layer = find_layer_by_id(g_layer_root, layer_id);
         
-        if (value) {
-            JSValue result = JS_NewString(ctx, value);
-            // 释放返回的字符串
-            free((void*)value);
-            return result;
+        JS_FreeCString(ctx, &buf1);
+        JS_FreeCString(ctx, &buf2);
+        
+        if (!layer) {
+            printf("JS: Layer '%s' not found\n", layer_id);
+            return JS_UNDEFINED;
         }
+        
+        cJSON* json_value = layer_get_property_as_json(layer, property_name);
+        if (!json_value) {
+            printf("JS: Property '%s' not found for layer '%s'\n", property_name, layer_id);
+            return JS_UNDEFINED;
+        }
+        
+        JSValue result;
+        if (cJSON_IsString(json_value)) {
+            result = JS_NewString(ctx, json_value->valuestring);
+        } else if (cJSON_IsNumber(json_value)) {
+            result = JS_NewNumber(ctx, json_value->valuedouble);
+        } else if (cJSON_IsBool(json_value)) {
+            result = cJSON_IsTrue(json_value) ? JS_TRUE : JS_FALSE;
+        } else if (cJSON_IsNull(json_value)) {
+            result = JS_NULL;
+        } else if (cJSON_IsArray(json_value) || cJSON_IsObject(json_value)) {
+            // 数组和对象转为 JSON 字符串
+            char* json_str = cJSON_PrintUnformatted(json_value);
+            result = JS_NewString(ctx, json_str);
+            free(json_str);
+        } else {
+            result = JS_UNDEFINED;
+        }
+        
+        cJSON_Delete(json_value);
+        return result;
     }
 
     return JS_UNDEFINED;
@@ -349,10 +378,16 @@ static JSValue js_render_from_json(JSContext *ctx, JSValue *this_val, int argc, 
         return JS_NewInt32(ctx, -4);
     }
 
-    Layer* parent_layer = find_layer_by_id(g_layer_root, layer_id);
-    if (!parent_layer) {
-        printf("YUI: ERROR - Layer '%s' not found\n", layer_id);
-        return JS_NewInt32(ctx, -1);
+    Layer* parent_layer = NULL;
+    if (layer_id[0] == '\0') {
+        parent_layer = g_layer_root;
+    } else {
+        parent_layer = find_layer_by_id(g_layer_root, layer_id);
+        if (!parent_layer) {
+            printf("YUI: WARN - Layer '%s' not found, fallback to root '%s'\n",
+                   layer_id, g_layer_root->id);
+            parent_layer = g_layer_root;
+        }
     }
 
     if (!append && parent_layer->children) {
@@ -498,6 +533,7 @@ static const JSPropDef js_yui[] = {
     JS_CFUNC_DEF("resizeRoot", 2, js_resize_root ),
     JS_CFUNC_DEF("call", 2, js_yui_call ),
     JS_CFUNC_DEF("update", 1, js_yui_update ),
+    JS_CFUNC_DEF("dump", 1, js_yui_dump ),
     JS_CFUNC_DEF("themeLoad", 1, js_yui_themeLoad ),
     JS_CFUNC_DEF("themeSetCurrent", 1, js_yui_themeSetCurrent ),
     JS_CFUNC_DEF("themeUnload", 1, js_yui_themeUnload ),
@@ -566,6 +602,102 @@ return JS_NewCFunctionParams(ctx, JS_CFUNCTION_rectangle_closure_test, argv[0]);
 extern int yui_update(Layer* root, const char* update_json);
 #endif
 
+static int js_yui_dump_bool(JSContext *ctx, JSValue val)
+{
+    if (JS_IsBool(val)) {
+        return JS_VALUE_GET_SPECIAL_VALUE(val) != 0;
+    }
+    if (JS_IsInt(val)) {
+        return JS_VALUE_GET_INT(val) != 0;
+    }
+    return !JS_IsNull(val) && !JS_IsUndefined(val);
+}
+
+static int js_yui_dump_parse_flags(JSContext *ctx, JSValue opts)
+{
+    int flags = 0;
+    JSValue v;
+
+    if (!JS_IsObject(ctx, opts)) {
+        return 0;
+    }
+
+    v = JS_GetPropertyStr(ctx, opts, "style");
+    if (!JS_IsUndefined(v) && !JS_IsNull(v) && js_yui_dump_bool(ctx, v)) {
+        flags |= LAYER_JSON_STYLE;
+    }
+
+    v = JS_GetPropertyStr(ctx, opts, "events");
+    if (!JS_IsUndefined(v) && !JS_IsNull(v) && js_yui_dump_bool(ctx, v)) {
+        flags |= LAYER_JSON_EVENTS;
+    }
+
+    return flags;
+}
+
+/* YUI.dump(id?, opts?) — dump layer tree as JSON string (also prints to stdout) */
+static JSValue js_yui_dump(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+#ifdef STDLIB_BUILD
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+#else
+    const char* layer_id = NULL;
+    JSCStringBuf buf;
+    int flags = 0;
+    int argi = 0;
+    Layer* layer;
+    cJSON* json;
+    char* printed;
+    JSValue result;
+
+    (void)this_val;
+
+    if (argc >= 1 && JS_IsString(ctx, argv[0])) {
+        layer_id = JS_ToCString(ctx, argv[0], &buf);
+        argi = 1;
+    } else if (argc >= 1 && JS_IsObject(ctx, argv[0])) {
+        flags = js_yui_dump_parse_flags(ctx, argv[0]);
+        argi = 1;
+    }
+
+    if (argi < argc && JS_IsObject(ctx, argv[argi])) {
+        flags |= js_yui_dump_parse_flags(ctx, argv[argi]);
+    }
+
+    if (!g_layer_root) {
+        return JS_NULL;
+    }
+
+    if (layer_id && layer_id[0]) {
+        layer = find_layer_by_id(g_layer_root, layer_id);
+        if (!layer) {
+            printf("YUI.dump: layer '%s' not found\n", layer_id);
+            return JS_NULL;
+        }
+    } else {
+        layer = g_layer_root;
+    }
+
+    json = layer_to_json(layer, flags);
+    if (!json) {
+        return JS_NULL;
+    }
+
+    printed = cJSON_Print(json);
+    cJSON_Delete(json);
+    if (!printed) {
+        return JS_NULL;
+    }
+
+    puts(printed);
+    fflush(stdout);
+    result = JS_NewString(ctx, printed);
+    free(printed);
+    return result;
+#endif
+}
+
 // YUI.update() - JSON 增量更新
 static JSValue js_yui_update(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
@@ -579,24 +711,53 @@ static JSValue js_yui_update(JSContext *ctx, JSValue *this_val, int argc, JSValu
 
     JSCStringBuf buf;
     const char* update_json = NULL;
-    int need_free = 0;
-    
-    // mquickjs 只支持字符串参数
-    // 如果 JS 代码需要传入对象，应该在 JS 层调用 JSON.stringify(obj)
+    JSValue stringified = JS_UNDEFINED;
+
     if (JS_IsString(ctx, argv[0])) {
         update_json = JS_ToCString(ctx, argv[0], &buf);
+    } else if (JS_IsObject(ctx, argv[0])) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue json = JS_GetPropertyStr(ctx, global, "JSON");
+        if (!JS_IsUndefined(json) && !JS_IsNull(json)) {
+            JSValue fn = JS_GetPropertyStr(ctx, json, "stringify");
+            if (!JS_IsUndefined(fn) && !JS_IsNull(fn)) {
+                if (!JS_StackCheck(ctx, 3)) {
+                    JS_PushArg(ctx, argv[0]);   // arg
+                    JS_PushArg(ctx, fn);         // func
+                    JS_PushArg(ctx, json);       // this
+                    stringified = JS_Call(ctx, 1);
+                }
+                JS_FreeValue(ctx, fn);
+            }
+        }
+        JS_FreeValue(ctx, json);
+        JS_FreeValue(ctx, global);
+        if (JS_IsException(stringified)) {
+            JSValue exc = JS_GetException(ctx);
+            fprintf(stderr, "YUI.update: JSON.stringify failed\n");
+            JS_FreeValue(ctx, exc);
+            JS_FreeValue(ctx, stringified);
+            return JS_NewInt32(ctx, -1);
+        }
+        if (JS_IsString(ctx, stringified)) {
+            update_json = JS_ToCString(ctx, stringified, &buf);
+        }
     } else {
-        printf("YUI.update: 参数必须是 JSON 字符串。如果要传对象，请在 JS 代码中使用 JSON.stringify(obj)\n");
+        printf("YUI.update: 参数必须是 JSON 字符串或对象/数组\n");
         return JS_NewInt32(ctx, -1);
     }
 
+    int result = -1;
     if (update_json && g_layer_root) {
-        int result = yui_update(g_layer_root, update_json);
-        return JS_NewInt32(ctx, result);
+        result = yui_update(g_layer_root, update_json);
+    } else {
+        printf("YUI.update: 无效的参数或未初始化\n");
     }
 
-    printf("YUI.update: 无效的参数或未初始化\n");
-    return JS_NewInt32(ctx, -1);
+    if (!JS_IsUndefined(stringified)) {
+        JS_FreeValue(ctx, stringified);
+    }
+    return JS_NewInt32(ctx, result);
 #endif
 }
 

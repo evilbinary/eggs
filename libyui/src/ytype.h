@@ -69,6 +69,18 @@ typedef int SDL_EventType;
 #ifndef SDLK_x
 #define SDLK_x 'x'
 #endif
+#ifndef SDLK_z
+#define SDLK_z 'z'
+#endif
+#ifndef SDLK_y
+#define SDLK_y 'y'
+#endif
+#ifndef SDLK_b
+#define SDLK_b 'b'
+#endif
+#ifndef SDLK_i
+#define SDLK_i 'i'
+#endif
 #ifndef SDLK_UP
 #define SDLK_UP 1073741906
 #endif
@@ -90,8 +102,14 @@ typedef int SDL_EventType;
 #ifndef SDLK_KP_ENTER
 #define SDLK_KP_ENTER 1073741912
 #endif
+#ifndef SDLK_F1
+#define SDLK_F1 1073741882
+#endif
 #ifndef SDLK_F2
-#define SDLK_F2 1073741911
+#define SDLK_F2 1073741883
+#endif
+#ifndef SDLK_F12
+#define SDLK_F12 1073741893
 #endif
 
 #ifndef KMOD_NONE
@@ -114,6 +132,15 @@ typedef int SDL_EventType;
 #endif
 #ifndef KMOD_CTRL
 #define KMOD_CTRL (KMOD_LCTRL | KMOD_RCTRL)
+#endif
+#ifndef KMOD_LALT
+#define KMOD_LALT 0x0100
+#endif
+#ifndef KMOD_RALT
+#define KMOD_RALT 0x0200
+#endif
+#ifndef KMOD_ALT
+#define KMOD_ALT (KMOD_LALT | KMOD_RALT)
 #endif
 
 typedef struct Rect {
@@ -222,6 +249,7 @@ typedef struct PointerEvent {
 
 typedef struct Layer Layer;
 typedef struct KeyEvent KeyEvent;
+typedef struct WindowEvent WindowEvent;
 
 #ifdef YUI_ANIMATION
 #include "animate.h"
@@ -386,6 +414,7 @@ typedef struct Scrollbar {
     int visible;
     int thickness;
     Color color;
+    Color track_color;
     int is_dragging;  // 滚动条是否被拖动
     int drag_offset;  // 拖动时鼠标相对于滚动条顶部的偏移
     ScrollbarDirection direction;  // 滚动条方向
@@ -423,6 +452,25 @@ typedef struct ResizeEvent {
     float scale_x;
     float scale_y;
 } ResizeEvent;
+
+/* OS 窗口生命周期（与 Layer ResizeEvent 分离） */
+typedef enum {
+    WINDOW_RESIZED = 0,
+    WINDOW_FOCUS_GAINED,
+    WINDOW_FOCUS_LOST,
+    WINDOW_MINIMIZED,
+    WINDOW_RESTORED,
+    WINDOW_EXPOSED,
+    WINDOW_MOVED
+} WindowEventType;
+
+typedef struct WindowEvent {
+    WindowEventType type;
+    int width;
+    int height;
+    int x;
+    int y;
+} WindowEvent;
 
 #define MAX_EVENT 512
 
@@ -477,6 +525,38 @@ typedef enum {
 #define SET_STATE(layer, st) (layer->state |= (st))
 #define CLEAR_STATE(layer, st) (layer->state &= ~(st))
 #define CLEAR_ALL_STATES(layer) (layer->state = LAYER_STATE_NORMAL)
+
+/* CSS box-shadow: offset-x offset-y blur-radius spread-radius color */
+typedef struct LayerShadow {
+    unsigned char enabled;
+    int offset_x;
+    int offset_y;
+    int blur;
+    int spread;
+    Color color;
+} LayerShadow;
+
+#define LAYER_GRADIENT_MAX_STOPS 8
+typedef struct LayerGradient {
+    unsigned char enabled;
+    unsigned char vertical; /* 1=to bottom, 0=to right */
+    int count;
+    Color colors[LAYER_GRADIENT_MAX_STOPS];
+} LayerGradient;
+
+/* CSS border: width style color */
+typedef enum {
+    LAYER_BORDER_NONE = 0,
+    LAYER_BORDER_SOLID = 1,
+    LAYER_BORDER_DASHED = 2,
+    LAYER_BORDER_DOTTED = 3
+} LayerBorderStyle;
+
+typedef struct LayerBorder {
+    int width;
+    LayerBorderStyle style;
+    Color color;
+} LayerBorder;
 
 typedef  int (*register_event_fun_t)(Layer* layer, const char* event_name, const char* event_func_name, EventHandler event_handler);
 typedef  cJSON* (*get_property_fun_t)(Layer* layer, const char* property_name);
@@ -594,6 +674,13 @@ typedef struct Layer {
     int blur_radius;         // 模糊半径
     float saturation;         // 饱和度 (1.0为正常，>1.0为更饱和，<1.0为不饱和)
     float brightness;        // 亮度 (1.0为正常，>1.0为更亮，<1.0为更暗)
+
+    /* box-shadow: offset-x offset-y blur spread color */
+    LayerShadow shadow;
+    /* 背景线性渐变（启用时优先于纯色 bgColor） */
+    LayerGradient bg_gradient;
+    /* border / border-width / border-style / border-color */
+    LayerBorder border;
     
     // 增量更新支持：脏标记
     unsigned int dirty_flags; // 标记哪些属性被修改

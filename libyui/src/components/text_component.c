@@ -6,6 +6,8 @@
 #include "../backend.h"
 #include "../render.h"
 #include "../util.h"
+#include "text_edit_history.h"
+#include "text_style_runs.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -79,6 +81,180 @@ static int text_component_get_left_padding(TextComponent* component) {
 }
 
 static void text_component_get_content_rect(TextComponent* component, Layer* layer, Rect* out);
+static void text_component_get_layout_line_range(TextComponent* component, const char* text,
+                                                 int text_len, int line_index,
+                                                 int* out_start, int* out_end);
+static void text_component_insert_text(TextComponent* component, const char* text);
+static void text_component_delete_selection(TextComponent* component);
+static void text_component_delete_prev_char(TextComponent* component);
+static void text_component_delete_next_char(TextComponent* component);
+
+static TextEditSnapshot* text_component_capture_snapshot(TextComponent* component)
+{
+    const char* text;
+    if (!component || !component->layer) {
+        return NULL;
+    }
+    text = component->layer->text ? component->layer->text : "";
+    return text_edit_snapshot_create(text,
+                                    component->cursor_pos,
+                                    component->selection_start,
+                                    component->selection_end,
+                                    component->style_runs,
+                                    component->style_run_count,
+                                    component->typing_style);
+}
+
+static void text_component_apply_snapshot(TextComponent* component, TextEditSnapshot* snap)
+{
+    if (!component || !snap) {
+        return;
+    }
+    layer_set_text(component->layer, snap->text ? snap->text : "");
+    component->cursor_pos = snap->cursor_pos;
+    component->selection_start = snap->selection_start;
+    component->selection_end = snap->selection_end;
+    component->typing_style = snap->typing_style;
+    text_style_runs_free(component->style_runs);
+    component->style_runs = text_style_runs_clone(snap->runs, snap->run_count);
+    component->style_run_count = component->style_runs ? snap->run_count : 0;
+    component->cursor_visual_line = -1;
+    text_component_invalidate_layout(component);
+    text_component_update_content_height(component);
+    text_component_update_scroll_for_cursor(component);
+    text_component_trigger_on_change(component);
+}
+
+static void text_component_begin_edit(TextComponent* component, TextEditKind kind)
+{
+    TextEditSnapshot* snap;
+    if (!component) {
+        return;
+    }
+    if (component->history_suppress > 0) {
+        return;
+    }
+    snap = text_component_capture_snapshot(component);
+    if (!snap) {
+        return;
+    }
+    text_edit_history_before_edit(&component->history, snap, kind, backend_get_ticks());
+}
+
+static void text_component_history_suppress_begin(TextComponent* component)
+{
+    if (component) {
+        component->history_suppress++;
+    }
+}
+
+static void text_component_history_suppress_end(TextComponent* component)
+{
+    if (component && component->history_suppress > 0) {
+        component->history_suppress--;
+    }
+}
+
+static int text_component_do_undo(TextComponent* component)
+{
+    TextEditSnapshot* current;
+    TextEditSnapshot* prev;
+    if (!component || !text_edit_history_can_undo(&component->history)) {
+        return 0;
+    }
+    current = text_component_capture_snapshot(component);
+    prev = text_edit_history_undo(&component->history, current);
+    if (!prev) {
+        return 0;
+    }
+    text_component_history_suppress_begin(component);
+    text_component_apply_snapshot(component, prev);
+    text_component_history_suppress_end(component);
+    text_edit_snapshot_free(prev);
+    return 1;
+}
+
+static int text_component_do_redo(TextComponent* component)
+{
+    TextEditSnapshot* current;
+    TextEditSnapshot* next;
+    if (!component || !text_edit_history_can_redo(&component->history)) {
+        return 0;
+    }
+    current = text_component_capture_snapshot(component);
+    next = text_edit_history_redo(&component->history, current);
+    if (!next) {
+        return 0;
+    }
+    text_component_history_suppress_begin(component);
+    text_component_apply_snapshot(component, next);
+    text_component_history_suppress_end(component);
+    text_edit_snapshot_free(next);
+    return 1;
+}
+
+static void text_component_normalize_selection_range(TextComponent* component, int* start, int* end)
+{
+    int s;
+    int e;
+    int text_len;
+    if (!component || !start || !end) {
+        return;
+    }
+    s = component->selection_start;
+    e = component->selection_end;
+    if (s < 0 || e < 0) {
+        *start = component->cursor_pos;
+        *end = component->cursor_pos;
+        return;
+    }
+    if (s > e) {
+        int t = s;
+        s = e;
+        e = t;
+    }
+    text_len = component->layer && component->layer->text ? (int)strlen(component->layer->text) : 0;
+    if (s < 0) s = 0;
+    if (e > text_len) e = text_len;
+    *start = s;
+    *end = e;
+}
+
+static int text_component_toggle_style(TextComponent* component, uint32_t flags)
+{
+    int start;
+    int end;
+    if (!component || flags == 0) {
+        return 0;
+    }
+    text_component_normalize_selection_range(component, &start, &end);
+    text_component_begin_edit(component, TEXT_EDIT_STYLE);
+    if (start < end) {
+        text_style_runs_toggle(&component->style_runs, &component->style_run_count, start, end, flags);
+    } else {
+        component->typing_style ^= flags;
+    }
+    mark_layer_dirty(component->layer, DIRTY_TEXT);
+    return 1;
+}
+
+static DFont* text_component_font_for_flags(TextComponent* component, uint32_t flags)
+{
+    Font* font;
+    if (!component || !component->layer || !component->layer->font) {
+        return NULL;
+    }
+    font = component->layer->font;
+    if (!(flags & TEXT_STYLE_BOLD)) {
+        return font->default_font;
+    }
+    if (component->bold_font_cache && component->bold_font_size_cache == font->size) {
+        return component->bold_font_cache;
+    }
+    component->bold_font_cache = backend_load_font_with_weight(font->path, font->size, "bold");
+    component->bold_font_size_cache = font->size;
+    return component->bold_font_cache ? component->bold_font_cache : font->default_font;
+}
 
 static int text_component_get_line_height(TextComponent* component) {
     if (!component || !component->layer) return 20;
@@ -100,14 +276,177 @@ static int text_component_get_line_height(TextComponent* component) {
     return line_height;
 }
 
+static unsigned int text_component_codepoint_at(const char* s, int* len) {
+    const unsigned char* u = (const unsigned char*)s;
+    int clen = utf8_char_len_at(s);
+    unsigned int cp = 0;
+
+    if (len) {
+        *len = clen;
+    }
+    if (!u || clen <= 0) {
+        return 0;
+    }
+    if (clen == 1) {
+        return u[0];
+    }
+    if (clen == 2) {
+        cp = ((unsigned int)(u[0] & 0x1F) << 6) |
+             (unsigned int)(u[1] & 0x3F);
+    } else if (clen == 3) {
+        cp = ((unsigned int)(u[0] & 0x0F) << 12) |
+             ((unsigned int)(u[1] & 0x3F) << 6) |
+             (unsigned int)(u[2] & 0x3F);
+    } else if (clen == 4) {
+        cp = ((unsigned int)(u[0] & 0x07) << 18) |
+             ((unsigned int)(u[1] & 0x3F) << 12) |
+             ((unsigned int)(u[2] & 0x3F) << 6) |
+             (unsigned int)(u[3] & 0x3F);
+    }
+    return cp;
+}
+
+static int text_component_is_grapheme_suffix(unsigned int cp) {
+    return cp == 0xFE0E || cp == 0xFE0F || cp == 0x20E3 ||
+           (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
+           (cp >= 0x0300 && cp <= 0x036F);
+}
+
+static int text_component_is_emoji_codepoint(unsigned int cp) {
+    return (cp >= 0x1F300 && cp <= 0x1FAFF) ||
+           (cp >= 0x2600 && cp <= 0x27BF) ||
+           cp == 0xFE0F || cp == 0x200D;
+}
+
+static int text_component_estimate_cluster_width(TextComponent* component, unsigned int cp) {
+    int font_size = 14;
+    if (component && component->layer && component->layer->font &&
+        component->layer->font->size > 0) {
+        font_size = component->layer->font->size;
+    }
+    if (text_component_is_emoji_codepoint(cp)) {
+        return font_size;
+    }
+    if (cp >= 0x80) {
+        return font_size;
+    }
+    return (font_size + 1) / 2;
+}
+
+static int text_component_grapheme_end(const char* text, int start, int end) {
+    int pos = start;
+    int clen;
+    unsigned int cp;
+
+    if (pos >= end) {
+        return pos;
+    }
+    clen = utf8_char_len_at(text + pos);
+    if (clen <= 0) {
+        return pos + 1;
+    }
+    pos += clen;
+    while (pos < end) {
+        cp = text_component_codepoint_at(text + pos, &clen);
+        if (clen <= 0) {
+            break;
+        }
+        if (text_component_is_grapheme_suffix(cp)) {
+            pos += clen;
+            continue;
+        }
+        if (cp == 0x200D) {
+            pos += clen;
+            if (pos >= end) {
+                break;
+            }
+            clen = utf8_char_len_at(text + pos);
+            if (clen <= 0) {
+                break;
+            }
+            pos += clen;
+            continue;
+        }
+        break;
+    }
+    return pos;
+}
+
 static int text_component_measure_width(TextComponent* component, const char* text, int start, int end) {
+    int measured;
+    int pos;
+    int estimated = 0;
+
     if (!component || !component->layer || !component->layer->font || !component->layer->font->default_font) {
         return 0;
     }
-    return text_syntax_measure_width(component->layer->font->default_font, text, start, end, component->layer->color);
+    if (start >= end) {
+        return 0;
+    }
+
+    measured = text_syntax_measure_range(component->layer->font->default_font, text, start, end,
+                                         &component->syntax_config);
+
+    pos = start;
+    while (pos < end) {
+        int clen;
+        unsigned int cp = text_component_codepoint_at(text + pos, &clen);
+        int gend = text_component_grapheme_end(text, pos, end);
+        if (gend <= pos) {
+            gend = pos + (clen > 0 ? clen : 1);
+        }
+        estimated += text_component_estimate_cluster_width(component, cp);
+        pos = gend;
+    }
+
+    /*
+     * backend_render_texture() is also what the normal rendering path uses,
+     * so its width is the only reliable width for wrapping.  The estimate is
+     * a fallback for backends that cannot create a texture for this text.
+     */
+    if (measured > 0) {
+        return measured;
+    }
+    return estimated;
+}
+
+static int text_component_grapheme_safe_end(const char* text, int start, int pos, int line_end) {
+    int clen;
+    unsigned int cp;
+
+    if (pos <= start || pos >= line_end) {
+        return pos;
+    }
+
+    while (pos < line_end) {
+        cp = text_component_codepoint_at(text + pos, &clen);
+        if (clen <= 0) {
+            break;
+        }
+        if (text_component_is_grapheme_suffix(cp)) {
+            pos += clen;
+            continue;
+        }
+        if (cp == 0x200D) {
+            pos += clen;
+            if (pos < line_end) {
+                clen = utf8_char_len_at(text + pos);
+                if (clen <= 0) {
+                    break;
+                }
+                pos += clen;
+            }
+            continue;
+        }
+        break;
+    }
+    return pos;
 }
 
 static int text_component_find_wrap_end(const char* text, int start, int line_end, int max_width, TextComponent* component) {
+    int pos;
+    int clen;
+
     if (start >= line_end) return start;
     if (text_component_measure_width(component, text, start, line_end) <= max_width) {
         return line_end;
@@ -122,7 +461,42 @@ static int text_component_find_wrap_end(const char* text, int start, int line_en
             hi = mid;
         }
     }
-    return lo - 1;
+    /* 二分按字节，结果对齐到 UTF-8 字符边界，避免中文截断乱码 */
+    pos = lo - 1;
+    if (pos < start) pos = start;
+    pos = start + utf8_safe_prefix_bytes(text + start, pos - start);
+    pos = text_component_grapheme_safe_end(text, start, pos, line_end);
+    if (pos > line_end) {
+        pos = line_end;
+    }
+
+    /*
+     * The binary search probes byte offsets, which can land inside UTF-8
+     * sequences.  Fill forward from the resulting valid grapheme boundary
+     * using real measurements, so a valid character is never left behind
+     * merely because an intermediate probe was an invalid UTF-8 fragment.
+     */
+    while (pos < line_end) {
+        int next = text_component_grapheme_end(text, pos, line_end);
+        if (next <= pos ||
+            text_component_measure_width(component, text, start, next) > max_width) {
+            break;
+        }
+        pos = next;
+    }
+
+    if (pos <= start) {
+        pos = text_component_grapheme_end(text, start, line_end);
+        if (pos <= start) {
+            clen = utf8_char_len_at(text + start);
+            if (clen <= 0) clen = 1;
+            pos = start + clen;
+        }
+        if (pos > line_end) {
+            pos = line_end;
+        }
+    }
+    return pos;
 }
 
 void text_component_invalidate_layout(TextComponent* component) {
@@ -160,7 +534,7 @@ static void text_component_ensure_layout(TextComponent* component, int max_width
 
     int count = 0;
     int current_pos = 0;
-    while (current_pos <= text_len) {
+    while (current_pos < text_len) {
         if (count >= capacity) {
             capacity *= 2;
             int* grown = (int*)realloc(starts, sizeof(int) * (size_t)capacity);
@@ -168,25 +542,45 @@ static void text_component_ensure_layout(TextComponent* component, int max_width
             starts = grown;
         }
         starts[count++] = current_pos;
-        if (current_pos >= text_len) break;
 
         int line_end = current_pos;
         while (line_end < text_len && text[line_end] != '\n') {
             line_end++;
         }
 
-        int split_pos = text_component_find_wrap_end(text, current_pos, line_end, max_width, component);
-        if (split_pos <= current_pos) {
-            split_pos = current_pos + 1;
-        }
-        if (split_pos < line_end) {
-            current_pos = split_pos;
-            continue;
+        if (component->wrap) {
+            int split_pos = text_component_find_wrap_end(text, current_pos, line_end, max_width, component);
+            if (split_pos <= current_pos) {
+                int clen = utf8_char_len_at(text + current_pos);
+                split_pos = current_pos + (clen > 0 ? clen : 1);
+            }
+            if (split_pos < line_end) {
+                current_pos = split_pos;
+                continue;
+            }
         }
         if (line_end < text_len && text[line_end] == '\n') {
             current_pos = line_end + 1;
         } else {
             current_pos = line_end;
+        }
+    }
+
+    /*
+     * A trailing empty visual line exists only for empty text or a final
+     * explicit newline.  Adding one after every non-empty line made the
+     * cursor and content height one line too large when wrap was disabled.
+     */
+    if (text_len == 0 || text[text_len - 1] == '\n') {
+        if (count >= capacity) {
+            int* grown = (int*)realloc(starts, sizeof(int) * (size_t)(capacity + 1));
+            if (grown) {
+                starts = grown;
+                capacity++;
+            }
+        }
+        if (count < capacity) {
+            starts[count++] = text_len;
         }
     }
 
@@ -204,6 +598,20 @@ static int text_component_count_visual_lines_in_range(TextComponent* component, 
     char* text = component->layer->text;
     if (start >= logical_end) return 1;
 
+    if (!component->wrap) {
+        int lines = 0;
+        int pos = start;
+        while (pos < logical_end) {
+            int next = pos;
+            while (next < logical_end && text[next] != '\n') {
+                next++;
+            }
+            lines++;
+            pos = (next < logical_end && text[next] == '\n') ? next + 1 : next;
+        }
+        return lines > 0 ? lines : 1;
+    }
+
     int width = text_component_measure_width(component, text, start, logical_end);
     if (width <= max_width) return 1;
 
@@ -211,11 +619,174 @@ static int text_component_count_visual_lines_in_range(TextComponent* component, 
     int pos = start;
     while (pos < logical_end) {
         int split_pos = text_component_find_wrap_end(text, pos, logical_end, max_width, component);
-        if (split_pos <= pos) split_pos = pos + 1;
+        if (split_pos <= pos) {
+            int clen = utf8_char_len_at(text + pos);
+            split_pos = pos + (clen > 0 ? clen : 1);
+        }
         lines++;
         pos = split_pos;
     }
     return lines > 0 ? lines : 1;
+}
+
+static int text_component_render_text_cluster_font(TextComponent* component, DFont* font,
+                                                   const char* text, int start, int end,
+                                                   int x, int y) {
+    int len;
+    char* buf;
+    Texture* tex;
+    int width = 0;
+    int height = 0;
+    Rect rect;
+    int draw_w = 0;
+
+    if (!component || !component->layer || !font) {
+        return 0;
+    }
+    if (start >= end) {
+        return 0;
+    }
+
+    len = end - start;
+    buf = (char*)malloc((size_t)len + 1);
+    if (!buf) {
+        return 0;
+    }
+    memcpy(buf, text + start, (size_t)len);
+    buf[len] = '\0';
+    tex = backend_render_texture(font, buf, component->layer->color);
+    free(buf);
+    if (!tex) {
+        return 0;
+    }
+    backend_query_texture(tex, NULL, NULL, &width, &height);
+    draw_w = width / yui_density;
+    if (draw_w < 1) {
+        draw_w = 1;
+    }
+    rect = (Rect){x, y, draw_w, height / yui_density};
+    backend_render_text_copy(tex, NULL, &rect);
+    backend_render_text_destroy(tex);
+    return draw_w;
+}
+
+static int text_component_render_text_cluster(TextComponent* component, const char* text,
+                                               int start, int end, int x, int y) {
+    if (!component || !component->layer || !component->layer->font || !component->layer->font->default_font) {
+        return 0;
+    }
+    return text_component_render_text_cluster_font(component, component->layer->font->default_font,
+                                                   text, start, end, x, y);
+}
+
+static void text_component_render_text_segment_graphemes_font(TextComponent* component, DFont* font,
+                                                             const char* text, int start, int end,
+                                                             int x, int y) {
+    int pos = start;
+    int cursor_x = x;
+
+    while (pos < end) {
+        int clen;
+        unsigned int cp;
+        int gend = text_component_grapheme_end(text, pos, end);
+        int advance;
+
+        if (gend <= pos) {
+            clen = utf8_char_len_at(text + pos);
+            gend = pos + (clen > 0 ? clen : 1);
+        }
+        {
+            int drawn_w = text_component_render_text_cluster_font(component, font, text, pos, gend,
+                                                                  cursor_x, y);
+            if (drawn_w > 0) {
+                cursor_x += drawn_w;
+            } else {
+                cp = text_component_codepoint_at(text + pos, &clen);
+                advance = text_component_estimate_cluster_width(component, cp);
+                if (advance < 1) {
+                    advance = 1;
+                }
+                cursor_x += advance;
+            }
+        }
+        pos = gend;
+    }
+}
+
+static void text_component_render_text_segment_graphemes(TextComponent* component, const char* text,
+                                                       int start, int end, int x, int y) {
+    if (!component || !component->layer || !component->layer->font || !component->layer->font->default_font) {
+        return;
+    }
+    text_component_render_text_segment_graphemes_font(component, component->layer->font->default_font,
+                                                      text, start, end, x, y);
+}
+
+static int text_component_style_seg_end(TextComponent* component, int start, int end)
+{
+    int i;
+    int seg_end = end;
+    uint32_t flags;
+
+    if (!component || start >= end) {
+        return end;
+    }
+    flags = text_style_runs_flags_at(component->style_runs, component->style_run_count, start);
+    for (i = 0; i < component->style_run_count; i++) {
+        TextStyleRun* r = &component->style_runs[i];
+        if (r->end <= start || r->start >= end) {
+            continue;
+        }
+        if (r->start > start && r->start < seg_end) {
+            seg_end = r->start;
+        }
+        if (start >= r->start && start < r->end) {
+            if (r->end < seg_end) {
+                seg_end = r->end;
+            }
+            if (r->flags != flags) {
+                /* should not happen for flags_at, keep going */
+            }
+        }
+    }
+    if (seg_end <= start) {
+        seg_end = start + 1;
+    }
+    if (seg_end > end) {
+        seg_end = end;
+    }
+    return seg_end;
+}
+
+static void text_component_render_text_segment_plain(TextComponent* component, DFont* font,
+                                                    const char* text, int start, int end,
+                                                    int x, int y) {
+    int len;
+    char* buf;
+    Texture* tex;
+
+    if (!component || !font || start >= end) {
+        return;
+    }
+
+    len = end - start;
+    buf = (char*)malloc((size_t)len + 1);
+    if (!buf) return;
+    memcpy(buf, text + start, (size_t)len);
+    buf[len] = '\0';
+    tex = backend_render_texture(font, buf, component->layer->color);
+    free(buf);
+    if (!tex) {
+        text_component_render_text_segment_graphemes_font(component, font, text, start, end, x, y);
+        return;
+    }
+    {
+        int width = 0, height = 0;
+        backend_query_texture(tex, NULL, NULL, &width, &height);
+        Rect rect = {x, y, width / yui_density, height / yui_density};
+        backend_render_text_copy(tex, NULL, &rect);
+        backend_render_text_destroy(tex);
+    }
 }
 
 static void text_component_render_text_segment(TextComponent* component, const char* text,
@@ -225,39 +796,72 @@ static void text_component_render_text_segment(TextComponent* component, const c
     }
     if (start >= end) return;
 
-    if (component->syntax_config.language != TEXT_SYNTAX_NONE) {
+    if (component->syntax_config.lang != NULL) {
         text_syntax_render_range(component->layer->font->default_font, text, start, end,
                                  &component->syntax_config, x, y);
         return;
     }
 
-    int len = end - start;
-    char* buf = (char*)malloc((size_t)len + 1);
-    if (!buf) return;
-    memcpy(buf, text + start, (size_t)len);
-    buf[len] = '\0';
-    Texture* tex = backend_render_texture(component->layer->font->default_font, buf, component->layer->color);
-    free(buf);
-    if (!tex) return;
-    int width = 0, height = 0;
-    backend_query_texture(tex, NULL, NULL, &width, &height);
-    Rect rect = {x, y, width / yui_density, height / yui_density};
-    backend_render_text_copy(tex, NULL, &rect);
-    backend_render_text_destroy(tex);
-}
+    if (component->style_run_count > 0) {
+        int pos = start;
+        int cursor_x = x;
+        while (pos < end) {
+            uint32_t flags = text_style_runs_flags_at(component->style_runs,
+                                                     component->style_run_count, pos);
+            int seg_end = text_component_style_seg_end(component, pos, end);
+            DFont* font = text_component_font_for_flags(component, flags);
+            int len = seg_end - pos;
+            char* buf;
+            Texture* tex;
+            if (!font) {
+                font = component->layer->font->default_font;
+            }
+            buf = (char*)malloc((size_t)len + 1);
+            if (!buf) {
+                break;
+            }
+            memcpy(buf, text + pos, (size_t)len);
+            buf[len] = '\0';
+            tex = backend_render_texture(font, buf, component->layer->color);
+            free(buf);
+            if (!tex) {
+                text_component_render_text_segment_graphemes_font(component, font, text, pos, seg_end,
+                                                                  cursor_x, y);
+                /* approximate advance for next piece */
+                {
+                    int approx = 0;
+                    int p = pos;
+                    while (p < seg_end) {
+                        int clen = 0;
+                        unsigned int cp = text_component_codepoint_at(text + p, &clen);
+                        int adv = text_component_estimate_cluster_width(component, cp);
+                        if (adv < 1) adv = 1;
+                        approx += adv;
+                        p += clen > 0 ? clen : 1;
+                    }
+                    cursor_x += approx;
+                }
+            } else {
+                int width = 0, height = 0;
+                backend_query_texture(tex, NULL, NULL, &width, &height);
+                Rect rect = {cursor_x, y, width / yui_density, height / yui_density};
+                backend_render_text_copy(tex, NULL, &rect);
+                backend_render_text_destroy(tex);
+                cursor_x += width / yui_density;
+            }
+            pos = seg_end;
+        }
+        return;
+    }
 
-static TextSyntaxLanguage text_component_parse_syntax_language(const char* language) {
-    if (!language || language[0] == '\0') return TEXT_SYNTAX_NONE;
-    if (strcmp(language, "json") == 0) return TEXT_SYNTAX_JSON;
-    if (strcmp(language, "sql") == 0) return TEXT_SYNTAX_SQL;
-    if (strcmp(language, "markdown") == 0 || strcmp(language, "md") == 0) return TEXT_SYNTAX_MARKDOWN;
-    return TEXT_SYNTAX_NONE;
+    text_component_render_text_segment_plain(component, component->layer->font->default_font,
+                                             text, start, end, x, y);
 }
 
 void text_component_set_syntax_highlight(TextComponent* component, const char* language) {
     if (!component) return;
-    TextSyntaxLanguage lang = text_component_parse_syntax_language(language);
-    text_syntax_config_init(&component->syntax_config, lang, component->layer ? component->layer->color : (Color){0, 0, 0, 255});
+    text_syntax_config_init(&component->syntax_config, language,
+                            component->layer ? component->layer->color : (Color){0, 0, 0, 255});
 }
 
 static void text_component_parse_syntax_colors(TextComponent* component, cJSON* colors_obj) {
@@ -386,6 +990,12 @@ static void text_component_apply_theme_style(Layer* layer, cJSON* style) {
 }
 
 // 创建文本组件
+static void text_layer_destroy(Layer* layer) {
+    if (!layer || !layer->component) return;
+    text_component_destroy((TextComponent*)layer->component);
+    layer->component = NULL;
+}
+
 TextComponent* text_component_create(Layer* layer) {
     TextComponent* component = (TextComponent*)malloc(sizeof(TextComponent));
     memset(component, 0, sizeof(TextComponent));
@@ -397,6 +1007,7 @@ TextComponent* text_component_create(Layer* layer) {
     // 文本内容现在存储在 layer->text 中，不需要初始化 component->text
     component->placeholder[0] = '\0';
     component->cursor_pos = 0;
+    component->cursor_visual_line = -1;
     component->selection_start = -1;
     component->selection_end = -1;
     component->max_length = MAX_TEXT * 4;
@@ -405,6 +1016,7 @@ TextComponent* text_component_create(Layer* layer) {
     component->scroll_y = 0;
     component->line_height = 20;
     component->multiline = 0;
+    component->wrap = 1;
     component->editable = 1;  // 默认设置为可编辑状态
     component->show_line_numbers = 0;  // 默认不显示行号
     component->line_number_width = 40;  // 默认行号区域宽度
@@ -412,6 +1024,7 @@ TextComponent* text_component_create(Layer* layer) {
     component->line_number_bg_color = (Color){30, 30, 30, 255};  // 默认行号背景颜色
     component->selection_color = (Color){70, 130, 180, 100};  // 默认选中颜色（半透明蓝色）
     component->is_selecting = 0;  // 默认不在选择状态
+    component->pending_line_select = 0;
     component->cached_line_height = 0;  // 行高缓存初始化为0（无效）
     component->line_height_valid = 0;  // 标记缓存无效
     component->text_revision = 0;
@@ -420,7 +1033,14 @@ TextComponent* text_component_create(Layer* layer) {
     component->layout_cache_revision = -1;
     component->layout_cache_max_width = 0;
     component->layout_cache_text_len = -1;
-    text_syntax_config_init(&component->syntax_config, TEXT_SYNTAX_NONE, layer->color);
+    text_edit_history_init(&component->history, 80);
+    component->history_suppress = 0;
+    component->style_runs = NULL;
+    component->style_run_count = 0;
+    component->typing_style = 0;
+    component->bold_font_cache = NULL;
+    component->bold_font_size_cache = 0;
+    text_syntax_config_init(&component->syntax_config, NULL, layer->color);
     
     // 初始化图层的文本字段
     if (!layer->text) {
@@ -437,7 +1057,9 @@ TextComponent* text_component_create(Layer* layer) {
     layer->handle_pointer_event = text_component_handle_pointer_event;
     layer->register_event = text_component_register_event;
     layer->get_property = text_component_get_property;
+    layer->set_property = text_component_set_property_from_json;
     layer->set_style = text_component_apply_theme_style;
+    layer->on_destroy = text_layer_destroy;
 
     return component;
 }
@@ -467,6 +1089,11 @@ TextComponent* text_component_create_from_json(Layer* layer,cJSON* json_obj){
     // 解析multiline属性
     if (cJSON_HasObjectItem(json_obj, "multiline")) {
         text_component_set_multiline(layer->component, cJSON_IsTrue(cJSON_GetObjectItem(json_obj, "multiline")));
+    }
+
+    // 解析 wrap 属性：多行时是否按宽度自动换行，默认 true
+    if (cJSON_HasObjectItem(json_obj, "wrap")) {
+        text_component_set_wrap(layer->component, cJSON_IsTrue(cJSON_GetObjectItem(json_obj, "wrap")));
     }
     
     // 解析editable属性
@@ -530,6 +1157,14 @@ TextComponent* text_component_create_from_json(Layer* layer,cJSON* json_obj){
 void text_component_destroy(TextComponent* component) {
     if (component) {
         text_component_free_layout(component);
+        text_edit_history_free(&component->history);
+        text_style_runs_free(component->style_runs);
+        component->style_runs = NULL;
+        component->style_run_count = 0;
+        if (component->change_name) {
+            free(component->change_name);
+            component->change_name = NULL;
+        }
         free(component);
     }
 }
@@ -567,6 +1202,11 @@ void text_component_set_text(TextComponent* component, const char* text) {
     component->cursor_pos = text_len;
     component->selection_start = -1;
     component->selection_end = -1;
+    text_style_runs_free(component->style_runs);
+    component->style_runs = NULL;
+    component->style_run_count = 0;
+    component->typing_style = 0;
+    text_edit_history_clear(&component->history);
     
     // 使行高缓存失效（因为文本或字体可能改变）
     component->line_height_valid = 0;
@@ -634,6 +1274,16 @@ void text_component_set_multiline(TextComponent* component, int multiline) {
     }
     
     component->multiline = multiline;
+    text_component_invalidate_layout(component);
+}
+
+void text_component_set_wrap(TextComponent* component, int wrap) {
+    if (!component) {
+        return;
+    }
+
+    component->wrap = wrap ? 1 : 0;
+    text_component_invalidate_layout(component);
 }
 
 // 设置可编辑性
@@ -703,6 +1353,9 @@ int text_component_register_event(Layer* layer, const char* event_name, const ch
         if (event_func_name && event_func_name[0] == '@') {
             event_func_name++;
         }
+        if (component->change_name) {
+            free(component->change_name);
+        }
         component->change_name = strdup(event_func_name);
         return 0;
     }
@@ -735,6 +1388,9 @@ cJSON* text_component_get_property(Layer* layer, const char* property_name) {
         // 是否多行
         return cJSON_CreateBool(component->multiline);
     }
+    else if (strcmp(property_name, "wrap") == 0) {
+        return cJSON_CreateBool(component->wrap);
+    }
     else if (strcmp(property_name, "editable") == 0) {
         // 是否可编辑
         return cJSON_CreateBool(component->editable);
@@ -743,9 +1399,475 @@ cJSON* text_component_get_property(Layer* layer, const char* property_name) {
         // 最大长度
         return cJSON_CreateNumber(component->max_length);
     }
-    
+    else if (strcmp(property_name, "contentHeight") == 0 || strcmp(property_name, "content_height") == 0) {
+        int pad_top;
+        int pad_bottom;
+        if (layer->dirty_flags & DIRTY_TEXT) {
+            text_component_invalidate_layout(component);
+            layer->dirty_flags &= ~DIRTY_TEXT;
+        }
+        text_component_update_content_height(component);
+        text_component_get_padding(layer, &pad_top, NULL, &pad_bottom, NULL);
+        return cJSON_CreateNumber(layer->content_height + pad_top + pad_bottom);
+    }
+    else if (strcmp(property_name, "cursorPos") == 0 || strcmp(property_name, "cursor") == 0) {
+        return cJSON_CreateNumber(component->cursor_pos);
+    }
+    else if (strcmp(property_name, "selectionStart") == 0) {
+        return cJSON_CreateNumber(component->selection_start);
+    }
+    else if (strcmp(property_name, "selectionEnd") == 0) {
+        return cJSON_CreateNumber(component->selection_end);
+    }
+    else if (strcmp(property_name, "selection") == 0) {
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddNumberToObject(obj, "start", component->selection_start);
+        cJSON_AddNumberToObject(obj, "end", component->selection_end);
+        return obj;
+    }
+    else if (strcmp(property_name, "selectedText") == 0) {
+        int start = component->selection_start;
+        int end = component->selection_end;
+        int text_len;
+        char* selected;
+        int len;
+
+        if (start < 0 || end < 0 || !layer->text) {
+            return cJSON_CreateString("");
+        }
+        if (start > end) {
+            int tmp = start;
+            start = end;
+            end = tmp;
+        }
+        text_len = (int)strlen(layer->text);
+        if (start > text_len) start = text_len;
+        if (end > text_len) end = text_len;
+        if (start >= end) {
+            return cJSON_CreateString("");
+        }
+        len = end - start;
+        selected = (char*)malloc((size_t)len + 1);
+        if (!selected) {
+            return cJSON_CreateString("");
+        }
+        memcpy(selected, layer->text + start, (size_t)len);
+        selected[len] = '\0';
+        {
+            cJSON* out = cJSON_CreateString(selected);
+            free(selected);
+            return out;
+        }
+    }
+    else if (strcmp(property_name, "scrollX") == 0) {
+        return cJSON_CreateNumber(component->scroll_x);
+    }
+    else if (strcmp(property_name, "scrollY") == 0 || strcmp(property_name, "scrollOffset") == 0) {
+        return cJSON_CreateNumber(layer->scroll_offset);
+    }
+    else if (strcmp(property_name, "fontSize") == 0) {
+        return layer->font ? cJSON_CreateNumber(layer->font->size) : cJSON_CreateNull();
+    }
+    else if (strcmp(property_name, "length") == 0) {
+        return cJSON_CreateNumber(layer->text ? (double)strlen(layer->text) : 0);
+    }
+    else if (strcmp(property_name, "lineStart") == 0) {
+        return cJSON_CreateNumber(get_line_start(component, component->cursor_pos));
+    }
+    else if (strcmp(property_name, "lineEnd") == 0) {
+        return cJSON_CreateNumber(get_line_end(component, component->cursor_pos));
+    }
+    else if (strcmp(property_name, "canUndo") == 0) {
+        return cJSON_CreateBool(text_edit_history_can_undo(&component->history));
+    }
+    else if (strcmp(property_name, "canRedo") == 0) {
+        return cJSON_CreateBool(text_edit_history_can_redo(&component->history));
+    }
+    else if (strcmp(property_name, "bold") == 0 || strcmp(property_name, "italic") == 0) {
+        uint32_t flag = (strcmp(property_name, "bold") == 0) ? TEXT_STYLE_BOLD : TEXT_STYLE_ITALIC;
+        int start;
+        int end;
+        uint32_t flags;
+        text_component_normalize_selection_range(component, &start, &end);
+        if (start < end) {
+            flags = text_style_runs_common_flags(component->style_runs, component->style_run_count, start, end);
+        } else {
+            flags = component->typing_style;
+            if (flags == 0) {
+                flags = text_style_runs_flags_at(component->style_runs, component->style_run_count,
+                                                 component->cursor_pos > 0 ? component->cursor_pos - 1
+                                                                          : component->cursor_pos);
+            }
+        }
+        return cJSON_CreateBool((flags & flag) != 0);
+    }
+    else if (strcmp(property_name, "styles") == 0) {
+        cJSON* arr = cJSON_CreateArray();
+        int i;
+        for (i = 0; i < component->style_run_count; i++) {
+            cJSON* run = cJSON_CreateObject();
+            cJSON_AddNumberToObject(run, "start", component->style_runs[i].start);
+            cJSON_AddNumberToObject(run, "end", component->style_runs[i].end);
+            cJSON_AddNumberToObject(run, "flags", (double)component->style_runs[i].flags);
+            cJSON_AddItemToArray(arr, run);
+        }
+        return arr;
+    }
+
     // 未知的属性，返回 NULL
     return NULL;
+}
+
+static int text_component_parse_int_value(cJSON* value, int* out)
+{
+    if (!value || !out) {
+        return 0;
+    }
+    if (cJSON_IsNumber(value)) {
+        *out = value->valueint;
+        return 1;
+    }
+    if (cJSON_IsString(value) && value->valuestring) {
+        *out = atoi(value->valuestring);
+        return 1;
+    }
+    return 0;
+}
+
+static void text_component_clamp_cursor(TextComponent* component)
+{
+    int text_len;
+
+    if (!component || !component->layer) {
+        return;
+    }
+    text_len = component->layer->text ? (int)strlen(component->layer->text) : 0;
+    if (component->cursor_pos < 0) {
+        component->cursor_pos = 0;
+    }
+    if (component->cursor_pos > text_len) {
+        component->cursor_pos = text_len;
+    }
+}
+
+static void text_component_clamp_selection(TextComponent* component)
+{
+    int text_len;
+
+    if (!component || !component->layer) {
+        return;
+    }
+    text_len = component->layer->text ? (int)strlen(component->layer->text) : 0;
+    if (component->selection_start < -1) {
+        component->selection_start = -1;
+    }
+    if (component->selection_end < -1) {
+        component->selection_end = -1;
+    }
+    if (component->selection_start > text_len) {
+        component->selection_start = text_len;
+    }
+    if (component->selection_end > text_len) {
+        component->selection_end = text_len;
+    }
+}
+
+static int text_component_copy_selection_to_clipboard(TextComponent* component)
+{
+    int start;
+    int end;
+    int len;
+    char* selected;
+
+    if (!component || !component->layer || !component->layer->text) {
+        return 0;
+    }
+    if (component->selection_start < 0 || component->selection_end < 0) {
+        return 0;
+    }
+    start = component->selection_start;
+    end = component->selection_end;
+    if (start > end) {
+        int tmp = start;
+        start = end;
+        end = tmp;
+    }
+    if (start >= end) {
+        return 0;
+    }
+    len = end - start;
+    selected = (char*)malloc((size_t)len + 1);
+    if (!selected) {
+        return 0;
+    }
+    memcpy(selected, component->layer->text + start, (size_t)len);
+    selected[len] = '\0';
+    backend_set_clipboard_text(selected);
+    free(selected);
+    return 1;
+}
+
+int text_component_set_property_from_json(Layer* layer, const char* key, cJSON* value, int is_creating)
+{
+    TextComponent* component;
+    int n;
+
+    (void)is_creating;
+    if (!layer || !key || !value || !layer->component) {
+        return 0;
+    }
+    component = (TextComponent*)layer->component;
+
+    if (strcmp(key, "cursorPos") == 0 || strcmp(key, "cursor") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        component->cursor_pos = n;
+        component->cursor_visual_line = -1;
+        text_component_clamp_cursor(component);
+        return 1;
+    }
+    if (strcmp(key, "selectionStart") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        component->selection_start = n;
+        text_component_clamp_selection(component);
+        return 1;
+    }
+    if (strcmp(key, "selectionEnd") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        component->selection_end = n;
+        text_component_clamp_selection(component);
+        return 1;
+    }
+    if (strcmp(key, "selection") == 0) {
+        if (cJSON_IsObject(value)) {
+            cJSON* start = cJSON_GetObjectItem(value, "start");
+            cJSON* end = cJSON_GetObjectItem(value, "end");
+            if (text_component_parse_int_value(start, &n)) {
+                component->selection_start = n;
+            }
+            if (text_component_parse_int_value(end, &n)) {
+                component->selection_end = n;
+            }
+            text_component_clamp_selection(component);
+            return 1;
+        }
+        if (cJSON_IsString(value) && value->valuestring) {
+            int start = 0;
+            int end = 0;
+            if (sscanf(value->valuestring, "%d,%d", &start, &end) == 2 ||
+                sscanf(value->valuestring, "%d:%d", &start, &end) == 2) {
+                component->selection_start = start;
+                component->selection_end = end;
+                text_component_clamp_selection(component);
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (strcmp(key, "scrollX") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        component->scroll_x = n < 0 ? 0 : n;
+        return 1;
+    }
+    if (strcmp(key, "scrollY") == 0 || strcmp(key, "scrollOffset") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        layer->scroll_offset = n < 0 ? 0 : n;
+        return 1;
+    }
+    if (strcmp(key, "scrollToCursor") == 0) {
+        text_component_update_scroll_for_cursor(component);
+        return 1;
+    }
+    if (strcmp(key, "copySelection") == 0) {
+        return text_component_copy_selection_to_clipboard(component) ? 1 : 0;
+    }
+    if (strcmp(key, "clearSelection") == 0) {
+        component->selection_start = -1;
+        component->selection_end = -1;
+        return 1;
+    }
+    if (strcmp(key, "selectAll") == 0) {
+        int text_len = layer->text ? (int)strlen(layer->text) : 0;
+        component->selection_start = 0;
+        component->selection_end = text_len;
+        component->cursor_pos = text_len;
+        return 1;
+    }
+    if (strcmp(key, "insertText") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        if (!cJSON_IsString(value) || !value->valuestring) {
+            return 0;
+        }
+        text_component_insert_text(component, value->valuestring);
+        return 1;
+    }
+    if (strcmp(key, "deleteSelection") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        if (component->selection_start >= 0 && component->selection_end >= 0 &&
+            component->selection_start != component->selection_end) {
+            text_component_delete_selection(component);
+        }
+        return 1;
+    }
+    if (strcmp(key, "cutSelection") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        if (!text_component_copy_selection_to_clipboard(component)) {
+            return 0;
+        }
+        text_component_delete_selection(component);
+        return 1;
+    }
+    if (strcmp(key, "paste") == 0) {
+        char* clip;
+        if (!component->editable) {
+            return 0;
+        }
+        clip = backend_get_clipboard_text();
+        if (!clip) {
+            return 0;
+        }
+        text_component_insert_text(component, clip);
+        free(clip);
+        return 1;
+    }
+    if (strcmp(key, "backspace") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        text_component_delete_prev_char(component);
+        return 1;
+    }
+    if (strcmp(key, "deleteForward") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        text_component_delete_next_char(component);
+        return 1;
+    }
+    if (strcmp(key, "undo") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        return text_component_do_undo(component);
+    }
+    if (strcmp(key, "redo") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        return text_component_do_redo(component);
+    }
+    if (strcmp(key, "bold") == 0 || strcmp(key, "italic") == 0) {
+        uint32_t flag = (strcmp(key, "bold") == 0) ? TEXT_STYLE_BOLD : TEXT_STYLE_ITALIC;
+        int start;
+        int end;
+        int enable;
+        if (!component->editable) {
+            return 0;
+        }
+        enable = cJSON_IsTrue(value) || (cJSON_IsNumber(value) && value->valueint) ||
+                 (cJSON_IsString(value) && value->valuestring &&
+                  (strcmp(value->valuestring, "1") == 0 || strcmp(value->valuestring, "true") == 0));
+        text_component_normalize_selection_range(component, &start, &end);
+        text_component_begin_edit(component, TEXT_EDIT_STYLE);
+        if (start < end) {
+            if (enable) {
+                text_style_runs_apply(&component->style_runs, &component->style_run_count,
+                                      start, end, flag, 0);
+            } else {
+                text_style_runs_apply(&component->style_runs, &component->style_run_count,
+                                      start, end, 0, flag);
+            }
+        } else if (enable) {
+            component->typing_style |= flag;
+        } else {
+            component->typing_style &= ~flag;
+        }
+        mark_layer_dirty(component->layer, DIRTY_TEXT);
+        return 1;
+    }
+    if (strcmp(key, "toggleBold") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        return text_component_toggle_style(component, TEXT_STYLE_BOLD);
+    }
+    if (strcmp(key, "toggleItalic") == 0) {
+        if (!component->editable) {
+            return 0;
+        }
+        return text_component_toggle_style(component, TEXT_STYLE_ITALIC);
+    }
+    if (strcmp(key, "moveLineStart") == 0) {
+        component->cursor_pos = get_line_start(component, component->cursor_pos);
+        component->cursor_visual_line = -1;
+        if (!(cJSON_IsTrue(value) || (cJSON_IsNumber(value) && value->valueint) ||
+              (cJSON_IsString(value) && value->valuestring &&
+               (strcmp(value->valuestring, "1") == 0 || strcmp(value->valuestring, "true") == 0)))) {
+            component->selection_start = -1;
+            component->selection_end = -1;
+        }
+        text_component_update_scroll_for_cursor(component);
+        return 1;
+    }
+    if (strcmp(key, "moveLineEnd") == 0) {
+        component->cursor_pos = get_line_end(component, component->cursor_pos);
+        component->cursor_visual_line = -1;
+        component->selection_start = -1;
+        component->selection_end = -1;
+        text_component_update_scroll_for_cursor(component);
+        return 1;
+    }
+    if (strcmp(key, "maxLength") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        text_component_set_max_length(component, n);
+        return 1;
+    }
+    if (strcmp(key, "editable") == 0) {
+        int on = 0;
+        if (cJSON_IsBool(value)) {
+            on = cJSON_IsTrue(value);
+        } else if (!text_component_parse_int_value(value, &on)) {
+            return 0;
+        }
+        text_component_set_editable(component, on);
+        return 1;
+    }
+    if (strcmp(key, "fontSize") == 0) {
+        if (!text_component_parse_int_value(value, &n)) {
+            return 0;
+        }
+        if (!layer->font) {
+            layer->font = (Font*)calloc(1, sizeof(Font));
+            if (!layer->font) {
+                return 0;
+            }
+            strcpy(layer->font->path, "Roboto-Regular.ttf");
+            strcpy(layer->font->weight, "normal");
+        }
+        layer->font->size = n;
+        text_component_invalidate_layout(component);
+        mark_layer_dirty(layer, DIRTY_TEXT | DIRTY_LAYOUT);
+        return 1;
+    }
+
+    return 0;
 }
 
 
@@ -805,6 +1927,8 @@ static void text_component_delete_selection(TextComponent* component) {
     
     // 只有当start < end时才执行删除操作
     if (start < end) {
+        text_component_begin_edit(component, TEXT_EDIT_DELETE);
+
         // 计算新文本的长度
         size_t new_len = text_len - (end - start);
         
@@ -822,6 +1946,8 @@ static void text_component_delete_selection(TextComponent* component) {
         // 设置新文本
         layer_set_text(component->layer, new_text);
         free(new_text);
+
+        text_style_runs_delete(&component->style_runs, &component->style_run_count, start, end);
         
         component->cursor_pos = start;
         text_component_invalidate_layout(component);
@@ -844,18 +1970,29 @@ static void text_component_insert_char(TextComponent* component, char c) {
     }
 
     int len = strlen(component->layer->text);
-
-    // 移除最大长度限制，使用动态内存分配
-    // 注释掉最大长度检查，因为现在使用 layer_set_text_with_size 进行动态内存分配
-    /*
-    if (len >= component->max_length - 1) {
-        return;
-    }
-    */
+    int has_selection = 0;
+    int insert_at;
 
     // 如果有选中的文本，先删除
     if (component->selection_start != -1 && component->selection_end != -1) {
+        int start = component->selection_start;
+        int end = component->selection_end;
+        if (start > end) {
+            int temp = start;
+            start = end;
+            end = temp;
+        }
+        if (start != end) {
+            has_selection = 1;
+        }
+    }
+
+    text_component_begin_edit(component, has_selection ? TEXT_EDIT_REPLACE : TEXT_EDIT_TYPING);
+
+    if (has_selection) {
+        text_component_history_suppress_begin(component);
         text_component_delete_selection(component);
+        text_component_history_suppress_end(component);
         // 更新len，因为删除选择后文本长度可能改变
         len = strlen(component->layer->text);
     }
@@ -863,13 +2000,7 @@ static void text_component_insert_char(TextComponent* component, char c) {
     // 确保cursor_pos在有效范围内
     if (component->cursor_pos < 0) component->cursor_pos = 0;
     if (component->cursor_pos > len) component->cursor_pos = len;
-
-    // 插入字符，使用动态内存分配
-    // 移除最大长度限制，使用动态内存分配
-    // 注释掉最大长度检查，因为现在使用 layer_set_text_with_size 进行动态内存分配
-    /*
-    if (component->cursor_pos < component->max_length - 1) {
-    */
+    insert_at = component->cursor_pos;
     
     // 计算新文本长度
     size_t new_len = len + 1;
@@ -890,6 +2021,12 @@ static void text_component_insert_char(TextComponent* component, char c) {
     // 设置新文本
     layer_set_text(component->layer, new_text);
     free(new_text);
+
+    text_style_runs_insert(&component->style_runs, &component->style_run_count, insert_at, 1);
+    if (component->typing_style) {
+        text_style_runs_apply(&component->style_runs, &component->style_run_count,
+                              insert_at, insert_at + 1, component->typing_style, 0);
+    }
     
     component->cursor_pos++;
     text_component_invalidate_layout(component);
@@ -906,86 +2043,144 @@ static void text_component_insert_char(TextComponent* component, char c) {
 
 // 更新滚动位置以确保光标可见
 void text_component_update_scroll_for_cursor(TextComponent* component) {
-    if (!component || !component->layer || !component->layer->font || !component->layer->font->default_font) {
-        return;
-    }
-    
-    // 只在单行模式下处理水平滚动
-    if (component->multiline) {
-        return;
-    }
-    
-    // 准备渲染区域（与渲染函数中的逻辑一致）
     Rect render_rect;
+    int line_height;
+    int line_stride;
+    int text_len;
+    const char* text;
+    int cursor_line = 0;
+    int i;
+
+    if (!component || !component->layer) {
+        return;
+    }
+
     text_component_get_content_rect(component, component->layer, &render_rect);
-    
-    // 计算整个文本的宽度
-    int full_text_width = 0;
-    if (strlen(component->layer->text) > 0) {
-        Texture* full_tex = backend_render_texture(component->layer->font->default_font, component->layer->text, component->layer->color);
-        if (full_tex) {
-            int full_width, full_height;
-            backend_query_texture(full_tex, NULL, NULL, &full_width, &full_height);
-            full_text_width = full_width / yui_density;
-            backend_render_text_destroy(full_tex);
+
+    /* Multiline: keep cursor line visible via vertical scroll_offset */
+    if (component->multiline) {
+        if (!component->layer->text) {
+            component->layer->scroll_offset = 0;
+            return;
         }
-    }
-    
-    // 获取可视区域宽度
-    int visible_width = render_rect.w;
-    
-    // 如果文本没有超过宽度，不需要滚动
-    if (full_text_width <= visible_width) {
-        component->scroll_x = 0;
-        return;
-    }
-    
-    // 获取光标位置之前的文本
-    if (component->cursor_pos <= 0) {
-        component->scroll_x = 0;
-        return;
-    }
-    
-    char* before_cursor = (char*)malloc(component->cursor_pos + 1);
-    if (!before_cursor) {
-        return;
-    }
-    
-    strncpy(before_cursor, component->layer->text, component->cursor_pos);
-    before_cursor[component->cursor_pos] = '\0';
-    
-    // 计算光标位置的X坐标
-    int cursor_x = render_rect.x;
-    if (component->cursor_pos > 0) {
-        Texture* text_tex = backend_render_texture(component->layer->font->default_font, before_cursor, component->layer->color);
-        if (text_tex) {
-            int text_width, text_height;
-            backend_query_texture(text_tex, NULL, NULL, &text_width, &text_height);
-            cursor_x = render_rect.x + text_width / yui_density;
-            backend_render_text_destroy(text_tex);
+        text = component->layer->text;
+        text_len = (int)strlen(text);
+        line_height = text_component_get_line_height(component);
+        line_stride = line_height + TEXT_LINE_SPACING;
+        text_component_ensure_layout(component, render_rect.w > 0 ? render_rect.w : 1);
+
+        for (i = 0; i < component->layout_count; i++) {
+            int start = 0;
+            int end = 0;
+            text_component_get_layout_line_range(component, text, text_len, i, &start, &end);
+            if (component->cursor_pos < end ||
+                (component->cursor_pos == end &&
+                 ((end < text_len && text[end] == '\n') ||
+                  component->cursor_visual_line == i)) ||
+                i == component->layout_count - 1) {
+                cursor_line = i;
+                break;
+            }
         }
+
+        {
+            int cursor_top = cursor_line * line_stride;
+            int cursor_bottom = cursor_top + line_height;
+            int visible = render_rect.h > 0 ? render_rect.h : component->layer->rect.h;
+            int max_scroll;
+            int content_h = text_component_calculate_content_height(component);
+
+            if (component->layer->scroll_offset < 0) {
+                component->layer->scroll_offset = 0;
+            }
+            if (cursor_top < component->layer->scroll_offset) {
+                component->layer->scroll_offset = cursor_top;
+            } else if (cursor_bottom > component->layer->scroll_offset + visible) {
+                component->layer->scroll_offset = cursor_bottom - visible;
+            }
+
+            max_scroll = content_h - visible;
+            if (max_scroll < 0) {
+                max_scroll = 0;
+            }
+            if (component->layer->scroll_offset < 0) {
+                component->layer->scroll_offset = 0;
+            }
+            if (component->layer->scroll_offset > max_scroll) {
+                component->layer->scroll_offset = max_scroll;
+            }
+        }
+        return;
     }
-    
-    free(before_cursor);
-    
-    // 确保光标在可视区域内
-    int cursor_pixel_x = cursor_x - render_rect.x + component->scroll_x;
-    
-    // 如果光标在可视区域左侧，向左滚动
-    if (cursor_pixel_x < component->scroll_x) {
-        component->scroll_x = cursor_pixel_x;
+
+    /* Single-line: horizontal scroll_x */
+    if (!component->layer->font || !component->layer->font->default_font) {
+        return;
     }
-    // 如果光标在可视区域右侧，向右滚动
-    else if (cursor_pixel_x > component->scroll_x + visible_width) {
-        component->scroll_x = cursor_pixel_x - visible_width;
-    }
-    
-    // 限制滚动范围
-    if (component->scroll_x < 0) {
-        component->scroll_x = 0;
-    }
-    if (component->scroll_x > full_text_width - visible_width) {
-        component->scroll_x = full_text_width - visible_width;
+
+    {
+        int full_text_width = 0;
+        int visible_width;
+        int cursor_x;
+        int cursor_pixel_x;
+        char* before_cursor;
+
+        if (component->layer->text && strlen(component->layer->text) > 0) {
+            Texture* full_tex = backend_render_texture(component->layer->font->default_font,
+                                                      component->layer->text,
+                                                      component->layer->color);
+            if (full_tex) {
+                int full_width, full_height;
+                backend_query_texture(full_tex, NULL, NULL, &full_width, &full_height);
+                full_text_width = full_width / yui_density;
+                backend_render_text_destroy(full_tex);
+            }
+        }
+
+        visible_width = render_rect.w;
+        if (full_text_width <= visible_width) {
+            component->scroll_x = 0;
+            return;
+        }
+
+        if (component->cursor_pos <= 0) {
+            component->scroll_x = 0;
+            return;
+        }
+
+        before_cursor = (char*)malloc((size_t)component->cursor_pos + 1);
+        if (!before_cursor) {
+            return;
+        }
+        strncpy(before_cursor, component->layer->text, (size_t)component->cursor_pos);
+        before_cursor[component->cursor_pos] = '\0';
+
+        cursor_x = render_rect.x;
+        {
+            Texture* text_tex = backend_render_texture(component->layer->font->default_font,
+                                                      before_cursor,
+                                                      component->layer->color);
+            if (text_tex) {
+                int text_width, text_height;
+                backend_query_texture(text_tex, NULL, NULL, &text_width, &text_height);
+                cursor_x = render_rect.x + text_width / yui_density;
+                backend_render_text_destroy(text_tex);
+            }
+        }
+        free(before_cursor);
+
+        cursor_pixel_x = cursor_x - render_rect.x + component->scroll_x;
+        if (cursor_pixel_x < component->scroll_x) {
+            component->scroll_x = cursor_pixel_x;
+        } else if (cursor_pixel_x > component->scroll_x + visible_width) {
+            component->scroll_x = cursor_pixel_x - visible_width;
+        }
+        if (component->scroll_x < 0) {
+            component->scroll_x = 0;
+        }
+        if (component->scroll_x > full_text_width - visible_width) {
+            component->scroll_x = full_text_width - visible_width;
+        }
     }
 }
 
@@ -1059,6 +2254,10 @@ static void text_component_delete_prev_char(TextComponent* component) {
         // 获取光标前一个 UTF-8 字符的字节长度
         int char_len = get_prev_utf8_char_len(component->layer->text, component->cursor_pos);
         if (char_len <= 0) char_len = 1;
+        int del_start = component->cursor_pos - char_len;
+        int del_end = component->cursor_pos;
+
+        text_component_begin_edit(component, TEXT_EDIT_DELETE);
         
         // 计算新文本长度
         size_t new_len = len - char_len;
@@ -1077,6 +2276,8 @@ static void text_component_delete_prev_char(TextComponent* component) {
         // 设置新文本
         layer_set_text(component->layer, new_text);
         free(new_text);
+
+        text_style_runs_delete(&component->style_runs, &component->style_run_count, del_start, del_end);
         
         component->cursor_pos -= char_len;
         text_component_invalidate_layout(component);
@@ -1124,6 +2325,8 @@ static void text_component_delete_next_char(TextComponent* component) {
     if (component->cursor_pos >= len) {
         return; // 已经在文本末尾，无需删除
     }
+
+    text_component_begin_edit(component, TEXT_EDIT_DELETE);
     
     // 计算新文本长度
     size_t new_len = len - 1;
@@ -1142,6 +2345,9 @@ static void text_component_delete_next_char(TextComponent* component) {
     // 设置新文本
     layer_set_text(component->layer, new_text);
     free(new_text);
+
+    text_style_runs_delete(&component->style_runs, &component->style_run_count,
+                           component->cursor_pos, component->cursor_pos + 1);
     text_component_invalidate_layout(component);
     
     // 更新内容高度
@@ -1193,16 +2399,35 @@ static void text_component_insert_text(TextComponent* component, const char* tex
     const char* insert_text = normalized;
     
     int current_len = strlen(component->layer->text);
+    int has_selection = 0;
+    int insert_at;
     
     // 如果有选中的文本，先删除
     if (component->selection_start != -1 && component->selection_end != -1) {
+        int start = component->selection_start;
+        int end = component->selection_end;
+        if (start > end) {
+            int temp = start;
+            start = end;
+            end = temp;
+        }
+        if (start != end) {
+            has_selection = 1;
+        }
+    }
+
+    if (has_selection) {
+        text_component_begin_edit(component, TEXT_EDIT_REPLACE);
+        text_component_history_suppress_begin(component);
         text_component_delete_selection(component);
+        text_component_history_suppress_end(component);
         current_len = strlen(component->layer->text);
     }
     
     // 确保cursor_pos在有效范围内
     if (component->cursor_pos < 0) component->cursor_pos = 0;
     if (component->cursor_pos > current_len) component->cursor_pos = current_len;
+    insert_at = component->cursor_pos;
     
     // 检查是否包含换行符，如果包含则设置为多行模式
     int has_newlines = 0;
@@ -1216,17 +2441,18 @@ static void text_component_insert_text(TextComponent* component, const char* tex
         component->multiline = 1;
     }
     
-    // 移除最大长度限制，使用动态内存分配
-    // 注释掉最大长度检查，因为现在使用 layer_set_text_with_size 进行动态内存分配
-    /*
-    if (current_len + text_len >= component->max_length) {
-        // 截断文本以适应最大长度
+    // Enforce maxLength when configured (> 0)
+    if (component->max_length > 0 && current_len + text_len >= component->max_length) {
         text_len = component->max_length - current_len - 1;
         if (text_len <= 0) {
-            return; // 没有足够空间
+            free(normalized);
+            return;
         }
     }
-    */
+
+    if (!has_selection) {
+        text_component_begin_edit(component, TEXT_EDIT_REPLACE);
+    }
     
     // 计算新文本长度
     size_t new_len = current_len + text_len;
@@ -1234,6 +2460,7 @@ static void text_component_insert_text(TextComponent* component, const char* tex
     // 创建临时缓冲区存储新文本
     char* new_text = malloc(new_len + 1);
     if (!new_text) {
+        free(normalized);
         return;
     }
     
@@ -1250,6 +2477,12 @@ static void text_component_insert_text(TextComponent* component, const char* tex
     layer_set_text(component->layer, new_text);
     free(new_text);
     free(normalized);
+
+    text_style_runs_insert(&component->style_runs, &component->style_run_count, insert_at, text_len);
+    if (component->typing_style) {
+        text_style_runs_apply(&component->style_runs, &component->style_run_count,
+                              insert_at, insert_at + text_len, component->typing_style, 0);
+    }
     
     component->cursor_pos += text_len;
     text_component_invalidate_layout(component);
@@ -1513,6 +2746,42 @@ int text_component_handle_key_event(Layer* layer, KeyEvent* event) {
                     text_component_insert_char(component, 'x');
                 }
                 break;
+            case SDLK_z:
+                if (event->data.key.mod & KMOD_CTRL) {
+                    if (event->data.key.mod & KMOD_SHIFT) {
+                        text_component_do_redo(component);
+                    } else {
+                        text_component_do_undo(component);
+                    }
+                } else if (event->type == KEY_EVENT_TEXT_INPUT) {
+                    text_component_insert_char(component, 'z');
+                }
+                break;
+            case SDLK_y:
+                if (event->data.key.mod & KMOD_CTRL) {
+                    text_component_do_redo(component);
+                } else if (event->type == KEY_EVENT_TEXT_INPUT) {
+                    text_component_insert_char(component, 'y');
+                }
+                break;
+            case SDLK_b:
+            case 'B':
+                if (event->data.key.mod & KMOD_CTRL) {
+                    text_component_toggle_style(component, TEXT_STYLE_BOLD);
+                    return 1;
+                } else if (event->type == KEY_EVENT_TEXT_INPUT) {
+                    text_component_insert_char(component, 'b');
+                }
+                break;
+            case SDLK_i:
+            case 'I':
+                if (event->data.key.mod & KMOD_CTRL) {
+                    text_component_toggle_style(component, TEXT_STYLE_ITALIC);
+                    return 1;
+                } else if (event->type == KEY_EVENT_TEXT_INPUT) {
+                    text_component_insert_char(component, 'i');
+                }
+                break;
             default:
                 // 处理其他普通字符输入
                 if (event->type == KEY_EVENT_TEXT_INPUT) {
@@ -1703,6 +2972,22 @@ int text_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     TextComponent* component = (TextComponent*)layer->component;
     Point pt = {event->x, event->y};
 
+    if (event->phase == POINTER_WHEEL && component->multiline &&
+        point_in_rect(pt, layer->rect)) {
+        Rect content_rect;
+        int max_scroll;
+
+        text_component_get_content_rect(component, layer, &content_rect);
+        text_component_update_content_height(component);
+        max_scroll = layer->content_height - content_rect.h;
+        if (max_scroll > 0) {
+            layer->scroll_offset += event->delta_y * 20;
+            if (layer->scroll_offset < 0) layer->scroll_offset = 0;
+            if (layer->scroll_offset > max_scroll) layer->scroll_offset = max_scroll;
+            return 1;
+        }
+    }
+
     if (layer->scrollbar_v && layer->scrollbar_v->is_dragging) {
         if (event->phase == POINTER_UP && event->button == SDL_BUTTON_LEFT) {
             component->is_selecting = 0;
@@ -1720,38 +3005,20 @@ int text_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     Rect content_rect;
     text_component_get_content_rect(component, layer, &content_rect);
 
-    if (event->phase == POINTER_DOUBLE_TAP) {
+    // 鼠标左键按下 / 双击：双击先当按下，抬起未拖动再选行
+    if ((event->phase == POINTER_DOWN || event->phase == POINTER_DOUBLE_TAP) &&
+        event->button == SDL_BUTTON_LEFT) {
         if (point_in_rect(pt, content_rect)) {
-            int click_pos = text_component_get_position_from_point(component, pt, layer);
-            int line_start, line_end;
+            int click_pos;
             if (layer->focusable) {
                 text_component_focus(component);
             }
-            text_component_get_line_range_at_pos(component, layer, click_pos,
-                                                   &line_start, &line_end);
-            component->selection_start = line_start;
-            component->selection_end = line_end;
-            component->cursor_pos = line_end;
-            component->is_selecting = 0;
-            text_component_update_scroll_for_cursor(component);
-            mark_layer_dirty(layer, DIRTY_TEXT);
-            return 1;
-        }
-    }
-    
-    // 鼠标左键按下 - 设置光标位置并开始选择
-    if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
-        if (point_in_rect(pt, content_rect)) {
-            if (layer->focusable) {
-                text_component_focus(component);
-            }
-
-            int click_pos = text_component_get_position_from_point(component, pt, layer);
-
+            click_pos = text_component_get_position_from_point(component, pt, layer);
             component->cursor_pos = click_pos;
             component->selection_start = click_pos;
             component->selection_end = click_pos;
             component->is_selecting = 1;
+            component->pending_line_select = (event->phase == POINTER_DOUBLE_TAP);
             text_component_update_scroll_for_cursor(component);
             return 1;
         }
@@ -1760,16 +3027,19 @@ int text_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
             component->selection_start = -1;
             component->selection_end = -1;
             component->is_selecting = 0;
+            component->pending_line_select = 0;
         } else if (focused_layer == layer) {
             component->selection_start = -1;
             component->selection_end = -1;
             component->is_selecting = 0;
+            component->pending_line_select = 0;
             text_component_blur(component);
         }
     }
     // 鼠标拖动 - 更新选择范围
     else if (event->phase == POINTER_MOVE && (event->button == SDL_BUTTON_LEFT) && component->is_selecting) {
         int drag_pos;
+        component->pending_line_select = 0;
         
         if (point_in_rect(pt, content_rect)) {
             // 在文本区域内，使用正常计算
@@ -1803,6 +3073,18 @@ int text_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
     }
     // 鼠标释放 - 结束选择
     else if (event->phase == POINTER_UP && event->button == SDL_BUTTON_LEFT) {
+        if (component->pending_line_select) {
+            int line_start = 0;
+            int line_end = 0;
+            text_component_get_line_range_at_pos(component, layer, component->cursor_pos,
+                                                   &line_start, &line_end);
+            component->selection_start = line_start;
+            component->selection_end = line_end;
+            component->cursor_pos = line_end;
+            text_component_update_scroll_for_cursor(component);
+            mark_layer_dirty(layer, DIRTY_TEXT);
+        }
+        component->pending_line_select = 0;
         component->is_selecting = 0;
     }
     return 0;
@@ -1856,6 +3138,54 @@ int get_line_end(TextComponent* component, int pos) {
     return end;
 }
 
+static void text_component_get_layout_line_range(TextComponent* component, const char* text,
+                                                 int text_len, int line_index,
+                                                 int* out_start, int* out_end) {
+    int start = 0;
+    int end = 0;
+
+    if (component && component->layout_count > 0 &&
+        line_index >= 0 && line_index < component->layout_count) {
+        start = component->layout_starts[line_index];
+        end = (line_index + 1 < component->layout_count)
+            ? component->layout_starts[line_index + 1] : text_len;
+        while (end > start && text[end - 1] == '\n') {
+            end--;
+        }
+    }
+
+    if (out_start) *out_start = start;
+    if (out_end) *out_end = end;
+}
+
+static int text_component_position_in_layout_line(TextComponent* component, const char* text,
+                                                  int start, int end, int click_x) {
+    int best_pos = start;
+    int best_distance = abs(click_x);
+    int pos = start;
+
+    while (pos < end) {
+        int next = text_component_grapheme_end(text, pos, end);
+        int width;
+        int distance;
+
+        if (next <= pos) {
+            int clen = utf8_char_len_at(text + pos);
+            next = pos + (clen > 0 ? clen : 1);
+        }
+        if (next > end) next = end;
+
+        width = text_component_measure_width(component, text, start, next);
+        distance = abs(click_x - width);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_pos = next;
+        }
+        pos = next;
+    }
+    return best_pos;
+}
+
 // 辅助函数：根据鼠标坐标计算对应的文本位置
 int text_component_get_position_from_point(TextComponent* component, Point pt, Layer* layer) {
     if (!component || !layer) {
@@ -1875,203 +3205,27 @@ int text_component_get_position_from_point(TextComponent* component, Point pt, L
         return 0;
     }
     
-    // 获取行高
-    int line_height = 20;
-    
-    if (layer->font && layer->font->default_font) {
-        Texture* temp_tex = backend_render_texture(layer->font->default_font, "X", layer->color);
-        if (temp_tex) {
-            int temp_width, temp_height;
-            backend_query_texture(temp_tex, NULL, NULL, &temp_width, &temp_height);
-            line_height = temp_height / yui_density;
-            backend_render_text_destroy(temp_tex);
-        }
-    }
-    
     if (component->multiline) {
-        // 多行模式处理 - 使用与文本渲染完全相同的算法
-        char* text = component->layer->text;
-        int text_len = strlen(text);
-        int current_pos = 0;
-        int visual_line = 0;  // 视觉上的行号（包括自动换行）
-        int max_width = render_rect.w;
-        
-        // 计算点击位置对应的视觉行号
-        int click_y = pt.y - render_rect.y;
-        int target_visual_line = click_y / (line_height + 2);
-        
-        // 考虑滚动偏移，计算实际的目标视觉行
-        int actual_scroll_line = layer->scroll_offset / (line_height + 2);
-        target_visual_line += actual_scroll_line;
-        if (target_visual_line < 0) target_visual_line = 0;
-        
-        // 遍历文本，模拟渲染过程（与文本渲染使用相同的算法）
-        while (current_pos < text_len) {
-            // 查找当前行可以显示的最大文本长度
-            int line_end = current_pos;
-            
-            // 尝试找到合适的换行点（找到\n或文本末尾）
-            while (line_end < text_len) {
-                // 遇到换行符时立即换行
-                if (text[line_end] == '\n') {
-                    break;
-                }
-                line_end++;
-            }
-            
-            // 计算整行文本的宽度
-            int current_width = 0;
-            char* temp_line = (char*)malloc(line_end - current_pos + 1);
-            if (temp_line) {
-                strncpy(temp_line, text + current_pos, line_end - current_pos);
-                temp_line[line_end - current_pos] = '\0';
-                
-                Texture* line_tex = backend_render_texture(layer->font->default_font, temp_line, layer->color);
-                if (line_tex) {
-                    int line_width, line_height_ignore;
-                    backend_query_texture(line_tex, NULL, NULL, &line_width, &line_height_ignore);
-                    current_width = line_width / yui_density;
-                    backend_render_text_destroy(line_tex);
-                }
-                
-                free(temp_line);
-            }
-            
-            // 确定当前视觉行的结束位置
-            int split_pos = current_pos;
-            
-            // 如果文本没有超过宽度限制
-            if (current_width <= max_width) {
-                // 使用整行（到\n或文本末尾）
-                split_pos = line_end;
-            }
-            // 如果文本超过宽度限制，需要硬换行
-            else {
-                // 找到最大的不超过宽度的位置
-                split_pos = current_pos;
-                while (split_pos < line_end) {
-                    char* test_line = (char*)malloc(split_pos - current_pos + 1);
-                    if (test_line) {
-                        strncpy(test_line, text + current_pos, split_pos - current_pos);
-                        test_line[split_pos - current_pos] = '\0';
-                        
-                        Texture* test_tex = backend_render_texture(layer->font->default_font, test_line, layer->color);
-                        if (test_tex) {
-                            int test_width, test_height;
-                            backend_query_texture(test_tex, NULL, NULL, &test_width, &test_height);
-                            if (test_width / yui_density > max_width) {
-                                backend_render_text_destroy(test_tex);
-                                free(test_line);
-                                break;
-                            }
-                            backend_render_text_destroy(test_tex);
-                        }
-                        
-                        free(test_line);
-                    }
-                    split_pos++;
-                } 
-                
-                if (split_pos > current_pos) {
-                    split_pos--;
-                }
-            }
-            
-            // 确保split_pos >= current_pos，防止负长度
-            if (split_pos < current_pos) {
-                split_pos = current_pos;
-            }
-            
-            // 检查是否是目标视觉行
-            if (visual_line == target_visual_line) {
-                // 这就是目标行，计算点击位置
-                int click_x = pt.x - render_rect.x;
-                int best_pos = current_pos;
-                int min_distance = abs(click_x);
-                
-                // 测试这一段内每个位置
-                for (int pos = current_pos; pos <= split_pos; pos++) {
-                    int len = pos - current_pos;
-                    char* temp_text = (char*)malloc(len + 1);
-                    if (temp_text) {
-                        strncpy(temp_text, text + current_pos, len);
-                        temp_text[len] = '\0';
-                        
-                        int actual_width = 0;
-                        if (len > 0) {
-                            Texture* temp_tex = backend_render_texture(layer->font->default_font, temp_text, layer->color);
-                            if (temp_tex) {
-                                int temp_w, temp_h;
-                                backend_query_texture(temp_tex, NULL, NULL, &temp_w, &temp_h);
-                                actual_width = temp_w / yui_density;
-                                backend_render_text_destroy(temp_tex);
-                            }
-                        }
-                        
-                        int distance = abs(click_x - actual_width);
-                        if (distance < min_distance) {
-                            min_distance = distance;
-                            best_pos = pos;
-                        }
-                        
-                        free(temp_text);
-                    }
-                }
-                
-                return best_pos;
-            }
-            
-            // 移动到下一视觉行
-            visual_line++;
-            
-            // 如果是在换行符处结束，直接跳到下一个字符
-            if (split_pos < text_len && text[split_pos] == '\n') {
-                current_pos = split_pos + 1;
-            } else {
-                current_pos = split_pos;
-            }
-        }
-        
-        // 如果超出范围，返回文本末尾
-        return text_len;
+        const char* text = component->layer->text;
+        int text_len = (int)strlen(text);
+        int line_height = text_component_get_line_height(component);
+        int line_stride = line_height + TEXT_LINE_SPACING;
+        int target_line = (pt.y - render_rect.y + layer->scroll_offset) / line_stride;
+        int start;
+        int end;
+
+        text_component_ensure_layout(component, render_rect.w);
+        if (target_line < 0) target_line = 0;
+        if (target_line >= component->layout_count) return text_len;
+        component->cursor_visual_line = target_line;
+        text_component_get_layout_line_range(component, text, text_len, target_line, &start, &end);
+        return text_component_position_in_layout_line(component, text, start, end,
+                                                      pt.x - render_rect.x);
     } else {
-        // 单行模式处理 - 使用实际渲染宽度
-        int click_x = pt.x - render_rect.x;
-        int text_len = strlen(component->layer->text);
-        int best_pos = 0;
-        int min_distance = abs(click_x);
-        
-        // 测试每个位置
-        for (int pos = 0; pos <= text_len; pos++) {
-            char* temp_text = (char*)malloc(pos + 1);
-            if (temp_text) {
-                strncpy(temp_text, component->layer->text, pos);
-                temp_text[pos] = '\0';
-                
-                // 渲染这段文本以获取实际宽度
-                int actual_width = 0;
-                if (pos > 0) {
-                    Texture* temp_tex = backend_render_texture(layer->font->default_font, temp_text, layer->color);
-                    if (temp_tex) {
-                        int temp_w, temp_h;
-                        backend_query_texture(temp_tex, NULL, NULL, &temp_w, &temp_h);
-                        actual_width = temp_w / yui_density;
-                        backend_render_text_destroy(temp_tex);
-                    }
-                }
-                
-                // 计算到点击位置的距离
-                int distance = abs(click_x - actual_width);
-                if (distance < min_distance) {
-                    min_distance = distance;
-                    best_pos = pos;
-                }
-                
-                free(temp_text);
-            }
-        }
-        
-        return best_pos;
+        component->cursor_visual_line = -1;
+        return text_component_position_in_layout_line(component, component->layer->text,
+                                                      0, (int)strlen(component->layer->text),
+                                                      pt.x - render_rect.x + component->scroll_x);
     }
 }
 
@@ -2114,7 +3268,7 @@ void text_component_render(Layer* layer) {
             1,
             line_number_bg.h
         };
-        Color separator_color = {51, 51, 51, 255};
+        Color separator_color = component->line_number_color;
         backend_render_fill_rect(&separator_line, separator_color);
         
         // 获取行高
@@ -2171,7 +3325,7 @@ void text_component_render(Layer* layer) {
                     
                     // 确定当前视觉行的结束位置
                     int split_pos = logical_line_pos;
-                    if (current_width <= max_width) {
+                    if (current_width <= max_width || !component->wrap) {
                         split_pos = line_end;
                     } else {
                         split_pos = logical_line_pos;
@@ -2347,8 +3501,8 @@ void text_component_render(Layer* layer) {
                     // 确定当前视觉行的结束位置
                     int split_pos = current_pos;
                     
-                    // 如果文本没有超过宽度限制
-                    if (current_width <= max_width) {
+                    // 如果文本没有超过宽度限制，或关闭了自动换行
+                    if (current_width <= max_width || !component->wrap) {
                         // 使用整行（到\n或文本末尾）
                         split_pos = line_end;
                     }
@@ -2583,7 +3737,42 @@ void text_component_render(Layer* layer) {
         int line_height = text_component_get_line_height(component);
         
         if (component->multiline) {
-            // 多行模式：需要考虑自动换行来计算光标位置
+            const char* text = component->layer->text;
+            int cursor_line = 0;
+            int line_start = 0;
+            int line_end = 0;
+            int cursor_x;
+            int cursor_y;
+            int line_stride = line_height + TEXT_LINE_SPACING;
+
+            text_component_ensure_layout(component, render_rect.w);
+            for (int i = 0; i < component->layout_count; i++) {
+                int start;
+                int end;
+                text_component_get_layout_line_range(component, text, text_len, i, &start, &end);
+
+                if (component->cursor_pos < end ||
+                    (component->cursor_pos == end &&
+                     ((end < text_len && text[end] == '\n') ||
+                      component->cursor_visual_line == i)) ||
+                    i == component->layout_count - 1) {
+                    cursor_line = i;
+                    line_start = start;
+                    line_end = end;
+                    break;
+                }
+            }
+
+            if (component->cursor_pos < line_start) component->cursor_pos = line_start;
+            if (component->cursor_pos > line_end) component->cursor_pos = line_end;
+            cursor_x = render_rect.x + text_component_measure_width(
+                component, text, line_start, component->cursor_pos);
+            cursor_y = render_rect.y + cursor_line * line_stride - layer->scroll_offset;
+
+            backend_render_fill_rect(&(Rect){cursor_x, cursor_y, 2, line_height},
+                                     component->cursor_color);
+        } else if (component->multiline) {
+            // 旧的多行光标计算路径（保留以便后续移除）
             char* text = component->layer->text;
             int current_pos = 0;
             int visual_line = 0;
@@ -2625,8 +3814,8 @@ void text_component_render(Layer* layer) {
                 // 确定当前视觉行的结束位置
                 int split_pos = current_pos;
                 
-                // 如果文本没有超过宽度限制
-                if (current_width <= max_width) {
+                // 如果文本没有超过宽度限制，或关闭了自动换行
+                if (current_width <= max_width || !component->wrap) {
                     // 使用整行（到\n或文本末尾）
                     split_pos = line_end;
                 }
@@ -2772,8 +3961,9 @@ void text_component_render(Layer* layer) {
     // 恢复裁剪区域
     backend_render_set_clip_rect(&prev_clip);
     
-    // 多行滚动条：仅当未启用 layer 通用垂直滚动条时自绘，避免与 render_vertical_scrollbar 重复
-    if (component->multiline && layer->scrollable != 1 && layer->scrollable != 3) {
+    // 多行滚动条：只读气泡不显示；且未启用 layer 通用垂直滚动条时才自绘
+    if (component->multiline && component->editable &&
+        layer->scrollable != 1 && layer->scrollable != 3) {
         int pad_top;
         int pad_right;
         int pad_bottom;

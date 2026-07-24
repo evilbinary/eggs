@@ -248,14 +248,27 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
     
     // 边框宽度
     cJSON* border_width_obj = cJSON_GetObjectItem(style_obj, "borderWidth");
+    if (!border_width_obj) border_width_obj = cJSON_GetObjectItem(style_obj, "borderSize");
+    if (!border_width_obj) border_width_obj = cJSON_GetObjectItem(style_obj, "border-width");
     if (border_width_obj && cJSON_IsNumber(border_width_obj)) {
         rule->border_width = border_width_obj->valueint;
     }
     
     // 边框颜色
     cJSON* border_color_obj = cJSON_GetObjectItem(style_obj, "borderColor");
+    if (!border_color_obj) border_color_obj = cJSON_GetObjectItem(style_obj, "border-color");
     if (border_color_obj && cJSON_IsString(border_color_obj)) {
         parse_color(border_color_obj->valuestring, &rule->border_color);
+    }
+
+    /* border: "3px solid #ff6600" 简写覆盖 width/color */
+    cJSON* border_obj = cJSON_GetObjectItem(style_obj, "border");
+    if (border_obj) {
+        LayerBorder tmp;
+        if (parse_layer_border(border_obj, &tmp)) {
+            rule->border_width = tmp.width;
+            rule->border_color = tmp.color;
+        }
     }
     
     // 间距
@@ -468,20 +481,9 @@ void theme_apply_component_style(Layer* layer, cJSON* style) {
 
     if (layer->set_style) {
         layer->set_style(layer, style);
-        return;
     }
 
-    if (layer->set_property) {
-        cJSON* item = style->child;
-        while (item) {
-            if (item->string) {
-                layer->set_property(layer, item->string, item, 0);
-            }
-            item = item->next;
-        }
-        return;
-    }
-
+    /* 通用 Layer 样式（border/shadow/radius 等）始终经属性表应用 */
     layer_set_properties_from_json(layer, style, 0);
 }
 
@@ -519,20 +521,46 @@ void theme_apply_to_layer(Theme* theme, Layer* layer, const char* id, const char
         return;
     }
 
+    /* 切换主题时先清空阴影/渐变/边框，再由新规则写入 */
+    memset(&layer->shadow, 0, sizeof(layer->shadow));
+    memset(&layer->bg_gradient, 0, sizeof(layer->bg_gradient));
+    memset(&layer->border, 0, sizeof(layer->border));
+
     printf("[Theme] Applying theme to layer id='%s', type='%s', specificity=%d\n",
            id, type, max_specificity);
-    for (int i = rule_count - 1; i >= 0; i--) {
+
+    ThemeRule* matching[256];
+    int matching_spec[256];
+    int matching_count = 0;
+    /* JSON 顺序（低下标先写入）：同 specificity 时后写的覆盖先写的 */
+    for (int i = rule_count - 1; i >= 0 && matching_count < 256; i--) {
         ThemeRule* current = ordered[i];
         if (!theme_rule_matches(current, layer, id, type)) {
             continue;
         }
-        if (theme_rule_specificity(current) != max_specificity) {
-            continue;
-        }
+        matching[matching_count] = current;
+        matching_spec[matching_count] = theme_rule_specificity(current);
+        matching_count++;
+    }
 
+    /* 按 specificity 升序稳定排序后级联合并 */
+    for (int a = 0; a < matching_count - 1; a++) {
+        for (int b = 0; b < matching_count - 1 - a; b++) {
+            if (matching_spec[b] > matching_spec[b + 1]) {
+                int tmp_spec = matching_spec[b];
+                ThemeRule* tmp_rule = matching[b];
+                matching_spec[b] = matching_spec[b + 1];
+                matching[b] = matching[b + 1];
+                matching_spec[b + 1] = tmp_spec;
+                matching[b + 1] = tmp_rule;
+            }
+        }
+    }
+
+    for (int i = 0; i < matching_count; i++) {
         printf("[Theme] Merging style for layer id='%s' selector='%s'\n",
-               id, current->selector);
-        theme_merge_style(current, layer);
+               id, matching[i]->selector);
+        theme_merge_style(matching[i], layer);
     }
 }
 
@@ -594,9 +622,14 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
         }
     }
     
-    // 边框颜色
-    if (rule->border_color.a > 0) {
-        // TODO: 需要添加边框支持
+    // 边框
+    if (rule->border_width > 0 || rule->border_color.a > 0) {
+        layer->border.width = rule->border_width;
+        layer->border.color = rule->border_color;
+        if (layer->border.width > 0 && layer->border.style == LAYER_BORDER_NONE) {
+            layer->border.style = LAYER_BORDER_SOLID;
+        }
+        mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
     }
     
     // 间距（应用到布局管理器）

@@ -103,6 +103,12 @@ LabelComponent* label_component_create(Layer* layer) {
     return label_component_create_from_json(layer, NULL);
 }
 
+static void label_layer_destroy(Layer* layer) {
+    if (!layer || !layer->component) return;
+    label_component_destroy((LabelComponent*)layer->component);
+    layer->component = NULL;
+}
+
 LabelComponent* label_component_create_from_json(Layer* layer, cJSON* json_obj) {
     if (!layer) return NULL;
 
@@ -130,6 +136,7 @@ LabelComponent* label_component_create_from_json(Layer* layer, cJSON* json_obj) 
     layer->component = component;
     layer->render = label_component_render;
     layer->handle_pointer_event = label_component_handle_pointer_event;
+    layer->on_destroy = label_layer_destroy;
 
     return component;
 }
@@ -276,8 +283,10 @@ void label_component_render(Layer* layer) {
             backend_query_texture(text_texture, NULL, NULL, &text_width, &text_height);
 
             Rect text_rect;
-            text_rect.h = text_height / yui_density;
-            text_rect.w = text_width / yui_density;
+            int nat_w = text_width / yui_density;
+            int nat_h = text_height / yui_density;
+            text_rect.w = nat_w;
+            text_rect.h = nat_h;
             text_rect.y = layer->rect.y + (layer->rect.h - text_rect.h) / 2;
 
             switch (component->text_alignment) {
@@ -295,11 +304,22 @@ void label_component_render(Layer* layer) {
             }
 
             if (text_rect.x < layer->rect.x) text_rect.x = layer->rect.x;
-            if (text_rect.x + text_rect.w > layer->rect.x + layer->rect.w)
-                text_rect.w = layer->rect.x + layer->rect.w - text_rect.x;
             if (text_rect.y < layer->rect.y) text_rect.y = layer->rect.y;
-            if (text_rect.y + text_rect.h > layer->rect.y + layer->rect.h)
-                text_rect.h = layer->rect.y + layer->rect.h - text_rect.y;
+
+            /* 放不下时等比缩小，禁止单独压扁宽/高造成变形 */
+            if (layer->rect.w > 0 && text_rect.w > layer->rect.w) {
+                float s = (float)layer->rect.w / (float)text_rect.w;
+                text_rect.w = layer->rect.w;
+                text_rect.h = (int)(text_rect.h * s);
+                if (text_rect.h < 1) text_rect.h = 1;
+            }
+            if (layer->rect.h > 0 && text_rect.h > layer->rect.h) {
+                float s = (float)layer->rect.h / (float)text_rect.h;
+                text_rect.h = layer->rect.h;
+                text_rect.w = (int)(text_rect.w * s);
+                if (text_rect.w < 1) text_rect.w = 1;
+                text_rect.y = layer->rect.y;
+            }
 
             backend_render_text_copy(text_texture, NULL, &text_rect);
             backend_render_text_destroy(text_texture);

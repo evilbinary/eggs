@@ -5,8 +5,8 @@
 # * 邮箱: rootntsd@gmail.com
 # ********************************************************************
 target("yaml2json")
-add_packages(get_config('default_libc'))
 set_kind("static")
+add_flags()
 add_deps("yaml","cjson")
 add_files(
     '*.c',

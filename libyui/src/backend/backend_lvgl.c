@@ -292,6 +292,13 @@ static void lvgl_yui_sdl_event_hook(const SDL_Event* event, void* user_data)
         key_event.data.key.mod = event->key.keysym.mod;
         key_event.data.key.repeat = event->key.repeat;
         handle_key_event(root, &key_event);
+    } else if (event->type == SDL_KEYUP) {
+        KeyEvent key_event;
+        key_event.type = KEY_EVENT_UP;
+        key_event.data.key.key_code = event->key.keysym.sym;
+        key_event.data.key.mod = event->key.keysym.mod;
+        key_event.data.key.repeat = 0;
+        handle_key_event(root, &key_event);
     } else if (event->type == SDL_TEXTEDITING) {
         KeyEvent key_event;
         key_event.type = KEY_EVENT_TEXT_EDITING;
@@ -755,6 +762,20 @@ void backend_quit(void)
     lv_port_deinit();
 }
 
+static int g_lvgl_exit_code = 0;
+static int g_lvgl_auto_frames = -1;
+
+void backend_set_auto_frames(int frames) { g_lvgl_auto_frames = frames; }
+void backend_request_quit(int exit_code)
+{
+    g_lvgl_exit_code = exit_code;
+    g_running = 0;
+}
+int backend_get_exit_code(void) { return g_lvgl_exit_code; }
+int backend_should_quit(void) { return !g_running; }
+void backend_set_headless(int on) { (void)on; }
+int backend_is_headless(void) { return 0; }
+
 void backend_set_ui_root(Layer* root)
 {
     g_ui_root = root;
@@ -774,6 +795,24 @@ Texture* backend_load_texture_from_base64(const char* base64_data, size_t data_l
     (void)base64_data;
     (void)data_len;
     return NULL;
+}
+
+int backend_measure_text_width(DFont* font, const char* text)
+{
+#if defined(YUI_LVGL_PORT_SDL)
+    int w = 0;
+    int h = 0;
+
+    if (!font || !text || !text[0]) {
+        return 0;
+    }
+    if (TTF_SizeUTF8((TTF_Font*)font, text, &w, &h) == 0 && w > 0) {
+        return (int)(((float)w / yui_density) + 0.5f);
+    }
+#endif
+    (void)font;
+    (void)text;
+    return 0;
 }
 
 Texture* backend_render_texture(DFont* font, const char* text, Color color)
@@ -1017,6 +1056,11 @@ void backend_render_text_copy(Texture* texture, const Rect* srcrect, const Rect*
 #endif
 }
 
+void backend_render_texture_tinted(Texture* texture, const Rect* srcrect, const Rect* dstrect, Color tint) {
+    (void)tint;
+    backend_render_text_copy(texture, srcrect, dstrect);
+}
+
 void backend_render_get_clip_rect(Rect* prev_clip)
 {
     if (prev_clip) {
@@ -1065,6 +1109,30 @@ void backend_render_rounded_rect_with_border(Rect* rect, Color bg_color, int rad
     (void)border_width;
     backend_render_fill_rect(rect, bg_color);
     (void)border_color;
+}
+
+void backend_render_shadow(const Rect* rect, int radius,
+                           int offset_x, int offset_y, int blur, int spread, Color color)
+{
+    Rect r;
+    (void)blur;
+    if (!rect || color.a == 0) return;
+    r = *rect;
+    r.x += offset_x - spread;
+    r.y += offset_y - spread;
+    r.w += spread * 2;
+    r.h += spread * 2;
+    if (r.w > 0 && r.h > 0) {
+        backend_render_rounded_rect(&r, color, radius + (spread > 0 ? spread : 0));
+    }
+}
+
+void backend_render_rounded_gradient(const Rect* rect, int radius, int vertical,
+                                     const Color* colors, int count)
+{
+    (void)vertical;
+    if (!rect || !colors || count <= 0) return;
+    backend_render_rounded_rect((Rect*)rect, colors[0], radius);
 }
 
 void backend_render_line(int x1, int y1, int x2, int y2, Color color)
@@ -1175,6 +1243,13 @@ void backend_run(Layer* ui_root)
 #else
     while (g_running) {
         backend_lvgl_frame();
+        if (g_lvgl_auto_frames >= 0) {
+            if (g_lvgl_auto_frames == 0) {
+                g_running = 0;
+            } else {
+                g_lvgl_auto_frames--;
+            }
+        }
     }
 #endif
 }
