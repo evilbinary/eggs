@@ -9,14 +9,16 @@
 
 
 int open(const char *filename, int flags, ...) {
-  FILE *file;
   int fd;
-  va_list vargs;
-  mode_t mode;
+  mode_t mode = 0;
 
-  va_start(vargs, flags);
-  mode = va_arg(vargs, mode_t);
-  va_end(vargs);
+  if (flags & O_CREAT) {
+    va_list vargs;
+    va_start(vargs, flags);
+    mode = va_arg(vargs, mode_t);
+    va_end(vargs);
+    (void)mode;
+  }
 
   fd = ya_open(filename, flags);
 

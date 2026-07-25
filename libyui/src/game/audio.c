@@ -29,6 +29,12 @@ void game_audio_init(void)
     if (g_engine_ok) {
         return;
     }
+#if defined(__YIYIYA__)
+    /* YiYiYa 无可用音频设备；ma_engine_init 会卡在开设备/建线程 */
+    g_engine_ok = 0;
+    printf("Game audio: skipped on YiYiYa\n");
+    return;
+#endif
     r = ma_engine_init(NULL, &g_engine);
     if (r != MA_SUCCESS) {
         printf("Game audio: ma_engine_init failed (%d), audio disabled\n", (int)r);
