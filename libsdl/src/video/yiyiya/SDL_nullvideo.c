@@ -39,6 +39,7 @@
 
 #include "SDL_video.h"
 #include "SDL_mouse.h"
+#include "SDL_timer.h"
 #include "../SDL_sysvideo.h"
 #include "../SDL_pixels_c.h"
 #include "../../events/SDL_events_c.h"
@@ -270,7 +271,8 @@ SDL_Surface *DUMMY_SetVideoMode(_THIS, SDL_Surface *current,
 
 /* 	printf("Setting mode %dx%d\n", width, height); */
 
-	SDL_memset(this->hidden->buffer, 0, width * height * (bpp / 8));
+	/* 勿清零共享 screen buffer：会整屏闪黑，且清掉已有 UI */
+	/* SDL_memset(this->hidden->buffer, 0, width * height * (bpp / 8)); */
 
 	/* Allocate the new pixel format for the screen */
 	if ( ! SDL_ReallocFormat(current, bpp, 0, 0, 0, 0) ) {
@@ -315,15 +317,22 @@ static void DUMMY_UnlockHWSurface(_THIS, SDL_Surface *surface)
 
 static void DUMMY_UpdateRects(_THIS, int numrects, SDL_Rect *rects)
 {
-	/* do nothing. */
+	(void)numrects;
+	(void)rects;
+	/* 软件路径常对同一帧多次 UpdateRects；合并，避免中间黑帧被 present */
+	static Uint32 last_flush_ms = 0;
+	Uint32 now = SDL_GetTicks();
+	if (last_flush_ms != 0 && (now - last_flush_ms) < 16) {
+		return;
+	}
+	last_flush_ms = now;
 	screen_flush();
-	
 }
 
 static int DUMMY_FlipHWSurface(_THIS, SDL_Surface *surface)
 {
-	
-	printf("flip\n");
+	(void)surface;
+	screen_flush();
 	return 0;
 }
 

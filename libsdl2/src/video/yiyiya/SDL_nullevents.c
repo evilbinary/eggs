@@ -128,9 +128,8 @@ void DUMMY_PumpEvents(_THIS) {
         break;
     }
   }
-  if (screen && screen_get_mode() == SCREEN_MODE_XWIN) {
-    screen_flush();
-  }
+  /* 勿在 PumpEvents 里 screen_flush：PollEvent 每帧都会泵事件，
+   * 会导致无 Present 也整屏重绘闪烁；刷新只走 UpdateWindowFramebuffer。 */
 }
 
 #endif /* SDL_VIDEO_DRIVER_DUMMY */

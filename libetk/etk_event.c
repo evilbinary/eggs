@@ -16,8 +16,9 @@ Ret etk_event_dispatch() {
   u32 ret=etk_platform_event_poll(&event);
   if(ret==RET_OK){
     etk_wnd_manager_queue_event(etk_default_wnd_manager(), &event);
+    return RET_OK;
   }
-  return RET_OK;
+  return RET_CONTINUE;
 }
 
 Ret etk_event_queue(EtkEvent* event) {

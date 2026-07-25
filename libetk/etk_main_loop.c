@@ -1,6 +1,7 @@
 #include "etk_main_loop.h"
 
 #include "etk_global.h"
+#include <unistd.h>
 
 EtkMainLoop* etk_main_loop_create(EtkSourcesManager* sources_manager) {
   EtkMainLoop* thiz = (EtkMainLoop*)ETK_MALLOC(sizeof(EtkMainLoop));
@@ -11,13 +12,17 @@ EtkMainLoop* etk_main_loop_create(EtkSourcesManager* sources_manager) {
   return thiz;
 }
 Ret etk_main_loop_run(EtkMainLoop* thiz) {
-  e32 wait_time = 3600 * 10000;
+  e32 wait_time = 16;
   e32 source_wait_time = 0;
   EtkSource* source;
+  static int boot_flush = 1;
   thiz->running = 1;
 
   while (thiz->running) {
-    if (etk_event_dispatch() != RET_OK) {
+    int need_flush = boot_flush;
+    wait_time = 16;
+    if (etk_event_dispatch() == RET_OK) {
+      need_flush = 1;
     }
     for (source = thiz->sources_manager->sources; source != NULL;
          source = source->next) {
@@ -32,15 +37,25 @@ Ret etk_main_loop_run(EtkMainLoop* thiz) {
         continue;
       }
       if ((source_wait_time = etk_source_check(source)) == 0) {
-        // printf("source_xxxx_time:%d\n",source_wait_time);
-        // dbg_printf("etk_source_check\n");
+        need_flush = 1;
         if (etk_source_dispatch(source) != RET_OK) {
           dbg_printf("etk_sources_manager_remove33\n");
           etk_sources_manager_remove(thiz->sources_manager, source);
         }
       }
     }
-    etk_display_flush();
+    /* 空闲不 present：避免每帧 memcpy 到 FB 造成闪屏 */
+    if (need_flush) {
+      etk_display_flush();
+      boot_flush = 0;
+    }
+    if (wait_time < 1) {
+      wait_time = 1;
+    }
+    if (wait_time > 16) {
+      wait_time = 16;
+    }
+    usleep((unsigned)wait_time * 1000u);
   }
 }
 

@@ -21,20 +21,27 @@ size_t etk_get_relative_time(void) {
 }
 
 Ret etk_platform_flush() {
+  static i32 last_mx = -1, last_my = -1;
   EtkRect r;
+  int mouse_moved = (mouse.x != last_mx || mouse.y != last_my);
+
   r.x = mouse.x;
   r.y = mouse.y;
   r.width = 4;
   r.height = 4;
 
-  etk_default_wnd_manager_update_rect(etk_default_wnd_manager(), &last_rect);
-  screen_fill_rect(mouse.x, mouse.y, 4, 4, 0x00ff00);
-  last_rect=r;
-  if (curssor != NULL) {
-    screen_show_bitmap(mouse.x, mouse.y, 16, 16, curssor);
+  if (mouse_moved) {
+    etk_default_wnd_manager_update_rect(etk_default_wnd_manager(), &last_rect);
+    screen_fill_rect(mouse.x, mouse.y, 4, 4, 0x00ff00);
+    last_rect = r;
+    last_mx = mouse.x;
+    last_my = mouse.y;
+    if (curssor != NULL) {
+      screen_show_bitmap(mouse.x, mouse.y, 16, 16, curssor);
+    }
   }
   screen_flush();
-
+  return RET_OK;
 }
 
 Ret etk_platform_event_poll(EtkEvent *event) {

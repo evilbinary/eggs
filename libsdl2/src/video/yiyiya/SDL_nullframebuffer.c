@@ -47,10 +47,13 @@ int SDL_DUMMY_CreateWindowFramebuffer(_THIS, SDL_Window * window, Uint32 * forma
 
 int SDL_DUMMY_UpdateWindowFramebuffer(_THIS, SDL_Window * window, const SDL_Rect * rects, int numrects)
 {
+    (void)rects;
+    (void)numrects;
 
     if (!SDL_GetWindowData(window, DUMMY_SURFACE)) {
         return SDL_SetError("Couldn't find yiyiya framebuffer for window");
     }
+    /* Present 已在帧末调用；直接 present，勿节流以免丢帧 */
     screen_flush();
     return 0;
 }

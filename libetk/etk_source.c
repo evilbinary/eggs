@@ -78,8 +78,9 @@ Ret etk_source_queue_event(EtkSource* thiz, EtkEvent* event) {
 }
 
 int etk_source_default_check(EtkSource* thiz) {
-  PrivInfo* priv = (PrivInfo*)thiz->priv;
-  return 0;
+  (void)thiz;
+  /* 默认源无队列可读；返回 -1 表示不就绪，避免主循环每 tick 狂刷 */
+  return -1;
 }
 
 EtkSource* etk_source_create(EtkOnEvent on_event, void* user_data) {
