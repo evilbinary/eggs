@@ -301,7 +301,7 @@ inline void screen_put_pixel(u32 x, u32 y, u32 c) {
     return;
   }
 
-  gscreen.buffer[gscreen.width * y + x] = c;
+  gscreen.buffer[gscreen.width * y + x] = c | 0xFF000000u;
 }
 
 // 画点函数
@@ -487,12 +487,11 @@ void screen_draw_char(i32 x, i32 y, u16 ch) {
 void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
                                   u32 bgcolor) {
   if (y < 0 || y >= (gscreen.height - 16)) {
-    return ;
+    return;
   }
   u32 i, j;
   u16 code, z;
   u8 *lp;
-  u32 *pp;
   code = ch;
   if (code < 0x20) return;
   if (code < 0x7f) {
@@ -501,22 +500,15 @@ void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
     lp = SCREEN_ASCII + code * 16;
     for (i = 0; i < 16; i++) {
       z = *lp++;
-      pp = (u8 *)(gscreen.buffer + (y + i) * gscreen.width + x);
       for (j = 0; j < 8; j++) {
-        if (z & 0x01)
-        // if(z & 0x80)
-        {
-          *pp++ = frcolor;
-        } else if (bgcolor == 0) {
-          pp++;
-        } else {
-          *pp++ = bgcolor;
+        if (z & 0x01) {
+          screen_put_pixel(x + j, y + i, frcolor);
+        } else if (bgcolor != 0) {
+          screen_put_pixel(x + j, y + i, bgcolor);
         }
-        // z = z <<1;
         z = z >> 1;
       }
     }
-    x = x + 1;
   } else if (code > 0xa1a1) {
     if (x > (gscreen.width - 1)) return;
     code = code - 0xa1a1;
@@ -525,19 +517,15 @@ void screen_draw_char_witdh_color(i32 x, i32 y, u16 ch, u32 frcolor,
     for (i = 0; i < 16; i++) {
       z = *lp++;
       z = (z << 8) + *lp++;
-      pp = (u8 *)(gscreen.buffer + (y + i) * gscreen.width + gscreen.cur.x);
       for (j = 0; j < 16; j++) {
         if (z & 0x8000) {
-          *pp++ = frcolor;
-        } else if (bgcolor == 0) {
-          pp++;
-        } else {
-          *pp++ = bgcolor;
+          screen_put_pixel(x + j, y + i, frcolor);
+        } else if (bgcolor != 0) {
+          screen_put_pixel(x + j, y + i, bgcolor);
         }
         z = z << 1;
       }
     }
-    x = x + 16;
   }
 }
 void screen_draw_string_with_color(i32 x, i32 y, i8 *str, u32 frcolor,
@@ -664,15 +652,59 @@ void screen_init() {
   screen_init_with_mode(SCREEN_MODE_XWIN);  // SCREEN_MODE_XWIN 默认使用 fb 模式
 }
 
+/* 读 /dev/fb 信息到 gscreen.fb；成功返回 fd，失败返回 -1。
+ * 宽高/地址用 ioctl 返回值，不依赖 INFO 写用户缓冲。 */
+static int screen_read_fb_info(void) {
+  int fd = open("/dev/fb", O_RDWR);
+  if (fd < 0) {
+    return -1;
+  }
+  u32 w = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_WIDTH, 0);
+  u32 h = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_HEIGHT, 0);
+  u32 bpp = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_BPP, 0);
+  u32 fb = (u32)ioctl(fd, IOC_READ_FRAMBUFFER, 0);
+  /* 勿用 IOC_READ_FRAMBUFFER_INFO 整结构拷贝：内核 vga_device_t 更长，
+   * 会写穿 gscreen.fb 后面的 screen_mode / xwin_handle。 */
+  if (w > 0) gscreen.fb.width = w;
+  if (h > 0) gscreen.fb.height = h;
+  if (bpp > 0) gscreen.fb.bpp = bpp;
+  if (fb != 0) gscreen.fb.frambuffer = (u32*)(uintptr_t)fb;
+  if (gscreen.fb.framebuffer_count == 0) {
+    gscreen.fb.framebuffer_count = 1;
+  }
+  if (gscreen.fb.framebuffer_length == 0 && gscreen.fb.width > 0 &&
+      gscreen.fb.height > 0) {
+    u32 bytes = gscreen.fb.bpp >= 8 ? (gscreen.fb.bpp / 8) : 4;
+    gscreen.fb.framebuffer_length =
+        gscreen.fb.width * gscreen.fb.height * bytes;
+  }
+  return fd;
+}
+
 void screen_init_with_mode(screen_mode_t mode) {
   gscreen.screen_mode = mode;
 
   if (mode == SCREEN_MODE_XWIN) {
-    // XWIN 模式初始化
-    // 使用预设尺寸或默认尺寸
+    // 与 FB 模式同一套 IOC_READ_FRAMBUFFER_INFO 取真实分辨率
+    if (gscreen.width == 0 || gscreen.height == 0) {
+      int fb = screen_read_fb_info();
+      if (fb >= 0) {
+        close(fb);
+        if (gscreen.fb.width > 0 && gscreen.fb.height > 0) {
+          gscreen.width = (int)gscreen.fb.width;
+          gscreen.height = (int)gscreen.fb.height;
+          if (gscreen.fb.bpp > 0) {
+            gscreen.bpp = (int)gscreen.fb.bpp;
+          }
+        } else {
+          gscreen.width = 480;
+          gscreen.height = 320;
+        }
+      }
+    }
     if (gscreen.width == 0) gscreen.width = 800;
     if (gscreen.height == 0) gscreen.height = 600;
-    gscreen.bpp = 32;
+    if (gscreen.bpp == 0) gscreen.bpp = 32;
     gscreen.buffer_length = gscreen.width * gscreen.height * 4;
     gscreen.buffer = malloc(gscreen.buffer_length);
     gscreen.pbuffer = gscreen.buffer;
@@ -680,8 +712,10 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.cur.y = 0;
     gscreen.ASC = SCREEN_ASCII;
     gscreen.fd = -1;
+    /* XWIN 不用 /dev/fb flush，避免 fd=-1 时误走 FB ioctl */
+    gscreen.fb.framebuffer_count = 0;
 
-    // 创建默认窗口
+    // 创建默认窗口（默认带缓存；需要直写时用 XWIN_FLAG_DIRECT）
     gscreen.xwin_handle = xwin_create(0, 0, gscreen.width, gscreen.height, "");
     xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
 
@@ -692,23 +726,24 @@ void screen_init_with_mode(screen_mode_t mode) {
   }
 
   // FB 模式初始化
-  int fd = open("/dev/fb", O_RDWR);
+  int fd = screen_read_fb_info();
   printf("screen init fd:%d\n", fd);
-  ioctl(fd, IOC_READ_FRAMBUFFER_INFO, &(gscreen.fb),
-        sizeof(framebuffer_info_t));
 
   gscreen.buffer = gscreen.fb.frambuffer;
   gscreen.pbuffer = gscreen.fb.frambuffer;
   gscreen.width = gscreen.fb.width;
   gscreen.height = gscreen.fb.height;
-  gscreen.bpp = gscreen.fb.bpp;
+  gscreen.bpp = gscreen.fb.bpp > 0 ? gscreen.fb.bpp : 32;
   gscreen.fd = fd;
   gscreen.xwin_handle = 0;
+  gscreen.cur.x = 0;
+  gscreen.cur.y = 0;
+  gscreen.ASC = SCREEN_ASCII;
   if (gscreen.fb.framebuffer_count == 0) {
     gscreen.fb.framebuffer_count = 1;
   }
   if (gscreen.fb.framebuffer_length == 0 && gscreen.width > 0 &&
-      gscreen.height > 0 && gscreen.bpp > 0) {
+      gscreen.height > 0) {
     gscreen.fb.framebuffer_length =
         gscreen.width * gscreen.height * (gscreen.bpp / 8);
   }
@@ -822,6 +857,9 @@ void screen_flush() {
                                                gscreen.fb.framebuffer_index;
 #endif
 
+  if (gscreen.fd < 0) {
+    return;
+  }
   ioctl(gscreen.fd, IOC_FLUSH_FRAMBUFFER, current_index);
 }
 
