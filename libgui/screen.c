@@ -354,20 +354,16 @@ i32 screen_get_poi32_color(i32 x, i32 y) {
 }
 
 void screen_draw_vline(i32 x1, i32 x2, i32 y, i32 color) {
-  register i32 i;
-  i32 x_max = gscreen.width - 1;   // 每行像素数
-  i32 y_max = gscreen.height - 1;  // 每列像素数
-  // 防止越界
-  if (x1 >= x_max) {
-    x1 = x_max;
-  }
-  if (x2 >= x_max) {
-    x2 = x_max;
-  }
-  if (y >= y_max) {
-    y = y_max;
-  }
-  for (i = x1; i < x2; i++) screen_put_pixel(i, y, color);
+  i32 x_max = gscreen.width;
+  i32 y_max = gscreen.height;
+  if (gscreen.buffer == NULL || y < 0 || y >= y_max) return;
+  if (x1 < 0) x1 = 0;
+  if (x2 > x_max) x2 = x_max;
+  if (x1 >= x2) return;
+
+  u32 c = (u32)color | 0xFF000000u;
+  u32* row = gscreen.buffer + (u32)y * (u32)gscreen.width + (u32)x1;
+  for (i32 i = 0; i < x2 - x1; i++) row[i] = c;
 }
 
 void screen_draw_hline(i32 y1, i32 y2, i32 x, i32 color) {
@@ -437,8 +433,21 @@ void screen_clear_screen(void) {
 }
 
 void screen_fill_rect(i32 x, i32 y, i32 w, i32 h, u32 color) {
-  register i32 i;
-  for (i = y; i < y + h; i++) screen_draw_vline(x, x + w, i, color);
+  if (gscreen.buffer == NULL || w <= 0 || h <= 0) return;
+  i32 x0 = x < 0 ? 0 : x;
+  i32 y0 = y < 0 ? 0 : y;
+  i32 x1 = x + w;
+  i32 y1 = y + h;
+  if (x1 > (i32)gscreen.width) x1 = (i32)gscreen.width;
+  if (y1 > (i32)gscreen.height) y1 = (i32)gscreen.height;
+  if (x0 >= x1 || y0 >= y1) return;
+
+  u32 c = color | 0xFF000000u;
+  u32 row_w = (u32)(x1 - x0);
+  for (i32 row = y0; row < y1; row++) {
+    u32* dst = gscreen.buffer + (u32)row * gscreen.width + (u32)x0;
+    for (u32 i = 0; i < row_w; i++) dst[i] = c;
+  }
 }
 
 void screen_put_ascii(i32 x, i32 y, u8 ch, i32 color) {
