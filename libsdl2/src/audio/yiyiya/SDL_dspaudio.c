@@ -45,7 +45,8 @@
 static void
 DSP_DetectDevices(void)
 {
-    SDL_EnumUnixAudioDevices(0, NULL);
+    /* 只注册默认设备，避免 Enum 扫 /dev/dsp0..64 */
+    SDL_AddAudioDevice(SDL_FALSE, "/dev/dsp", NULL, (void *)(uintptr_t) 1);
 }
 
 
@@ -296,13 +297,6 @@ DSP_FlushCapture(_THIS)
 }
 
 static SDL_bool InitTimeDevicesExist = SDL_FALSE;
-static int
-look_for_devices_test(int fd)
-{
-    InitTimeDevicesExist = SDL_TRUE;  /* note that _something_ exists. */
-    /* Don't add to the device list, we're just seeing if any devices exist. */
-    return 0;
-}
 
 /* This function waits until it is possible to write a full sound buffer */
 static void DSP_WaitAudio(_THIS)
@@ -324,11 +318,8 @@ static void DSP_WaitAudio(_THIS)
 static int
 DSP_Init(SDL_AudioDriverImpl * impl)
 {
-    InitTimeDevicesExist = SDL_FALSE;
-    SDL_EnumUnixAudioDevices(0, look_for_devices_test);
-    if (!InitTimeDevicesExist) {
-        return 0;  /* maybe try a different backend. */
-    }
+    /* YiYiYa 固定有 /dev/dsp，跳过枚举（原先会 open 探测 dsp0..64 数百次） */
+    InitTimeDevicesExist = SDL_TRUE;
 
     /* Set the function pointers */
     impl->DetectDevices = DSP_DetectDevices;
@@ -341,7 +332,7 @@ DSP_Init(SDL_AudioDriverImpl * impl)
     impl->WaitDevice = DSP_WaitAudio;
 
     impl->AllowsArbitraryDeviceNames = 1;
-    impl->HasCaptureSupport = SDL_TRUE;
+    impl->HasCaptureSupport = SDL_FALSE;
 
     return 1;   /* this audio target is available. */
 }

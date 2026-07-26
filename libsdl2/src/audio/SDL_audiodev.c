@@ -107,6 +107,10 @@ SDL_EnumUnixAudioDevices_Internal(const int iscapture, const int classic, int (*
     }
     test_device(iscapture, audiodev, flags, test);
 
+#if defined(__YIYIYA__) || defined(SDL_AUDIO_DRIVER_YIYIYA)
+    /* YiYiYa 只有 /dev/dsp，不必扫 dsp0..dsp64（每次 open 失败刷屏且极慢） */
+    (void)audiopath;
+#else
     if (SDL_strlen(audiodev) < (sizeof(audiopath) - 3)) {
         int instance = 0;
         while (instance <= 64) {
@@ -116,6 +120,7 @@ SDL_EnumUnixAudioDevices_Internal(const int iscapture, const int classic, int (*
             test_device(iscapture, audiopath, flags, test);
         }
     }
+#endif
 }
 
 void
