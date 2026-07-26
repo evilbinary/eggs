@@ -48,6 +48,8 @@ void xwin_process_events(void);
 // 渲染
 void xwin_render(void);
 void xwin_update(xwin_handle_t win);
+u32* xwin_get_fb(xwin_handle_t win);
+u32 xwin_get_ticks(void);
 
 // ========== Syscall 编号 ==========
 #define SYS_XWIN_BASE          0x5000
@@ -71,6 +73,8 @@ void xwin_update(xwin_handle_t win);
 #define SYS_XWIN_PROCESS_EVENTS (SYS_XWIN_BASE + 21)
 #define SYS_XWIN_RENDER        (SYS_XWIN_BASE + 22)
 #define SYS_XWIN_UPDATE        (SYS_XWIN_BASE + 23)
+#define SYS_XWIN_GET_FB        (SYS_XWIN_BASE + 24) /* 返回窗口/LCD VA */
+#define SYS_XWIN_GET_TICKS     (SYS_XWIN_BASE + 25) /* schedule ticks */
 
 
 

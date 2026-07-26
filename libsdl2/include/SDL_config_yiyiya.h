@@ -158,10 +158,12 @@ typedef unsigned _Int64 uint64_t;
 
 #define HAVE_MMAP 1
 
-// #define HAVE_MALLOC 1
-// #define HAVE_CALLOC 1
-// #define HAVE_REALLOC    1
-// #define HAVE_FREE   1
+/* 必须用系统 malloc：若走内置 dlmalloc，会与 musl mallocng 抢同一 brk，
+ * 加载较大 JSON（如 game2048）时堆元数据损坏 → a_crash/UNDEF。 */
+#define HAVE_MALLOC 1
+#define HAVE_CALLOC 1
+#define HAVE_REALLOC 1
+#define HAVE_FREE 1
 // #define HAVE_ALLOCA 1
 
 #define HAVE_GETENV 1

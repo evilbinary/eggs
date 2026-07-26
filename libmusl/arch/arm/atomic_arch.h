@@ -74,7 +74,8 @@ static inline void a_barrier()
 #define a_crash a_crash
 static inline void a_crash()
 {
-	printf("i have crash %s:%d %s\n",__FILE__, __LINE__, __FUNCTION__);
+	printf("i have crash %s:%d %s lr=%p\n", __FILE__, __LINE__, __FUNCTION__,
+	       __builtin_return_address(0));
 	__asm__ __volatile__(
 #ifndef __thumb__
 		".word 0xe7f000f0"

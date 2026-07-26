@@ -10,7 +10,10 @@
 #include "fcntl.h"
 #include "image.h"
 #include "stdarg.h"
-#include "syscall.h"
+#include "stdio.h"
+#include "string.h"
+#include "time.h"
+#include "unistd.h"
 
 // 启用 XWIN 用户态实现
 #define XWIN_USER_IMPL
@@ -23,6 +26,34 @@
 #endif
 
 screen_info_t gscreen;
+
+/* 用户态耗时：用 xwin_get_ticks（与内核 schedule tick 一致，1tick=1ms@1kHz） */
+static u32 screen_now_ms(void) { return xwin_get_ticks(); }
+
+static u32 g_acc_fill_ms;
+static u32 g_acc_blit_ms;
+static u32 g_acc_update_ms;
+static u32 g_acc_render_ms;
+static u32 g_acc_frames;
+static u32 g_fps_t0;
+static int g_stats_inited;
+
+static void screen_stats_frame_done(void) {
+  g_acc_frames++;
+  if (g_acc_frames < 60) return;
+  {
+    u32 now = screen_now_ms();
+    u32 dt = now - g_fps_t0;
+    u32 fps = dt > 0 ? (g_acc_frames * 1000u) / dt : 0;
+    printf("gui: app_fps=%d fill=%dms blit=%dms update=%dms render=%dms "
+           "direct=%d (n=%d dt=%d)\n",
+           fps, g_acc_fill_ms, g_acc_blit_ms, g_acc_update_ms, g_acc_render_ms,
+           (int)gscreen.xwin_direct, g_acc_frames, dt);
+    g_acc_fill_ms = g_acc_blit_ms = g_acc_update_ms = g_acc_render_ms = 0;
+    g_acc_frames = 0;
+    g_fps_t0 = now;
+  }
+}
 
 u8 SCREEN_ASCII[] = {
 
@@ -442,12 +473,14 @@ void screen_fill_rect(i32 x, i32 y, i32 w, i32 h, u32 color) {
   if (y1 > (i32)gscreen.height) y1 = (i32)gscreen.height;
   if (x0 >= x1 || y0 >= y1) return;
 
+  u32 t0 = screen_now_ms();
   u32 c = color | 0xFF000000u;
   u32 row_w = (u32)(x1 - x0);
   for (i32 row = y0; row < y1; row++) {
     u32* dst = gscreen.buffer + (u32)row * gscreen.width + (u32)x0;
     for (u32 i = 0; i < row_w; i++) dst[i] = c;
   }
+  g_acc_fill_ms += screen_now_ms() - t0;
 }
 
 void screen_put_ascii(i32 x, i32 y, u8 ch, i32 color) {
@@ -694,25 +727,20 @@ void screen_init_with_mode(screen_mode_t mode) {
   gscreen.screen_mode = mode;
 
   if (mode == SCREEN_MODE_XWIN) {
-    // 与 FB 模式同一套 IOC_READ_FRAMBUFFER_INFO 取真实分辨率
-    if (gscreen.width == 0 || gscreen.height == 0) {
-      int fb = screen_read_fb_info();
-      if (fb >= 0) {
-        close(fb);
-        if (gscreen.fb.width > 0 && gscreen.fb.height > 0) {
-          gscreen.width = (int)gscreen.fb.width;
-          gscreen.height = (int)gscreen.fb.height;
-          if (gscreen.fb.bpp > 0) {
-            gscreen.bpp = (int)gscreen.fb.bpp;
-          }
-        } else {
-          gscreen.width = 480;
-          gscreen.height = 320;
-        }
+    /* 始终读 fb：要分辨率，更要 VA（DIRECT 直绘 LCD） */
+    int fbfd = screen_read_fb_info();
+    if (fbfd >= 0) {
+      close(fbfd);
+    }
+    if (gscreen.fb.width > 0 && gscreen.fb.height > 0) {
+      gscreen.width = (int)gscreen.fb.width;
+      gscreen.height = (int)gscreen.fb.height;
+      if (gscreen.fb.bpp > 0) {
+        gscreen.bpp = (int)gscreen.fb.bpp;
       }
     }
-    if (gscreen.width == 0) gscreen.width = 800;
-    if (gscreen.height == 0) gscreen.height = 600;
+    if (gscreen.width == 0) gscreen.width = 480;
+    if (gscreen.height == 0) gscreen.height = 320;
     if (gscreen.bpp == 0) gscreen.bpp = 32;
     gscreen.buffer_length = gscreen.width * gscreen.height * 4;
     gscreen.buffer = malloc(gscreen.buffer_length);
@@ -721,14 +749,35 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.cur.y = 0;
     gscreen.ASC = SCREEN_ASCII;
     gscreen.fd = -1;
+    gscreen.xwin_direct = 0;
     /* XWIN 不用 /dev/fb flush，避免 fd=-1 时误走 FB ioctl */
     gscreen.fb.framebuffer_count = 0;
 
-    // 创建默认窗口（默认带缓存；需要直写时用 XWIN_FLAG_DIRECT）
-    gscreen.xwin_handle = xwin_create(0, 0, gscreen.width, gscreen.height, "");
-    xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
+    /* 全屏 DIRECT：内核绑 LCD；经 xwin_get_fb 取 VA（ioctl 返回 0xfb****** 会被当成负 errno） */
+    gscreen.xwin_handle = xwin_create_flags(0, 0, gscreen.width, gscreen.height,
+                                            "", XWIN_FLAG_DIRECT);
+    /* 不在这里 set_bg/clear：等 get_fb 绑好 VA 后再由 fill_rect 上色 */
 
-    printf("screen init xwin mode %dx%d\n", gscreen.width, gscreen.height);
+    {
+      u32* fb = xwin_get_fb(gscreen.xwin_handle);
+      u32 fb_addr = fb != NULL ? (u32)(uintptr_t)fb : 0;
+      /* 只要 0xfb...... VA；拒绝 PA、kmalloc、以及 -1/未映射假指针 */
+      if (fb_addr >= 0xfb000000u && fb_addr < 0xfe000000u) {
+        if (gscreen.buffer != NULL) {
+          free(gscreen.buffer);
+        }
+        gscreen.buffer = fb;
+        gscreen.pbuffer = fb;
+        gscreen.fb.frambuffer = fb;
+        gscreen.xwin_direct = 1;
+        printf("screen init xwin DIRECT %dx%d fb=%p\n", gscreen.width,
+               gscreen.height, (void*)gscreen.buffer);
+      } else {
+        gscreen.xwin_direct = 0;
+        printf("screen init xwin mode %dx%d (fb=%p addr=%x, blit path)\n",
+               gscreen.width, gscreen.height, (void*)fb, fb_addr);
+      }
+    }
     event_init();
     printf("event init end\n");
     return;
@@ -782,7 +831,8 @@ void screen_set_mode(screen_mode_t mode) {
     xwin_destroy(gscreen.xwin_handle);
     gscreen.xwin_handle = 0;
   }
-  if (gscreen.buffer && gscreen.screen_mode == SCREEN_MODE_XWIN) {
+  if (gscreen.buffer && gscreen.screen_mode == SCREEN_MODE_XWIN &&
+      !gscreen.xwin_direct) {
     free(gscreen.buffer);
     gscreen.buffer = NULL;
   }
@@ -805,7 +855,8 @@ void screen_set_size(u32 width, u32 height) {
   if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
     // 已经初始化，重新创建窗口
     xwin_destroy(gscreen.xwin_handle);
-    gscreen.xwin_handle = xwin_create(0, 0, width, height, "");
+    gscreen.xwin_handle = xwin_create_flags(0, 0, width, height, "",
+                                            XWIN_FLAG_DIRECT);
     xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
   }
   // 更新尺寸
@@ -824,17 +875,36 @@ screen_info_t *screen_info() { return &gscreen; }
 
 void screen_flush() {
   if (gscreen.screen_mode == SCREEN_MODE_XWIN) {
-    // XWIN 模式：将 buffer 内容绘制到窗口
+    u32 t0, t1;
     if (gscreen.xwin_handle == 0) {
       printf("xwin handle is null\n");
       return;
     }
-    if (gscreen.buffer != NULL) {
+    if (!g_stats_inited) {
+      g_fps_t0 = screen_now_ms();
+      g_stats_inited = 1;
+      printf("gui: stats fill/blit/update/render (ms sum per 60 frames)\n");
+    }
+    /* DIRECT：已画在 LCD 上，勿再整屏 blit */
+    t0 = screen_now_ms();
+    if (!gscreen.xwin_direct && gscreen.buffer != NULL) {
       xwin_blit(gscreen.xwin_handle, 0, 0, (const u32*)gscreen.buffer,
                 gscreen.width, gscreen.height);
     }
+    t1 = screen_now_ms();
+    g_acc_blit_ms += t1 - t0;
+
+    t0 = t1;
     xwin_update(gscreen.xwin_handle);
+    t1 = screen_now_ms();
+    g_acc_update_ms += t1 - t0;
+
+    t0 = t1;
     xwin_render();
+    t1 = screen_now_ms();
+    g_acc_render_ms += t1 - t0;
+
+    screen_stats_frame_done();
     return;
   }
 

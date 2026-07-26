@@ -61,6 +61,7 @@ typedef struct screen_info {
   framebuffer_info_t fb;
   screen_mode_t screen_mode;     // 当前模式
   u32 xwin_handle;               // xwin 模式下的窗口句柄
+  u32 xwin_direct;               // 1=buffer 即 LCD，flush 不再 blit
 } screen_info_t;
 
 

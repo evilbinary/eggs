@@ -19,16 +19,16 @@ long xwin_syscall(int num, long a1, long a2, long a3, long a4, long a5,
                    : "memory");
   return x0;
 #elif defined(__arm__) || defined(ARM)
-  register long r7 __asm__("r7") = num;
   register long r0 __asm__("r0") = a1;
   register long r1 __asm__("r1") = a2;
   register long r2 __asm__("r2") = a3;
   register long r3 __asm__("r3") = a4;
   register long r4 __asm__("r4") = a5;
   register long r5 __asm__("r5") = a6;
+  register long r7 __asm__("r7") = num;
   __asm__ volatile("svc #0"
                    : "+r"(r0)
-                   : "r"(r7), "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5)
+                   : "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5), "r"(r7)
                    : "memory");
   return r0;
 #elif defined(__xtensa__) || defined(XTENSA)
@@ -128,4 +128,13 @@ void xwin_render(void) { xwin_syscall(SYS_XWIN_RENDER, 0, 0, 0, 0, 0, 0); }
 
 void xwin_update(xwin_handle_t win) {
   xwin_syscall(SYS_XWIN_UPDATE, (long)win, 0, 0, 0, 0, 0);
+}
+
+u32* xwin_get_fb(xwin_handle_t win) {
+  return (u32*)(uintptr_t)xwin_syscall(SYS_XWIN_GET_FB, (long)win, 0, 0, 0, 0,
+                                       0);
+}
+
+u32 xwin_get_ticks(void) {
+  return (u32)xwin_syscall(SYS_XWIN_GET_TICKS, 0, 0, 0, 0, 0, 0);
 }

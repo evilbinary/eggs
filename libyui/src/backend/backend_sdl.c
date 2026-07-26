@@ -1408,11 +1408,24 @@ int backend_init(){
 #if !defined(__EMSCRIPTEN__) && !defined(__YIYIYA__)
     window_flags |= SDL_WINDOW_OPENGL;
 #endif
-    
+
+    int win_w = 800;
+    int win_h = 600;
+#ifdef __YIYIYA__
+    /* 固定分辨率屏：窗口跟 desktop display，避免默认 800x600 撑爆堆 */
+    {
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
+            win_w = dm.w;
+            win_h = dm.h;
+        }
+    }
+#endif
+
     window = SDL_CreateWindow("YUI",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
-                                        800, 600, window_flags);
+                                        win_w, win_h, window_flags);
 
     /* YiYiYa SDL 驱动无 GL：带 OPENGL 会直接返回 NULL（Invalid window 连锁失败） */
     if (!window && (window_flags & SDL_WINDOW_OPENGL)) {
@@ -1422,7 +1435,7 @@ int backend_init(){
         window = SDL_CreateWindow("YUI",
                                   SDL_WINDOWPOS_CENTERED,
                                   SDL_WINDOWPOS_CENTERED,
-                                  800, 600, window_flags);
+                                  win_w, win_h, window_flags);
     }
 
     if (!window) {
@@ -2400,6 +2413,13 @@ void backend_get_windowsize(int* width,int * height){
 }
 
 void backend_set_windowsize(int width,int  height){
+#ifdef __YIYIYA__
+    SDL_DisplayMode dm;
+    if (SDL_GetDesktopDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
+        if (width > dm.w) width = dm.w;
+        if (height > dm.h) height = dm.h;
+    }
+#endif
     SDL_SetWindowSize(window, width, height);
     backend_apply_display_scale();
 }
