@@ -276,7 +276,7 @@ SDL_Surface *DUMMY_SetVideoMode(_THIS, SDL_Surface *current,
 
 	/* Allocate the new pixel format for the screen */
 	if ( ! SDL_ReallocFormat(current, bpp, 0, 0, 0, 0) ) {
-		SDL_free(this->hidden->buffer);
+		/* buffer 是 screen/LCD，不是 SDL_malloc，失败时不可 SDL_free */
 		this->hidden->buffer = NULL;
 		SDL_SetError("Couldn't allocate new pixel format for requested mode");
 		return(NULL);
@@ -350,9 +350,10 @@ int DUMMY_SetColors(_THIS, int firstcolor, int ncolors, SDL_Color *colors)
 */
 void DUMMY_VideoQuit(_THIS)
 {
-	if (this->screen->pixels != NULL)
-	{
-		SDL_free(this->screen->pixels);
+	/* pixels/buffer 指向 libgui screen（可能是 LCD VA），勿 SDL_free，
+	 * 否则 musl mallocng 元数据损坏 → a_crash/UNDEF。 */
+	if (this->screen != NULL) {
 		this->screen->pixels = NULL;
 	}
+	this->hidden->buffer = NULL;
 }
