@@ -24,6 +24,14 @@
 
 #include "SDL_timer.h"
 
+#ifdef __YIYIYA__
+#include <time.h>
+#include <sys/time.h>
+
+static struct timespec yiyiya_start_ts;
+static int yiyiya_ticks_inited = 0;
+#endif
+
 static SDL_bool ticks_started = SDL_FALSE;
 
 void
@@ -33,6 +41,11 @@ SDL_TicksInit(void)
         return;
     }
     ticks_started = SDL_TRUE;
+
+#ifdef __YIYIYA__
+    clock_gettime(CLOCK_MONOTONIC, &yiyiya_start_ts);
+    yiyiya_ticks_inited = 1;
+#endif
 }
 
 void
@@ -47,6 +60,16 @@ SDL_GetTicks64(void)
     if (!ticks_started) {
         SDL_TicksInit();
     }
+
+#ifdef __YIYIYA__
+    if (yiyiya_ticks_inited) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        Uint64 elapsed_ms = (Uint64)(now.tv_sec - yiyiya_start_ts.tv_sec) * 1000ULL
+                          + (Uint64)(now.tv_nsec - yiyiya_start_ts.tv_nsec) / 1000000ULL;
+        return elapsed_ms;
+    }
+#endif
 
     SDL_Unsupported();
     return 0;
@@ -67,7 +90,16 @@ SDL_GetPerformanceFrequency(void)
 void
 SDL_Delay(Uint32 ms)
 {
+#ifdef __YIYIYA__
+    if (ms > 0) {
+        struct timespec req;
+        req.tv_sec = ms / 1000U;
+        req.tv_nsec = (long)(ms % 1000U) * 1000000L;
+        nanosleep(&req, NULL);
+    }
+#else
     SDL_Unsupported();
+#endif
 }
 
 #endif /* SDL_TIMER_DUMMY || SDL_TIMERS_DISABLED */
