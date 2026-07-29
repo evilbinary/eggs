@@ -25,7 +25,8 @@ extern "C" {
 // 屏幕模式
 typedef enum {
   SCREEN_MODE_FB = 0,    // 直接 framebuffer 模式
-  SCREEN_MODE_XWIN = 1   // xwin 窗口模式 (默认)
+  SCREEN_MODE_XWIN = 1,  // xwin DIRECT 模式 (buffer=LCD FB, 零拷贝)
+  SCREEN_MODE_XWIN_BUFFER = 2  // xwin buffer 模式 (cached buffer + blit)
 } screen_mode_t;
 
 struct screen_point_t {
@@ -61,7 +62,6 @@ typedef struct screen_info {
   framebuffer_info_t fb;
   screen_mode_t screen_mode;     // 当前模式
   u32 xwin_handle;               // xwin 模式下的窗口句柄
-  u32 xwin_direct;               // 1=buffer 即 LCD，flush 不再 blit
 } screen_info_t;
 
 
@@ -77,6 +77,7 @@ typedef struct screen_info {
 #define IOC_READ_FRAMBUFFER_INFO _IOW(IOC_MAGIC, 8, int)
 
 void screen_init();
+void screen_init_buffer(void);
 screen_info_t *screen_info();
 void screen_put_pixel(u32 x, u32 y, u32 c);
 void screen_draw_poi32(i32 x, i32 y, i32 color);

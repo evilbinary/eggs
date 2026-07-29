@@ -48,7 +48,7 @@ static void screen_stats_frame_done(void) {
     printf("gui: app_fps=%d fill=%dms blit=%dms update=%dms render=%dms "
            "direct=%d (n=%d dt=%d)\n",
            fps, g_acc_fill_ms, g_acc_blit_ms, g_acc_update_ms, g_acc_render_ms,
-           (int)gscreen.xwin_direct, g_acc_frames, dt);
+           (int)(gscreen.screen_mode == SCREEN_MODE_XWIN), g_acc_frames, dt);
     g_acc_fill_ms = g_acc_blit_ms = g_acc_update_ms = g_acc_render_ms = 0;
     g_acc_frames = 0;
     g_fps_t0 = now;
@@ -691,7 +691,13 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
 }
 
 void screen_init() {
-  screen_init_with_mode(SCREEN_MODE_XWIN);  // SCREEN_MODE_XWIN 默认使用 fb 模式
+  screen_init_with_mode(SCREEN_MODE_XWIN);
+}
+
+/* buffer 模式：buffer 保留 cached malloc，screen_flush 由 xwin_blit 原子拷贝。
+ * 适用于增量渲染的 app（SDL/ymain），避免 DE 扫描到半帧造成闪烁。 */
+void screen_init_buffer() {
+  screen_init_with_mode(SCREEN_MODE_XWIN_BUFFER);
 }
 
 /* 读 /dev/fb 信息到 gscreen.fb；成功返回 fd，失败返回 -1。
@@ -726,7 +732,7 @@ static int screen_read_fb_info(void) {
 void screen_init_with_mode(screen_mode_t mode) {
   gscreen.screen_mode = mode;
 
-  if (mode == SCREEN_MODE_XWIN) {
+  if (mode == SCREEN_MODE_XWIN || mode == SCREEN_MODE_XWIN_BUFFER) {
     /* 始终读 fb：要分辨率，更要 VA（DIRECT 直绘 LCD） */
     int fbfd = screen_read_fb_info();
     if (fbfd >= 0) {
@@ -749,7 +755,6 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.cur.y = 0;
     gscreen.ASC = SCREEN_ASCII;
     gscreen.fd = -1;
-    gscreen.xwin_direct = 0;
     /* XWIN 不用 /dev/fb flush，避免 fd=-1 时误走 FB ioctl */
     gscreen.fb.framebuffer_count = 0;
 
@@ -761,19 +766,26 @@ void screen_init_with_mode(screen_mode_t mode) {
     {
       u32* fb = xwin_get_fb(gscreen.xwin_handle);
       u32 fb_addr = fb != NULL ? (u32)(uintptr_t)fb : 0;
-      /* 只要 0xfb...... VA；拒绝 PA、kmalloc、以及 -1/未映射假指针 */
       if (fb_addr >= 0xfb000000u && fb_addr < 0xfe000000u) {
-        if (gscreen.buffer != NULL) {
-          free(gscreen.buffer);
+        if (mode == SCREEN_MODE_XWIN_BUFFER) {
+          /* buffer 模式：窗口 DIRECT（内核快速路径），但 buffer 保留 cached
+           * malloc。screen_flush 时 xwin_blit 一次性原子拷贝到 LCD FB。 */
+          gscreen.fb.frambuffer = fb;
+          printf("screen init xwin %dx%d fb=%p (buffer, cached render)\n",
+                 gscreen.width, gscreen.height, (void*)fb);
+        } else {
+          /* DIRECT 模式：buffer 直接指向 LCD FB（零拷贝）。
+           * 适用于原子渲染的 app（infones, gnuboy 等）。 */
+          if (gscreen.buffer != NULL) {
+            free(gscreen.buffer);
+          }
+          gscreen.buffer = fb;
+          gscreen.pbuffer = fb;
+          gscreen.fb.frambuffer = fb;
+          printf("screen init xwin DIRECT %dx%d fb=%p\n",
+                 gscreen.width, gscreen.height, (void*)gscreen.buffer);
         }
-        gscreen.buffer = fb;
-        gscreen.pbuffer = fb;
-        gscreen.fb.frambuffer = fb;
-        gscreen.xwin_direct = 1;
-        printf("screen init xwin DIRECT %dx%d fb=%p\n", gscreen.width,
-               gscreen.height, (void*)gscreen.buffer);
       } else {
-        gscreen.xwin_direct = 0;
         printf("screen init xwin mode %dx%d (fb=%p addr=%x, blit path)\n",
                gscreen.width, gscreen.height, (void*)fb, fb_addr);
       }
@@ -827,12 +839,15 @@ void screen_set_mode(screen_mode_t mode) {
   if (gscreen.screen_mode == mode) return;
 
   // 销毁旧模式的资源
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+  if ((gscreen.screen_mode == SCREEN_MODE_XWIN ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER) &&
+      gscreen.xwin_handle) {
     xwin_destroy(gscreen.xwin_handle);
     gscreen.xwin_handle = 0;
   }
-  if (gscreen.buffer && gscreen.screen_mode == SCREEN_MODE_XWIN &&
-      !gscreen.xwin_direct) {
+  if (gscreen.buffer && (gscreen.screen_mode == SCREEN_MODE_XWIN ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER) &&
+      gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
     free(gscreen.buffer);
     gscreen.buffer = NULL;
   }
@@ -874,8 +889,11 @@ void screen_set_size(u32 width, u32 height) {
 screen_info_t *screen_info() { return &gscreen; }
 
 void screen_flush() {
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN) {
-    u32 t0, t1;
+  u32 t0, t1;
+
+  /* XWIN 模式（DIRECT / BUFFER） */
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN ||
+      gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER) {
     if (gscreen.xwin_handle == 0) {
       printf("xwin handle is null\n");
       return;
@@ -885,9 +903,10 @@ void screen_flush() {
       g_stats_inited = 1;
       printf("gui: stats fill/blit/update/render (ms sum per 60 frames)\n");
     }
-    /* DIRECT：已画在 LCD 上，勿再整屏 blit */
+    /* DIRECT: buffer=LCD FB, 跳过拷贝; buffer: cached buffer 一次性原子 blit */
     t0 = screen_now_ms();
-    if (!gscreen.xwin_direct && gscreen.buffer != NULL) {
+    if (gscreen.buffer != NULL &&
+        gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
       xwin_blit(gscreen.xwin_handle, 0, 0, (const u32*)gscreen.buffer,
                 gscreen.width, gscreen.height);
     }
@@ -908,7 +927,7 @@ void screen_flush() {
     return;
   }
 
-  // FB 模式
+  /* FB 模式 */
   if (gscreen.fb.framebuffer_count <= 0) {
     if (gscreen.width > 0 && gscreen.height > 0 && gscreen.fd >= 0) {
       gscreen.fb.framebuffer_count = 1;
@@ -932,8 +951,8 @@ void screen_flush() {
     memcpy(gscreen.pbuffer, gscreen.buffer, gscreen.buffer_length);
   }
 #else
-  gscreen.buffer = gscreen.fb.frambuffer + gscreen.width * gscreen.height *
-                                               gscreen.fb.framebuffer_index;
+  gscreen.buffer = gscreen.fb.frambuffer +
+      gscreen.width * gscreen.height * gscreen.fb.framebuffer_index;
 #endif
 
   if (gscreen.fd < 0) {

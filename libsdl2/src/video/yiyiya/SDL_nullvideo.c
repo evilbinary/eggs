@@ -126,7 +126,7 @@ DUMMY_VideoInit(_THIS)
 {
     SDL_DisplayMode mode;
 
-    screen_init();
+    screen_init_buffer();
     screen_info_t* screen = screen_info();
     if (!screen) {
         return SDL_SetError("libgui screen_info is not available");
