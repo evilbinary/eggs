@@ -4,6 +4,7 @@
 #include "../util.h"
 #include "../layout.h"
 #include "../layer_update.h"
+#include "../render.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -1295,10 +1296,11 @@ void treeview_component_render(Layer* layer) {
     // 更新滚动条状态
     treeview_update_scrollbar(component);
     
-    // 设置裁剪区域
+    // 设置裁剪区域（与父级 scroll clip 取交集，避免穿透）
     Rect prev_clip;
-    backend_render_get_clip_rect(&prev_clip);
-    backend_render_set_clip_rect(&layer->rect);
+    if (!render_clip_push(&layer->rect, &prev_clip)) {
+        return;
+    }
     
     // 使用纹理获取实际文本高度
     int text_height = 20; // 默认高度
@@ -1676,5 +1678,5 @@ void treeview_component_render(Layer* layer) {
     }
     
     // 恢复裁剪区域
-    backend_render_set_clip_rect(&prev_clip);
+    render_clip_pop(&prev_clip);
 }

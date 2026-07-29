@@ -208,7 +208,7 @@ static char* remove_json_comments(char* json_str) {
 }
 
 cJSON* parse_json(char* json_path) {
-  FILE* file = fopen(json_path, "rb");
+  FILE* file = fopen(json_path, "r");
   if (!file) {
     printf("open file failed %s\n", json_path);
     return NULL;

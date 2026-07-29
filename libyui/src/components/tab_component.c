@@ -6,7 +6,9 @@
 #include "../backend.h"
 #include "../event.h"
 #include "../layout.h"
+#include "../layer_update.h"
 #include "../render.h"
+#include "../theme_manager.h"
 #include "../util.h"
 
 static void tab_layer_destroy(Layer* layer) {
@@ -15,6 +17,70 @@ static void tab_layer_destroy(Layer* layer) {
   }
   tab_component_destroy((TabComponent*)layer->component);
   layer->component = NULL;
+}
+
+static void tab_component_apply_theme_style(Layer* layer, cJSON* style) {
+  TabComponent* component;
+  cJSON* item;
+  Color tab_color;
+  Color active_tab_color;
+  Color text_color;
+  Color active_text_color;
+  Color border_color;
+  int has_colors = 0;
+
+  if (!layer || !layer->component || !style) return;
+  component = (TabComponent*)layer->component;
+
+  tab_color = component->tab_color;
+  active_tab_color = component->active_tab_color;
+  text_color = component->text_color;
+  active_text_color = component->active_text_color;
+  border_color = component->border_color;
+
+  item = cJSON_GetObjectItem(style, "tabColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &tab_color);
+    has_colors = 1;
+  }
+  item = cJSON_GetObjectItem(style, "activeTabColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &active_tab_color);
+    has_colors = 1;
+  }
+  item = cJSON_GetObjectItem(style, "textColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &text_color);
+    has_colors = 1;
+  }
+  item = cJSON_GetObjectItem(style, "activeTextColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &active_text_color);
+    has_colors = 1;
+  }
+  item = cJSON_GetObjectItem(style, "borderColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &border_color);
+    has_colors = 1;
+  }
+  if (has_colors) {
+    tab_component_set_colors(component, tab_color, active_tab_color, text_color,
+                             active_text_color, border_color);
+  }
+
+  item = cJSON_GetObjectItem(style, "bgColor");
+  if (item && cJSON_IsString(item) && item->valuestring) {
+    parse_color(item->valuestring, &layer->bg_color);
+  }
+
+  /* 内容层挂在 tabs[]，主题切换时由 Tab 自己下发 */
+  for (int i = 0; i < component->tab_count; i++) {
+    if (component->tabs[i].content_layer) {
+      theme_manager_apply_to_tree(component->tabs[i].content_layer);
+    }
+  }
+
+  mark_layer_dirty(layer, DIRTY_STYLE | DIRTY_COLOR);
 }
 
 // 创建选项卡组件
@@ -36,12 +102,16 @@ TabComponent* tab_component_create(Layer* layer) {
   component->user_data = NULL;
   component->on_tab_changed = NULL;
   component->on_tab_close = NULL;
+  component->on_change = NULL;
+  component->change_name = NULL;
 
   // 设置组件类型和渲染函数
   layer->component = component;
   layer->render = tab_component_render;
   layer->handle_pointer_event = tab_component_handle_pointer_event;
   layer->handle_key_event = tab_component_handle_key_event;
+  layer->set_style = tab_component_apply_theme_style;
+  layer->register_event = tab_component_register_event;
   layer->on_destroy = tab_layer_destroy;
 
   return component;
@@ -70,36 +140,20 @@ TabComponent* tab_component_create_from_json(Layer* layer, cJSON* json_obj) {
   // 解析选项卡颜色
   cJSON* style = cJSON_GetObjectItem(json_obj, "style");
   if (style) {
-    Color tabColor = {240, 240, 240, 255};
-    Color activeTabColor = {255, 255, 255, 255};
-    Color textColor = {51, 51, 51, 255};
-    Color activeTextColor = {0, 0, 0, 255};
-    Color borderColor = {204, 204, 204, 255};
-
-    if (cJSON_HasObjectItem(style, "tabColor")) {
-      parse_color(cJSON_GetObjectItem(style, "tabColor")->valuestring,
-                  &tabColor);
-    }
-    if (cJSON_HasObjectItem(style, "activeTabColor")) {
-      parse_color(cJSON_GetObjectItem(style, "activeTabColor")->valuestring,
-                  &activeTabColor);
-    }
-    if (cJSON_HasObjectItem(style, "textColor")) {
-      parse_color(cJSON_GetObjectItem(style, "textColor")->valuestring,
-                  &textColor);
-    }
-    if (cJSON_HasObjectItem(style, "activeTextColor")) {
-      parse_color(cJSON_GetObjectItem(style, "activeTextColor")->valuestring,
-                  &activeTextColor);
-    }
-    if (cJSON_HasObjectItem(style, "borderColor")) {
-      parse_color(cJSON_GetObjectItem(style, "borderColor")->valuestring,
-                  &borderColor);
-    }
-
-    tab_component_set_colors(tabComponent, tabColor, activeTabColor, textColor,
-                             activeTextColor, borderColor);
+    tab_component_apply_theme_style(layer, style);
   }
+
+  cJSON* events = cJSON_GetObjectItem(json_obj, "events");
+  if (events) {
+    cJSON* on_change = cJSON_GetObjectItem(events, "onChange");
+    if (on_change && cJSON_IsString(on_change) && on_change->valuestring) {
+      const char* name = on_change->valuestring;
+      if (name[0] == '@') name++;
+      tabComponent->change_name = strdup(name);
+      tabComponent->on_change = find_event_by_name(name);
+    }
+  }
+
   // 解析选项卡数组
   cJSON* tabs = cJSON_GetObjectItem(json_obj, "tabs");
   if(tabs==NULL){
@@ -115,28 +169,23 @@ TabComponent* tab_component_create_from_json(Layer* layer, cJSON* json_obj) {
       cJSON* title = cJSON_GetObjectItem(tab_json, "title");
       if (!title || !title->valuestring) continue;
 
-      // 创建内容层
+      // 创建内容层（挂到 tabs[].content_layer，由 Tab 自行管理）
       Layer* content_layer = layer_create_from_json(tab_json, layer);
-      cJSON* content = tab_json;
-      if (content) {
-        if (content_layer) {
-          // 设置内容层的位置和大小
-          content_layer->rect.x = layer->rect.x;
-          content_layer->rect.y = layer->rect.y + tabComponent->tab_height;
-          content_layer->rect.w = layer->rect.w;
-          content_layer->rect.h = layer->rect.h - tabComponent->tab_height;
-          content_layer->parent = layer;
-          // 注意：不添加到父层的children中，由tab组件自己管理渲染
-        }
+      if (content_layer) {
+        content_layer->rect.x = layer->rect.x;
+        content_layer->rect.y = layer->rect.y + tabComponent->tab_height;
+        content_layer->rect.w = layer->rect.w;
+        content_layer->rect.h = layer->rect.h - tabComponent->tab_height;
+        content_layer->parent = layer;
       }
 
       // 添加选项卡
       int tab_index = tab_component_add_tab(tabComponent, title->valuestring,
                                             content_layer);
 
-      // 设置选项卡为不可见（只有活动选项卡的内容可见）
+      // 非活动页隐藏
       if (content_layer && tab_index != tabComponent->active_tab) {
-        SET_STATE(content_layer, LAYER_STATE_DISABLED);
+        layer_hide(content_layer);
       }
     }
   }
@@ -145,6 +194,7 @@ TabComponent* tab_component_create_from_json(Layer* layer, cJSON* json_obj) {
   layer->render = tab_component_render;
   layer->handle_pointer_event = tab_component_handle_pointer_event;
   layer->handle_key_event = tab_component_handle_key_event;
+  layer->register_event = tab_component_register_event;
 
   return tabComponent;
 }
@@ -153,14 +203,23 @@ TabComponent* tab_component_create_from_json(Layer* layer, cJSON* json_obj) {
 void tab_component_destroy(TabComponent* component) {
   if (!component) return;
 
-  // 释放所有选项卡
+  // 释放所有选项卡（内容层不在 children 中，需自行销毁）
   if (component->tabs) {
     for (int i = 0; i < component->tab_count; i++) {
       if (component->tabs[i].title) {
         free(component->tabs[i].title);
       }
+      if (component->tabs[i].content_layer) {
+        destroy_layer(component->tabs[i].content_layer);
+        component->tabs[i].content_layer = NULL;
+      }
     }
     free(component->tabs);
+  }
+
+  if (component->change_name) {
+    free(component->change_name);
+    component->change_name = NULL;
   }
 
   free(component);
@@ -246,21 +305,14 @@ void tab_component_remove_tab(TabComponent* component, int index) {
 
 // 设置活动选项卡
 void tab_component_set_active_tab(TabComponent* component, int index) {
-  printf("DEBUG: tab_component_set_active_tab called with index=%d (current=%d)\n", index, component->active_tab);
-  
   if (!component || index < 0 || index >= component->tab_count ||
       !component->tabs[index].enabled) {
-    printf("DEBUG: tab_component_set_active_tab rejected - invalid parameters\n");
     return;
   }
 
   int old_tab = component->active_tab;
-
-  // 设置新的活动选项卡
   component->active_tab = index;
-  printf("DEBUG: Active tab changed from %d to %d\n", old_tab, index);
 
-  // 更新内容层的可见性
   for (int i = 0; i < component->tab_count; i++) {
     if (component->tabs[i].content_layer) {
       if (i == index) {
@@ -268,14 +320,41 @@ void tab_component_set_active_tab(TabComponent* component, int index) {
       } else {
         layer_hide(component->tabs[i].content_layer);
       }
-      printf("DEBUG: Tab %d content_layer visible=%d\n", i, component->tabs[i].content_layer->visible);
     }
   }
 
-  // 调用回调函数
-  if (old_tab != index && component->on_tab_changed) {
-    component->on_tab_changed(old_tab, index, component->user_data);
+  if (old_tab != index) {
+    if (component->on_tab_changed) {
+      component->on_tab_changed(old_tab, index, component->user_data);
+    }
+    if (component->on_change == NULL && component->change_name != NULL) {
+      component->on_change = find_event_by_name(component->change_name);
+    }
+    if (component->on_change) {
+      component->on_change(component->layer);
+    }
+    mark_layer_dirty(component->layer, DIRTY_STYLE | DIRTY_CHILDREN);
   }
+}
+
+int tab_component_register_event(Layer* layer, const char* event_name,
+                                 const char* event_func_name,
+                                 EventHandler event_handler) {
+  TabComponent* component;
+  if (!layer || !layer->component || !event_name) return -1;
+  if (strcmp(event_name, "change") != 0 && strcmp(event_name, "onChange") != 0) {
+    return -1;
+  }
+
+  component = (TabComponent*)layer->component;
+  component->on_change = event_handler;
+  if (event_func_name && event_func_name[0] != '\0') {
+    const char* name = event_func_name;
+    if (name[0] == '@') name++;
+    if (component->change_name) free(component->change_name);
+    component->change_name = strdup(name);
+  }
+  return 0;
 }
 
 // 获取活动选项卡
@@ -474,23 +553,32 @@ int tab_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
 
   TabComponent* component = (TabComponent*)layer->component;
 
+  /* 标题栏：切换 / 关闭 */
   if (event->phase == POINTER_DOWN && event->button == SDL_BUTTON_LEFT) {
-    // 检查点击了哪个标签
     int tab_index = tab_get_tab_from_position(component, event->x, event->y);
     if (tab_index >= 0) {
-      // 检查是否点击了关闭按钮
       if (component->closable &&
           tab_is_close_button_clicked(component, tab_index, event->x,
                                       event->y)) {
-        // 调用关闭回调
         if (component->on_tab_close) {
           component->on_tab_close(tab_index, component->user_data);
         }
       } else {
         tab_component_set_active_tab(component, tab_index);
       }
+      return 1;
     }
   }
+
+  /* 内容挂在 tabs[]，不在 children，需自行转发指针事件 */
+  if (component->active_tab >= 0 &&
+      component->active_tab < component->tab_count) {
+    Layer* content = component->tabs[component->active_tab].content_layer;
+    if (content && content->visible == VISIBLE) {
+      return handle_pointer_event(content, event);
+    }
+  }
+
   return 0;
 }
 
@@ -531,7 +619,8 @@ void tab_component_render(Layer* layer) {
     layer->rect.w, 
     layer->rect.h - component->tab_height
   };
-  backend_render_fill_rect_color(&content_rect, 255, 255, 255, 255);
+  Color content_bg = layer->bg_color.a ? layer->bg_color : (Color){255, 255, 255, 255};
+  backend_render_fill_rect(&content_rect, content_bg);
 
   // 计算每个tab的宽度（使用与点击检测相同的计算方式）
   int current_x = layer->rect.x;
@@ -541,19 +630,17 @@ void tab_component_render(Layer* layer) {
     int tab_width = tab_calculate_tab_width(component, i);
     int tab_x = current_x;
     Rect tab_rect = {tab_x, layer->rect.y, tab_width, component->tab_height};
+    Color tab_bg = (i == component->active_tab)
+                       ? component->active_tab_color
+                       : component->tab_color;
+    Color text_color = (i == component->active_tab)
+                           ? component->active_text_color
+                           : component->text_color;
 
-    // 选择颜色：active tab用蓝色，其他用灰色
-    if (i == component->active_tab) {
-      backend_render_fill_rect_color(&tab_rect, 33, 150, 243, 255); // 蓝色
-    } else {
-      backend_render_fill_rect_color(&tab_rect, 240, 240, 240, 255); // 灰色
-    }
+    backend_render_fill_rect(&tab_rect, tab_bg);
 
     // 绘制tab文字
     if (layer->font && layer->font->default_font && component->tabs[i].title) {
-      Color text_color = (i == component->active_tab) ? 
-        (Color){255, 255, 255, 255} : (Color){51, 51, 51, 255}; // active用白色，其他用黑色
-      
       Texture* text_texture = backend_render_texture(
           layer->font->default_font, component->tabs[i].title, text_color);
       
@@ -575,6 +662,16 @@ void tab_component_render(Layer* layer) {
     }
     
     current_x += tab_width;  // 移动到下一个tab位置
+  }
+
+  if (component->border_color.a) {
+    Rect border_rect = {
+      layer->rect.x,
+      layer->rect.y + component->tab_height - 1,
+      layer->rect.w,
+      1
+    };
+    backend_render_fill_rect(&border_rect, component->border_color);
   }
 
   // 渲染活动tab的内容
@@ -603,71 +700,54 @@ void tab_component_render(Layer* layer) {
       
       // 设置内容区域的裁剪
       Rect prev_clip;
-      backend_render_get_clip_rect(&prev_clip);
-      
       Rect content_clip = {
         layer->rect.x, 
         layer->rect.y + component->tab_height,
         layer->rect.w, 
         layer->rect.h - component->tab_height
       };
-      // printf("DEBUG: Content clip rect: x=%d, y=%d, w=%d, h=%d\n", 
-      //        content_clip.x, content_clip.y, content_clip.w, content_clip.h);
-      backend_render_set_clip_rect(&content_clip);
-      
-      // 保存内容层原始位置
-      int original_x = active_content->rect.x;
-      int original_y = active_content->rect.y;
-      
-      // 设置内容层到正确的位置（tab组件内的内容区域）
-      active_content->rect.x = layer->rect.x;
-      active_content->rect.y = layer->rect.y + component->tab_height;
-      active_content->rect.w = layer->rect.w;
-      active_content->rect.h = layer->rect.h - component->tab_height;
-      
-      // printf("DEBUG: After position adjustment - content rect: x=%d, y=%d, w=%d, h=%d\n", 
-      //        active_content->rect.x, active_content->rect.y, active_content->rect.w, active_content->rect.h);
-      
-      // 确保内容层及其子元素都可见
-      active_content->visible = VISIBLE;
-      for (int i = 0; i < active_content->child_count; i++) {
-        if (active_content->children[i]) {
-          active_content->children[i]->visible = VISIBLE;
-          //printf("DEBUG: Setting child %d visible to VISIBLE\n", i);
-        }
-      }
-      
-      // 手动触发布局计算
-      //printf("DEBUG: Checking layout manager: %p\n", (void*)active_content->layout_manager);
-      if (active_content->layout_manager) {
-        //printf("DEBUG: Triggering layout calculation for content layer\n");
-        layout_layer(active_content);
+      if (!render_clip_push(&content_clip, &prev_clip)) {
+        /* fully clipped by parent scroll — skip content */
       } else {
-        // printf("DEBUG: No layout manager found for content layer\n");
-        // 手动设置子元素位置作为备选方案
+        // 保存内容层原始位置
+        int original_x = active_content->rect.x;
+        int original_y = active_content->rect.y;
+        
+        // 设置内容层到正确的位置（tab组件内的内容区域）
+        active_content->rect.x = layer->rect.x;
+        active_content->rect.y = layer->rect.y + component->tab_height;
+        active_content->rect.w = layer->rect.w;
+        active_content->rect.h = layer->rect.h - component->tab_height;
+        
+        // 确保内容层及其子元素都可见
+        active_content->visible = VISIBLE;
         for (int i = 0; i < active_content->child_count; i++) {
-          Layer* child = active_content->children[i];
-          if (child) {
-            // 简单的垂直布局
-            child->rect.x = active_content->rect.x + 20;
-            child->rect.y = active_content->rect.y + 20 + i * 30;
-            child->rect.w = active_content->rect.w - 40;
-            child->rect.h = 25;
-            // printf("DEBUG: Manually positioned child %d: x=%d, y=%d, w=%d, h=%d\n", 
-            //        i, child->rect.x, child->rect.y, child->rect.w, child->rect.h);
+          if (active_content->children[i]) {
+            active_content->children[i]->visible = VISIBLE;
           }
         }
+        
+        if (active_content->layout_manager) {
+          layout_layer(active_content);
+        } else {
+          for (int i = 0; i < active_content->child_count; i++) {
+            Layer* child = active_content->children[i];
+            if (child) {
+              child->rect.x = active_content->rect.x + 20;
+              child->rect.y = active_content->rect.y + 20 + i * 30;
+              child->rect.w = active_content->rect.w - 40;
+              child->rect.h = 25;
+            }
+          }
+        }
+        
+        render_layer(active_content);
+        
+        active_content->rect.x = original_x;
+        active_content->rect.y = original_y;
+        
+        render_clip_pop(&prev_clip);
       }
-      
-      // 递归渲染内容层及其所有子元素
-      render_layer(active_content);
-      
-      // 恢复内容层的原始位置
-      active_content->rect.x = original_x;
-      active_content->rect.y = original_y;
-      
-      // 恢复裁剪区域
-      backend_render_set_clip_rect(&prev_clip);
     } else {
       printf("DEBUG: No content layer for active tab %d\n", component->active_tab);
     }

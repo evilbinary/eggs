@@ -364,6 +364,7 @@ typedef enum {
     LOADING,
     CONNECTOR,
     DRAGGABLE,
+    TERMINAL,
 
     LAYER_TYPE_BUILTIN_MAX,
     LAYER_TYPE_USER_BASE = 256,
@@ -698,6 +699,8 @@ typedef struct Layer {
     unsigned char layout_base_valid;
 
     int connectable;
+
+    int pointer_passthrough;  // 1=事件穿透，不阻挡 POINTER_DOWN/POINTER_UP
 
 } Layer;
 // 全局变量：当前拥有焦点的图层

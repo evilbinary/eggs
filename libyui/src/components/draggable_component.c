@@ -208,6 +208,9 @@ static int draggable_dot_overlay_handle_mouse(Layer* layer, PointerEvent* event)
         }
     }
 
+    if (parent->handle_pointer_event) {
+        return parent->handle_pointer_event(parent, event);
+    }
     return 0;
 }
 
@@ -295,6 +298,7 @@ static void draggable_sync_dot_overlay(DraggableComponent* component)
         snprintf(overlay->id, sizeof(overlay->id), "%s_dots", parent->id);
         overlay->bg_color.a = 0;
         overlay->focusable = 0;
+        overlay->pointer_passthrough = 1;
         overlay->render = draggable_dot_overlay_render;
         overlay->handle_pointer_event = draggable_dot_overlay_handle_mouse;
 

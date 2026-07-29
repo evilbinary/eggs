@@ -7,7 +7,8 @@
 
 target('yui')
 add_deps("cjson")
-add_includedirs('.', 'components', public=True)
+add_deps("tsm")
+add_includedirs('.', 'components', '../lib/libtsm/src', public=True)
 add_flags()
 set_kind('static')
 add_files("*.c")
@@ -38,8 +39,3 @@ elif get_plat() in ("android", "ios"):
 else:
     add_files("backend/backend_sdl.c")
     add_cflags("-DYUI_USE_SDL_BACKEND")
-    add_cflags("-DSDL2")
-    add_deps("sdl2", "sdl2-ttf", "sdl2-image")
-    # Match eggs/libsdl2: select yiyiya video config / no-GL window path
-    if get_plat() not in ("linux", "macos", "windows", "wasm", "emscripten"):
-        add_cflags("-D__YIYIYA__")

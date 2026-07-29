@@ -382,6 +382,7 @@ void handle_key_event(Layer* layer, KeyEvent* event) {
 // 递归检查指定位置是否有子图层可以处理点击事件
 static bool has_child_handler_at_point(Layer* layer, Point point) {
     if (!layer) return false;
+    if (!point_in_rect(point, layer->rect)) return false;
     for (int i = 0; i < layer->child_count; i++) {
         Layer* child = layer->children[i];
         if (!child) continue;
@@ -440,10 +441,13 @@ int default_layer_handle_pointer_event(Layer* layer, PointerEvent* event) {
         }
     }
     if (event->phase == POINTER_DOWN || event->phase == POINTER_UP) {
-        if (layer->child_count > 0) {
-            return 0;
+        if (point_in_rect(mouse_pos, layer->rect)) {
+            if (layer->pointer_passthrough) {
+                return 0;
+            }
+            return 1;
         }
-        return point_in_rect(mouse_pos, layer->rect) ? 1 : 0;
+        return 0;
     }
     return 0;
 }
@@ -512,6 +516,9 @@ static int default_scrollable_pointer_handler(Layer* layer, PointerEvent* event)
     }
 
     if (event->phase == POINTER_MOVE) {
+        if (!is_point_in_rect(event->x, event->y, layer->rect)) {
+            return 0;
+        }
         if (event->delta_x == 0 && event->delta_y == 0) {
             return 0;
         }
@@ -576,6 +583,11 @@ int handle_pointer_event(Layer* layer, PointerEvent* event) {
 
     for (int i = layer->child_count - 1; i >= 0; i--) {
         if (layer->children[i] && layer->children[i]->visible == VISIBLE) {
+            /* POINTER_MOVE: don't gate on child rect — a drag may have moved outside */
+            if (pe->phase != POINTER_MOVE &&
+                !point_in_rect(pos, layer->children[i]->rect)) {
+                continue;
+            }
             int consumed = handle_pointer_event(layer->children[i], pe);
             if (consumed) return 1;
         }
