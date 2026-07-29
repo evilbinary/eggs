@@ -1525,8 +1525,17 @@ int backend_init(){
         return -1;
     }
 
-    if (window && backend_is_headless()) {
-        SDL_HideWindow(window);
+    /* 确认窗口实际尺寸，若因驱动问题返回 1x1 则强制修正到屏幕大小 */
+    {
+        int ww, wh;
+        SDL_GetWindowSize(window, &ww, &wh);
+        if (ww < 100 || wh < 100) {
+            SDL_DisplayMode dm;
+            SDL_zero(dm);
+            SDL_GetCurrentDisplayMode(0, &dm);
+            printf("Backend: window size %dx%d looks wrong, display mode %dx%d\n",
+                   ww, wh, dm.w, dm.h);
+        }
     }
 
 #ifdef __EMSCRIPTEN__
@@ -1586,7 +1595,7 @@ int backend_init(){
         } else {
             printf("  Vertical Sync: Disabled (not supported)\n");
         }
-        
+
         // 打印支持的纹理格式
         printf("  Supported texture formats (%d): ", renderer_info.num_texture_formats);
         for (int i = 0; i < renderer_info.num_texture_formats; i++) {

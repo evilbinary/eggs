@@ -171,6 +171,17 @@ DUMMY_CreateWindow(_THIS, SDL_Window *window)
     if (window->y == SDL_WINDOWPOS_UNDEFINED) {
         window->y = 0;
     }
+    /* 用 libgui 真实屏幕尺寸覆盖窗口大小（SDL_CreateWindow 收到 0,0 后会
+       被 `< 1` 限制转成 1,1，此处恢复正确尺寸） */
+    {
+        screen_info_t *si = screen_info();
+        if (si && si->width > 0 && si->height > 0) {
+            window->w = si->width;
+            window->h = si->height;
+            window->windowed.w = si->width;
+            window->windowed.h = si->height;
+        }
+    }
     window->driverdata = window;
     SDL_SetMouseFocus(window);
     SDL_SetKeyboardFocus(window);
