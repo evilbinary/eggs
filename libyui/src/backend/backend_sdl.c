@@ -1507,7 +1507,7 @@ int backend_init(){
     window = SDL_CreateWindow("YUI",
                                         SDL_WINDOWPOS_CENTERED,
                                         SDL_WINDOWPOS_CENTERED,
-                                        800, 600, window_flags);
+                                        0, 0, window_flags);
 
     /* 平台视频驱动可能不支持 OpenGL（如 YiYiYa DUMMY 驱动无 GL_CreateContext），
        此时 SDL_CreateWindow 会因 SDL_WINDOW_OPENGL 失败返回 NULL。去掉 OpenGL
@@ -1517,7 +1517,7 @@ int backend_init(){
         window = SDL_CreateWindow("YUI",
                                             SDL_WINDOWPOS_CENTERED,
                                             SDL_WINDOWPOS_CENTERED,
-                                            800, 600, window_flags);
+                                            0, 0, window_flags);
     }
 
     if (!window) {
