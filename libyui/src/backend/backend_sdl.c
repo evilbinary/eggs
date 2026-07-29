@@ -16,6 +16,13 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Compatibility: bundled SDL_ttf (< 2.20) lacks TTF_GlyphIsProvided32(Uint32);
+   fall back to the 16-bit API. Supplementary-plane codepoints (>0xFFFF) cannot
+   be queried reliably with the old API and are treated as absent. */
+#ifndef TTF_GlyphIsProvided32
+#define TTF_GlyphIsProvided32(font, cp) TTF_GlyphIsProvided((font), (Uint16)(cp))
+#endif
+
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #define YUI_WIN32_NATIVE 1
 #include <windows.h>
