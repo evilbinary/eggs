@@ -694,9 +694,7 @@ void screen_init() {
   screen_init_with_mode(SCREEN_MODE_XWIN);
 }
 
-/* buffer 模式：buffer 保留 cached malloc，screen_flush 由 xwin_blit 原子拷贝。
- * 适用于增量渲染的 app（SDL/ymain），避免 DE 扫描到半帧造成闪烁。 */
-void screen_init_buffer() {
+void screen_init_buffer(void) {
   screen_init_with_mode(SCREEN_MODE_XWIN_BUFFER);
 }
 
@@ -758,9 +756,10 @@ void screen_init_with_mode(screen_mode_t mode) {
     /* XWIN 不用 /dev/fb flush，避免 fd=-1 时误走 FB ioctl */
     gscreen.fb.framebuffer_count = 0;
 
-    /* 全屏 DIRECT：内核绑 LCD；经 xwin_get_fb 取 VA（ioctl 返回 0xfb****** 会被当成负 errno） */
+    /* 全屏 DIRECT：内核绑 LCD；BUFFER 模式也走 DIRECT（避免事件系统受影响）。 */
+    u32 create_flags = XWIN_FLAG_DIRECT;
     gscreen.xwin_handle = xwin_create_flags(0, 0, gscreen.width, gscreen.height,
-                                            "", XWIN_FLAG_DIRECT);
+                                            "", create_flags);
     /* 不在这里 set_bg/clear：等 get_fb 绑好 VA 后再由 fill_rect 上色 */
 
     {
@@ -903,12 +902,29 @@ void screen_flush() {
       g_stats_inited = 1;
       printf("gui: stats fill/blit/update/render (ms sum per 60 frames)\n");
     }
-    /* DIRECT: buffer=LCD FB, 跳过拷贝; buffer: cached buffer 一次性原子 blit */
+    /* DIRECT: buffer=LCD FB, 跳过拷贝; BUFFER: cached buffer 一次性 blit */
     t0 = screen_now_ms();
     if (gscreen.buffer != NULL &&
         gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
       xwin_blit(gscreen.xwin_handle, 0, 0, (const u32*)gscreen.buffer,
                 gscreen.width, gscreen.height);
+      /* BUFFER 模式：blit 后 cached buffer 已拷到 LCD FB，走 xwin_render 提交。
+       * DIRECT 窗口的 framebuffer 即 LCD FB，blit 后已是完整帧。 */
+      t1 = screen_now_ms();
+      g_acc_blit_ms += t1 - t0;
+
+      t0 = t1;
+      xwin_update(gscreen.xwin_handle);
+      t1 = screen_now_ms();
+      g_acc_update_ms += t1 - t0;
+
+      t0 = t1;
+      xwin_render();
+      t1 = screen_now_ms();
+      g_acc_render_ms += t1 - t0;
+
+      screen_stats_frame_done();
+      return;
     }
     t1 = screen_now_ms();
     g_acc_blit_ms += t1 - t0;

@@ -179,7 +179,10 @@ int event_init() {
   event_info.input_fd = -1;
   event_info.joystick_fd = -1;
   event_info.mouse_fd = -1;
-  event_info.xwin_mode = (screen_get_mode() == SCREEN_MODE_XWIN);
+  /* XWIN 与 XWIN_BUFFER 都走 xwin 事件路径（xwin_get_event 非阻塞）；
+   * 否则会落入 /dev/mouse 阻塞 read，导致主循环卡死、屏幕黑屏。 */
+  event_info.xwin_mode = (screen_get_mode() == SCREEN_MODE_XWIN ||
+                          screen_get_mode() == SCREEN_MODE_XWIN_BUFFER);
 
   if (event_info.xwin_mode) {
     printf("event init xwin mode\n");
