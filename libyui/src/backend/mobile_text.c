@@ -4,7 +4,12 @@
 #include "backend.h"
 #include "util.h"
 
+// OpenGL ES 头文件：Android 和 iOS 路径不同
+#ifdef __APPLE__
+#include <OpenGLES/ES2/gl.h>
+#else
 #include <GLES2/gl2.h>
+#endif
 /* #include <android/log.h> */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +32,7 @@ typedef struct {
     int size;
 } MobileFont;
 
-#define MOBILE_TEXT_CACHE_MAX 128
+#define MOBILE_TEXT_CACHE_MAX 512
 
 typedef struct {
     DFont* font;

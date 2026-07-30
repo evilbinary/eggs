@@ -9,6 +9,7 @@
 #include "backend.h"
 #include "component_registry.h"
 #include "log.h"
+#include "perf/perf.h"
 
 Layer* focused_layer = NULL;
 
@@ -1185,6 +1186,7 @@ void destroy_layer(Layer* layer) {
     }
 
     layer_free_strings(layer);
+    perf_layer_destroyed(layer);
     free(layer);
 }
 
@@ -1261,15 +1263,15 @@ Layer* layer_resolve_path(Layer* root, const char* path)
     return root;
 }
 
-int layer_show(Layer* layer) {
+int layer_show(Layer* layer, int recursive) {
     if (!layer) {
         return 0;
     }
-    if (layer->visible == VISIBLE) {
+    if (!recursive && layer->visible == VISIBLE) {
         return 0;
     }
 
-    layer_set_visible(layer, VISIBLE);
+    layer_set_visible(layer, recursive ? VISIBLE_ALL : VISIBLE);
     return 1;
 }
 
