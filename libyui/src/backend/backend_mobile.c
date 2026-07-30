@@ -278,28 +278,13 @@ static void mobile_draw_rect_norm(float x, float y, float w, float h,
 static void mobile_fill_corner_phys(int cx, int cy, int radius, int quadrant,
                                     unsigned char r, unsigned char g,
                                     unsigned char b, unsigned char a) {
-    float verts[262]; /* 128 segments + 2 center + 1 last = 131, * 2 coords */
-    int segments;
-    int vert_count;
-    float start_a, end_a;
+    float verts[262];
+    int segments, vert_count;
 
     if (radius <= 0 || !g_egl_ready) return;
 
     segments = radius < 4 ? 4 : radius;
     if (segments > 128) segments = 128;
-
-    /* Map quadrant to angle range (in radians, y-up screen coords) */
-    switch (quadrant) {
-    case 0: /* top-left:   180° → 90°  */
-        start_a = (float)M_PI; end_a = (float)M_PI * 0.5f; break;
-    case 1: /* top-right:  90°  → 0°  */
-        start_a = (float)M_PI * 0.5f; end_a = 0.0f; break;
-    case 2: /* bottom-left: 180° → 270° (-90°) */
-        start_a = (float)M_PI; end_a = (float)M_PI * 1.5f; break;
-    default: /* bottom-right: 270° → 360° (0°) */
-        start_a = (float)M_PI * 1.5f; end_a = (float)M_PI * 2.0f; break;
-    }
-
     vert_count = segments + 2;
     if (vert_count * 2 > 262) return;
 
@@ -307,14 +292,20 @@ static void mobile_fill_corner_phys(int cx, int cy, int radius, int quadrant,
     verts[0] = -1.0f + 2.0f * (float)cx / (float)g_window_w;
     verts[1] =  1.0f - 2.0f * (float)cy / (float)g_window_h;
 
-    /* Arc vertices */
+    /* Arc vertices as triangle fan around the corner center.
+     * Angles in screen coords: 0=right, π/2=down, π=left, 3π/2=up */
     for (int i = 0; i <= segments; i++) {
         float frac = (float)i / (float)segments;
         float a;
-        if (end_a > start_a) {
-            a = start_a + (end_a - start_a) * frac;
-        } else {
-            a = start_a - (start_a - end_a) * frac;
+        switch (quadrant) {
+        case 0: /* top-left:  left(π) → up(3π/2)   increasing */
+            a = (float)M_PI + (float)M_PI * 0.5f * frac; break;
+        case 1: /* top-right: up(3π/2) → right(2π)  increasing */
+            a = (float)M_PI * 1.5f + (float)M_PI * 0.5f * frac; break;
+        case 2: /* bottom-left: left(π) → down(π/2) decreasing */
+            a = (float)M_PI - (float)M_PI * 0.5f * frac; break;
+        default: /* bottom-right: down(π/2) → right(0) decreasing */
+            a = (float)M_PI * 0.5f - (float)M_PI * 0.5f * frac; break;
         }
         float px = (float)cx + (float)radius * cosf(a);
         float py = (float)cy + (float)radius * sinf(a);
