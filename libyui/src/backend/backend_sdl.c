@@ -38,6 +38,7 @@
 #define WINDOW_WIDTH 1000
 #define MAX_TOUCHES 10
 #define MAX_UPDATE_CALLBACKS 16
+#define TEXTURE_CACHE_SIZE 256  // 2^8，便于用位运算取模
 #define MAX_TEXTURE_CACHE_ENTRIES 200
 
 // ====================== 全局渲染器 ======================
@@ -105,6 +106,7 @@ static ResizeCallback resize_callback = NULL;
 
 // 字体缓存结构
 typedef struct {
+    uint64_t hash;          // 预计算的哈希值
     char font_path[MAX_PATH];
     int size;
     char weight[32];  // "normal", "bold", "light"
@@ -112,8 +114,9 @@ typedef struct {
     Uint32 last_used;
 } FontCacheEntry;
 
+#define FONT_CACHE_SIZE 256  // 2^8，便于用位运算取模
 #define MAX_FONT_CACHE_ENTRIES 150
-FontCacheEntry font_cache[MAX_FONT_CACHE_ENTRIES] = {0};
+FontCacheEntry font_cache[FONT_CACHE_SIZE] = {0};
 int font_cache_initialized = 0;
 
 // 纹理缓存结构
@@ -132,7 +135,7 @@ typedef struct {
     uint8_t pinned;
 } TextureCacheEntry;
 
-TextureCacheEntry texture_cache[MAX_TEXTURE_CACHE_ENTRIES] = {0};
+TextureCacheEntry texture_cache[TEXTURE_CACHE_SIZE] = {0};
 int texture_cache_initialized = 0;
 static int texture_cache_scale_milli = -1;
 
@@ -232,46 +235,54 @@ static void backend_texture_cache_sync_scale(void) {
 
 static int backend_texture_cache_find_index(uint64_t key_hash, DFont* font, int font_size,
                                             Color color, const char* text) {
-    int i;
-
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
-        if (!texture_cache[i].texture || texture_cache[i].key_hash != key_hash) {
-            continue;
+    // 开放寻址哈希表查找：从 hash 位置开始线性探测
+    int start = (int)(key_hash & 0xFF);  // TEXTURE_CACHE_SIZE = 256
+    int probe = start;
+    int max_probes = 8;  // 最多探测 8 个槽位，超过则回退到线性搜索
+    
+    while (max_probes-- > 0) {
+        if (texture_cache[probe].texture && 
+            texture_cache[probe].key_hash == key_hash &&
+            backend_texture_cache_entry_matches(&texture_cache[probe], key_hash, font, font_size, color, text)) {
+            return probe;
         }
-        if (backend_texture_cache_entry_matches(&texture_cache[i], key_hash, font, font_size, color, text)) {
-            return i;
-        }
+        probe = (probe + 1) & 0xFF;  // 循环探测
+        if (probe == start) break;
     }
     return -1;
 }
 
-static int backend_texture_cache_pick_evict_index(void) {
-    int i;
-    int cache_index = -1;
+static int backend_texture_cache_pick_evict_index(uint64_t key_hash) {
+    int start = (int)(key_hash & 0xFF);
+    int probe = start;
+    int empty_slot = -1;
+    int lru_slot = -1;
     Uint32 oldest_time = SDL_GetTicks();
-
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
-        if (!texture_cache[i].texture) {
-            return i;
+    int probes = 0;
+    
+    // 探测寻找空槽或 LRU 条目
+    while (probes < 16) {  // 探测最多 16 个位置
+        if (!texture_cache[probe].texture) {
+            empty_slot = probe;
+            break;  // 找到空槽，直接使用
         }
+        if (!texture_cache[probe].pinned && texture_cache[probe].last_used < oldest_time) {
+            oldest_time = texture_cache[probe].last_used;
+            lru_slot = probe;
+        }
+        probe = (probe + 1) & 0xFF;
+        probes++;
+        if (probe == start) break;
     }
-
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
-        if (texture_cache[i].pinned) {
-            continue;
-        }
-        if (texture_cache[i].last_used <= oldest_time) {
-            oldest_time = texture_cache[i].last_used;
-            cache_index = i;
-        }
-    }
-    return cache_index;
+    
+    // 优先使用空槽，否则使用 LRU 位置
+    return empty_slot >= 0 ? empty_slot : lru_slot;
 }
 
 static void backend_texture_cache_store_entry(int cache_index, uint64_t key_hash, DFont* font,
                                               int font_size, const char* text, Color color,
                                               SDL_Texture* texture, int width, int height, int pinned) {
-    if (cache_index < 0 || cache_index >= MAX_TEXTURE_CACHE_ENTRIES) {
+    if (cache_index < 0 || cache_index >= TEXTURE_CACHE_SIZE) {
         return;
     }
     if (texture_cache[cache_index].texture && texture_cache[cache_index].texture != texture) {
@@ -935,7 +946,7 @@ void init_texture_cache() {
         return;
     }
 
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+    for (i = 0; i < TEXTURE_CACHE_SIZE; i++) {
         texture_cache[i].key_hash = 0;
         texture_cache[i].font = NULL;
         texture_cache[i].font_size = 0;
@@ -956,7 +967,7 @@ void init_texture_cache() {
 void cleanup_texture_cache() {
     int i;
 
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+    for (i = 0; i < TEXTURE_CACHE_SIZE; i++) {
         if (texture_cache[i].texture) {
             SDL_DestroyTexture(texture_cache[i].texture);
             texture_cache[i].texture = NULL;
@@ -977,7 +988,7 @@ void cleanup_texture_cache() {
 void backend_texture_cache_invalidate(void) {
     int i;
 
-    for (i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+    for (i = 0; i < TEXTURE_CACHE_SIZE; i++) {
         if (!texture_cache[i].texture || texture_cache[i].pinned) {
             continue;
         }
@@ -1081,7 +1092,7 @@ void add_texture_to_cache(DFont* font, const char* text, Color color, int font_s
         return;
     }
 
-    cache_index = backend_texture_cache_pick_evict_index();
+    cache_index = backend_texture_cache_pick_evict_index(key_hash);
     if (cache_index < 0) {
         SDL_DestroyTexture(texture);
         return;
@@ -1092,10 +1103,31 @@ void add_texture_to_cache(DFont* font, const char* text, Color color, int font_s
 }
 
 // ====================== 字体缓存管理 ======================
+// 计算 Font Cache 的哈希值
+static uint64_t font_cache_hash(const char* font_path, int size, const char* weight) {
+    uint64_t h = 14695981039346656037ULL;
+    if (font_path) {
+        for (const char* p = font_path; *p; p++) {
+            h ^= (uint64_t)(unsigned char)*p;
+            h *= 1099511628211ULL;
+        }
+    }
+    h ^= (uint64_t)size;
+    h *= 1099511628211ULL;
+    if (weight) {
+        for (const char* p = weight; *p; p++) {
+            h ^= (uint64_t)(unsigned char)*p;
+            h *= 1099511628211ULL;
+        }
+    }
+    return h;
+}
+
 void init_font_cache() {
     if (font_cache_initialized) return;
     
-    for (int i = 0; i < MAX_FONT_CACHE_ENTRIES; i++) {
+    for (int i = 0; i < FONT_CACHE_SIZE; i++) {
+        font_cache[i].hash = 0;
         font_cache[i].font = NULL;
         font_cache[i].font_path[0] = '\0';
         font_cache[i].size = 0;
@@ -1108,11 +1140,12 @@ void init_font_cache() {
 
 void cleanup_font_cache() {
     printf("Cleaning up font cache...\n");
-    for (int i = 0; i < MAX_FONT_CACHE_ENTRIES; i++) {
+    for (int i = 0; i < FONT_CACHE_SIZE; i++) {
         if (font_cache[i].font) {
             TTF_CloseFont(font_cache[i].font);
             font_cache[i].font = NULL;
         }
+        font_cache[i].hash = 0;
         font_cache[i].font_path[0] = '\0';
         font_cache[i].size = 0;
         font_cache[i].weight[0] = '\0';
@@ -1120,43 +1153,54 @@ void cleanup_font_cache() {
     printf("Font cache cleanup completed\n");
 }
 
-// 在缓存中查找字体
+// 在缓存中查找字体（使用哈希表）
 TTF_Font* find_font_in_cache(const char* font_path, int size, const char* weight) {
-    for (int i = 0; i < MAX_FONT_CACHE_ENTRIES; i++) {
-        if (font_cache[i].font &&
-            strcmp(font_cache[i].font_path, font_path) == 0 &&
-            font_cache[i].size == size &&
-            strcmp(font_cache[i].weight, weight) == 0) {
-            font_cache[i].last_used = SDL_GetTicks();
-            return font_cache[i].font;
+    uint64_t hash = font_cache_hash(font_path, size, weight);
+    int start = (int)(hash & 0xFF);
+    int probe = start;
+    int probes = 0;
+    
+    while (probes < 8) {
+        if (font_cache[probe].font && font_cache[probe].hash == hash &&
+            strcmp(font_cache[probe].font_path, font_path) == 0 &&
+            font_cache[probe].size == size &&
+            strcmp(font_cache[probe].weight, weight) == 0) {
+            font_cache[probe].last_used = SDL_GetTicks();
+            return font_cache[probe].font;
         }
+        probe = (probe + 1) & 0xFF;
+        probes++;
+        if (probe == start) break;
     }
     return NULL;
 }
 
-// 添加字体到缓存
+// 添加字体到缓存（使用哈希表）
 void add_font_to_cache(const char* font_path, int size, const char* weight, TTF_Font* font) {
-    // 查找空闲位置或最久未使用的位置
-    int cache_index = -1;
+    uint64_t hash = font_cache_hash(font_path, size, weight);
+    int start = (int)(hash & 0xFF);
+    int probe = start;
+    int empty_slot = -1;
+    int lru_slot = -1;
     Uint32 oldest_time = SDL_GetTicks();
+    int probes = 0;
     
-    // 首先查找空闲位置
-    for (int i = 0; i < MAX_FONT_CACHE_ENTRIES; i++) {
-        if (!font_cache[i].font) {
-            cache_index = i;
-            break;
+    // 探测寻找空槽或 LRU 条目
+    while (probes < 16) {
+        if (!font_cache[probe].font) {
+            empty_slot = probe;
+            break;  // 找到空槽，直接使用
         }
+        if (font_cache[probe].last_used < oldest_time) {
+            oldest_time = font_cache[probe].last_used;
+            lru_slot = probe;
+        }
+        probe = (probe + 1) & 0xFF;
+        probes++;
+        if (probe == start) break;
     }
     
-    // 如果没有空闲位置，查找最久未使用的位置
-    if (cache_index == -1) {
-        for (int i = 0; i < MAX_FONT_CACHE_ENTRIES; i++) {
-            if (font_cache[i].last_used < oldest_time) {
-                oldest_time = font_cache[i].last_used;
-                cache_index = i;
-            }
-        }
-    }
+    int cache_index = (empty_slot >= 0) ? empty_slot : lru_slot;
     
     if (cache_index >= 0) {
         // 如果该位置已有字体，先关闭它
@@ -1165,6 +1209,7 @@ void add_font_to_cache(const char* font_path, int size, const char* weight, TTF_
         }
         
         // 添加新字体到缓存
+        font_cache[cache_index].hash = hash;
         strncpy(font_cache[cache_index].font_path, font_path, MAX_PATH - 1);
         font_cache[cache_index].font_path[MAX_PATH - 1] = '\0';
         font_cache[cache_index].size = size;
@@ -1194,6 +1239,7 @@ int blur_cache_initialized = 0;
 #define MAX_ARC_CACHE_ENTRIES 32
 
 typedef struct {
+    uint64_t hash;          // 预计算的哈希值，避免查找时重复计算
     SDL_Texture* texture;
     int radius;
     int line_width;
@@ -1253,14 +1299,9 @@ static uint64_t arc_cache_hash(int radius, int line_width, float start_angle, fl
 static int find_arc_cache_entry(int radius, int line_width, float start_angle, float end_angle, Color color) {
     uint64_t target_hash = arc_cache_hash(radius, line_width, start_angle, end_angle, color);
     for (int i = 0; i < MAX_ARC_CACHE_ENTRIES; i++) {
-        if (arc_cache[i].in_use && arc_cache[i].texture) {
-            uint64_t entry_hash = arc_cache_hash(arc_cache[i].radius, arc_cache[i].line_width,
-                                                  arc_cache[i].start_angle, arc_cache[i].end_angle,
-                                                  arc_cache[i].color);
-            if (entry_hash == target_hash) {
-                arc_cache[i].last_used = arc_cache_frame;
-                return i;
-            }
+        if (arc_cache[i].in_use && arc_cache[i].texture && arc_cache[i].hash == target_hash) {
+            arc_cache[i].last_used = arc_cache_frame;
+            return i;
         }
     }
     return -1;
@@ -2060,7 +2101,7 @@ void backend_render_text_destroy(Texture * texture){
     // 检查纹理是否在缓存中，如果在缓存中则不销毁
     if (!texture) return;
     
-    for (int i = 0; i < MAX_TEXTURE_CACHE_ENTRIES; i++) {
+    for (int i = 0; i < TEXTURE_CACHE_SIZE; i++) {
         if (texture_cache[i].texture == texture) {
             // 纹理在缓存中，不销毁
             return;
@@ -2940,17 +2981,53 @@ void draw_rect(SDL_Renderer* renderer, int x, int y, int w, int h, SDL_Color col
     SDL_RenderFillRect(renderer, &rect);
 }
 
-// 绘制带透明度的圆形
+// 绘制带透明度的圆形（带抗锯齿：内部实心 + 边缘 alpha 渐变）
+#define MAX_ARC_POINTS 8192
+static void arc_draw_bucketed(SDL_Point* points, const Uint8* alphas, int count, Color color);
 void draw_circle(SDL_Renderer* renderer, int center_x, int center_y, int radius, SDL_Color color) {
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    
-    for (int x = -radius; x <= radius; x++) {
-        for (int y = -radius; y <= radius; y++) {
-            if (x*x + y*y <= radius*radius) {
-                SDL_RenderDrawPoint(renderer, center_x + x, center_y + y);
+    if (radius <= 0 || color.a == 0) return;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // 收集像素：圆内实心点 + 边缘抗锯齿点
+    static SDL_Point points[MAX_ARC_POINTS];
+    static Uint8 alphas[MAX_ARC_POINTS];
+    int count = 0;
+
+    float r_outer = radius + 0.5f;
+    float r_inner = radius - 0.5f;
+    float r_outer_sq = r_outer * r_outer;
+    float r_inner_sq = r_inner * r_inner;
+
+    for (int y = -radius - 1; y <= radius + 1; y++) {
+        for (int x = -radius - 1; x <= radius + 1; x++) {
+            float dx = x + 0.5f;
+            float dy = y + 0.5f;
+            float dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq > r_outer_sq) continue;
+
+            // 边缘区域：按像素中心到圆的距离计算覆盖率
+            float alpha = 1.0f;
+            if (dist_sq >= r_inner_sq) {
+                float dist = sqrtf(dist_sq);
+                alpha = r_outer - dist;
+                if (alpha > 1.0f) alpha = 1.0f;
+                if (alpha <= 0.0f) continue;
+            }
+
+            Uint8 a = (Uint8)(alpha * color.a);
+            if (a < 3) continue;
+            if (count < MAX_ARC_POINTS) {
+                points[count].x = center_x + x;
+                points[count].y = center_y + y;
+                alphas[count] = a;
+                count++;
             }
         }
     }
+
+    arc_draw_bucketed(points, alphas, count, color);
 }
 
 // // 绘制带透明度的多边形
@@ -3166,25 +3243,30 @@ yui_aa_build_done:
 
 static YuiRadiusAA *yui_aa_circle_get(int radius)
 {
-    int i;
-    int slot = -1;
-
     if (radius <= 0) {
         return NULL;
     }
 
-    for (i = 0; i < YUI_AA_CIRCLE_CACHE_SIZE; i++) {
-        if (yui_aa_circle_cache[i].radius == radius && yui_aa_circle_cache[i].buf) {
-            return &yui_aa_circle_cache[i];
+    // 使用开放寻址哈希表：radius % SIZE 作为起始位置
+    int start = radius % YUI_AA_CIRCLE_CACHE_SIZE;
+    int probe = start;
+    int empty_slot = -1;
+    int probes = 0;
+    
+    while (probes < YUI_AA_CIRCLE_CACHE_SIZE) {
+        if (yui_aa_circle_cache[probe].radius == radius && yui_aa_circle_cache[probe].buf) {
+            return &yui_aa_circle_cache[probe];
         }
-        if (slot < 0 && yui_aa_circle_cache[i].radius == 0) {
-            slot = i;
+        if (yui_aa_circle_cache[probe].radius == 0 && empty_slot < 0) {
+            empty_slot = probe;
         }
+        probe = (probe + 1) % YUI_AA_CIRCLE_CACHE_SIZE;
+        probes++;
     }
-    if (slot < 0) {
-        slot = 0;
-    }
-
+    
+    // 使用找到的空槽或起始位置
+    int slot = (empty_slot >= 0) ? empty_slot : start;
+    
     yui_aa_circle_build(&yui_aa_circle_cache[slot], radius);
     return yui_aa_circle_cache[slot].buf ? &yui_aa_circle_cache[slot] : NULL;
 }
@@ -3246,7 +3328,8 @@ static void yui_draw_rounded_row_aa(SDL_Renderer *renderer, int x, int py, int w
     }
 }
 
-void draw_rounded_rect(SDL_Renderer* renderer, int x, int y, int w, int h, int radius, SDL_Color color) {
+/* 直接光栅化圆角矩形（无缓存），供纹理烘焙与缓存失败回退使用 */
+static void yui_draw_rounded_rect_direct(SDL_Renderer* renderer, int x, int y, int w, int h, int radius, SDL_Color color) {
     int r = radius;
     YuiRadiusAA *aa;
 
@@ -3288,6 +3371,37 @@ void draw_rounded_rect(SDL_Renderer* renderer, int x, int y, int w, int h, int r
             yui_draw_rounded_row_aa(renderer, x, py, w, r, cir_y, aa, color);
         }
     }
+}
+
+/* 圆角矩形纹理缓存：按 (w,h,radius,rgba) 烘焙一次，之后单次 blit。
+   依赖 g_style_fx 缓存（kind=3），复用 shadow/gradient 的 offscreen 纹理方案。 */
+static SDL_Texture* yui_rounded_rect_texture_get(int w, int h, int radius, SDL_Color color);
+
+/* 绘制带圆角的填充矩形（缓存版：首次烘焙纹理，后续单次 blit） */
+void draw_rounded_rect(SDL_Renderer* renderer, int x, int y, int w, int h, int radius, SDL_Color color) {
+    SDL_Texture* tex;
+    int r = radius;
+
+    if (w <= 0 || h <= 0 || color.a == 0) return;
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
+    if (r <= 0) {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        SDL_Rect rect = {x, y, w, h};
+        SDL_RenderFillRect(renderer, &rect);
+        return;
+    }
+
+    tex = yui_rounded_rect_texture_get(w, h, r, color);
+    if (tex) {
+        SDL_Rect dst = {x, y, w, h};
+        SDL_RenderCopy(renderer, tex, NULL, &dst);
+        return;
+    }
+
+    yui_draw_rounded_rect_direct(renderer, x, y, w, h, r, color);
 }
 
 // 绘制带边框的圆角矩形
@@ -3402,6 +3516,62 @@ static int yui_style_fx_alloc_slot(void) {
     }
     memset(&g_style_fx[lru_i], 0, sizeof(g_style_fx[lru_i]));
     return lru_i;
+}
+
+static SDL_Texture* yui_rounded_rect_texture_get(int w, int h, int radius, SDL_Color color) {
+    Uint32 rgba = ((Uint32)color.r << 24) | ((Uint32)color.g << 16) | ((Uint32)color.b << 8) | (Uint32)color.a;
+    SDL_Rect prev_clip;
+    SDL_bool clip_on;
+    SDL_Texture* prev;
+    SDL_Texture* tex;
+    int slot;
+
+    if (!renderer || w <= 0 || h <= 0 || radius <= 0) return NULL;
+
+    g_style_fx_clock++;
+    for (int i = 0; i < YUI_STYLE_FX_CACHE; i++) {
+        YuiStyleFxEntry* e = &g_style_fx[i];
+        if (e->kind != 3 || !e->tex || e->w != w || e->h != h ||
+            e->radius != radius || e->rgba != rgba) {
+            continue;
+        }
+        e->last_use = g_style_fx_clock;
+        return e->tex;
+    }
+
+    slot = yui_style_fx_alloc_slot();
+    tex = SDL_CreateTexture(renderer, yui_fx_pixel_format(), SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!tex) return NULL;
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+
+    /* 烘焙期间关闭 clip，避免主表面的裁剪影响纹理内容 */
+    clip_on = SDL_RenderIsClipEnabled(renderer);
+    if (clip_on) SDL_RenderGetClipRect(renderer, &prev_clip);
+    SDL_RenderSetClipRect(renderer, NULL);
+
+    prev = SDL_GetRenderTarget(renderer);
+    if (SDL_SetRenderTarget(renderer, tex) != 0) {
+        SDL_RenderSetClipRect(renderer, clip_on ? &prev_clip : NULL);
+        SDL_DestroyTexture(tex);
+        return NULL;
+    }
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+    SDL_RenderClear(renderer);
+    yui_draw_rounded_rect_direct(renderer, 0, 0, w, h, radius, color);
+    SDL_SetRenderTarget(renderer, prev);
+
+    if (clip_on) SDL_RenderSetClipRect(renderer, &prev_clip);
+
+    g_style_fx[slot].tex = tex;
+    g_style_fx[slot].tw = w;
+    g_style_fx[slot].th = h;
+    g_style_fx[slot].kind = 3;
+    g_style_fx[slot].w = w;
+    g_style_fx[slot].h = h;
+    g_style_fx[slot].radius = radius;
+    g_style_fx[slot].rgba = rgba;
+    g_style_fx[slot].last_use = g_style_fx_clock;
+    return tex;
 }
 
 static void yui_draw_vertical_gradient_fast(int x, int y, int w, int h, int radius,
@@ -3882,7 +4052,25 @@ static void plot_aa_pixel(int x, int y, float alpha, Color color) {
     SDL_RenderDrawPoint(renderer, x, y);
 }
 
-// 绘制抗锯齿线段
+/* 批量提交像素点：每批一次 SDL_RenderDrawPoints，避免逐像素驱动调用。
+   与 arc 的批量绘制一致，分批防止个别驱动对单次点数的限制。 */
+#define MAX_LINE_POINTS 8192
+#define LINE_POINTS_CHUNK 2048
+static SDL_Point line_main_pts[MAX_LINE_POINTS];
+static SDL_Point line_aa_pts[MAX_LINE_POINTS * 2];
+
+static void line_flush_points(const SDL_Point *pts, int count, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+    int i = 0;
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+    while (i < count) {
+        int n = count - i;
+        if (n > LINE_POINTS_CHUNK) n = LINE_POINTS_CHUNK;
+        SDL_RenderDrawPoints(renderer, &pts[i], n);
+        i += n;
+    }
+}
+
+// 绘制抗锯齿线段（批量版：先收集再提交，斜线不再逐像素绘制）
 void backend_render_line(int x1, int y1, int x2, int y2, Color color) {
     // 对于水平或垂直线，使用SDL原生绘制（更快）
     if (x1 == x2 || y1 == y2) {
@@ -3890,45 +4078,122 @@ void backend_render_line(int x1, int y1, int x2, int y2, Color color) {
         SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
         return;
     }
-    
-    // 对于斜线，使用简化的抗锯齿算法
-    // 使用Bresenham算法的改进版本
+
     int dx = abs(x2 - x1);
     int dy = abs(y2 - y1);
+    int steps = (dx > dy) ? dx : dy;
+
+    // 超长线（极少数情况）回退到逐像素绘制
+    if (steps >= MAX_LINE_POINTS) {
+        int sx0 = (x1 < x2) ? 1 : -1;
+        int sy0 = (y1 < y2) ? 1 : -1;
+        int err0 = dx - dy;
+        int px = x1, py = y1;
+        while (1) {
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+            SDL_RenderDrawPoint(renderer, px, py);
+            int err2 = 2 * err0;
+            if (err2 > -dy) {
+                if (py + sy0 >= 0) {
+                    plot_aa_pixel(px, py + sy0, 0.3f, color);
+                }
+                err0 -= dy;
+                px += sx0;
+            }
+            if (err2 < dx) {
+                if (px + sx0 >= 0) {
+                    plot_aa_pixel(px + sx0, py, 0.3f, color);
+                }
+                err0 += dx;
+                py += sy0;
+            }
+            if (px == x2 && py == y2) break;
+        }
+        return;
+    }
+
+    // 对于斜线，使用简化的抗锯齿算法（Bresenham 改进版）
     int sx = (x1 < x2) ? 1 : -1;
     int sy = (y1 < y2) ? 1 : -1;
     int err = dx - dy;
-    
     int x = x1, y = y1;
-    
+    int main_count = 0;
+    int aa_count = 0;
+
+    // 第一遍：收集主像素与抗锯齿像素（不提交，避免逐像素驱动调用）
     while (1) {
-        // 绘制主像素
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderDrawPoint(renderer, x, y);
-        
-        // 计算误差来决定是否绘制周围的像素进行抗锯齿
+        line_main_pts[main_count].x = x;
+        line_main_pts[main_count].y = y;
+        main_count++;
+
         int err2 = 2 * err;
-        float alpha_factor = 0.3f; // 抗锯齿强度
-        
         if (err2 > -dy) {
-            // 绘制旁边像素进行抗锯齿
             if (y + sy >= 0) {
-                plot_aa_pixel(x, y + sy, alpha_factor, color);
+                line_aa_pts[aa_count].x = x;
+                line_aa_pts[aa_count].y = y + sy;
+                aa_count++;
             }
             err -= dy;
             x += sx;
         }
-        
         if (err2 < dx) {
-            // 绘制旁边像素进行抗锯齿
             if (x + sx >= 0) {
-                plot_aa_pixel(x + sx, y, alpha_factor, color);
+                line_aa_pts[aa_count].x = x + sx;
+                line_aa_pts[aa_count].y = y;
+                aa_count++;
             }
             err += dx;
             y += sy;
         }
-        
         if (x == x2 && y == y2) break;
+    }
+
+    // 主像素（不透明）：单次批量提交
+    line_flush_points(line_main_pts, main_count, color.r, color.g, color.b, color.a);
+
+    // 抗锯齿像素（半透明）：单次批量提交
+    Uint8 aa_a = (Uint8)(0.3f * color.a);
+    if (aa_count > 0 && aa_a > 0) {
+        line_flush_points(line_aa_pts, aa_count, color.r, color.g, color.b, aa_a);
+    }
+}
+
+// 按 alpha 分桶批量绘制圆弧点（单次遍历 + 计数排序，替代 O(32*N) 逐桶扫描）
+static void arc_draw_bucketed(SDL_Point* points, const Uint8* alphas, int count, Color color) {
+    if (count <= 0) return;
+    #define ARC_BUCKETS 32
+    static SDL_Point bucket_pts[MAX_ARC_POINTS];
+    static int bucket_off[ARC_BUCKETS + 1];
+    static int bucket_cnt[ARC_BUCKETS];
+    int i;
+
+    for (i = 0; i < ARC_BUCKETS; i++) bucket_cnt[i] = 0;
+    for (i = 0; i < count; i++) {
+        int b = (255 - alphas[i] + 3) / 8;
+        if (b < 0) b = 0;
+        if (b >= ARC_BUCKETS) b = ARC_BUCKETS - 1;
+        bucket_cnt[b]++;
+    }
+    bucket_off[0] = 0;
+    for (i = 0; i < ARC_BUCKETS; i++) bucket_off[i + 1] = bucket_off[i] + bucket_cnt[i];
+
+    // 二遍：拷贝到每个桶的连续区间
+    static int cursor[ARC_BUCKETS];
+    for (i = 0; i < ARC_BUCKETS; i++) cursor[i] = bucket_off[i];
+    for (i = 0; i < count; i++) {
+        int b = (255 - alphas[i] + 3) / 8;
+        if (b < 0) b = 0;
+        if (b >= ARC_BUCKETS) b = ARC_BUCKETS - 1;
+        bucket_pts[cursor[b]++] = points[i];
+    }
+
+    // 逐桶提交（仅非空桶触发 SDL 调用）
+    for (i = 0; i < ARC_BUCKETS; i++) {
+        if (bucket_cnt[i] > 0) {
+            int alpha = 255 - i * 8;
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, (Uint8)alpha);
+            SDL_RenderDrawPoints(renderer, bucket_pts + bucket_off[i], bucket_cnt[i]);
+        }
     }
 }
 
@@ -3981,72 +4246,127 @@ void backend_render_arc(int center_x, int center_y, int radius, float start_angl
     // 边界框
     int extent = (int)(r_outer + 2);
 
+    // 圆弧边界单位向量（用于叉积角度判断，替代逐像素 atan2f + 归一化循环）
+    float ux_s = cosf(start_rad), uy_s = sinf(start_rad);
+    float ux_e = cosf(end_rad), uy_e = sinf(end_rad);
+    float sweep_rad = end_rad - start_rad;
+    int sweep_le_pi = (sweep_rad <= (float)M_PI);
+
+    // 非完整圆弧：把扫描范围缩小到扇形的轴对齐包围盒，
+    // 避免扫描整个 (2*extent)² 外接正方形
+    int px_lo = -extent, px_hi = extent, py_lo = -extent, py_hi = extent;
+    if (!is_full_circle) {
+        float r_max = r_outer + 1.0f;
+        float c_s = cosf(start_rad), s_s = sinf(start_rad);
+        float c_e = cosf(end_rad), s_e = sinf(end_rad);
+        float cosmax = c_s > c_e ? c_s : c_e;
+        float cosmin = c_s < c_e ? c_s : c_e;
+        float sinmax = s_s > s_e ? s_s : s_e;
+        float sinmin = s_s < s_e ? s_s : s_e;
+
+        // 临界角度（cos 在 0/π 取 ±1，sin 在 π/2/3π/2 取 ±1）若落在扇形内则取极值
+        float d = fmodf(-start_rad, 2.0f * (float)M_PI);
+        if (d < 0.0f) d += 2.0f * (float)M_PI;
+        if (d <= sweep_rad) cosmax = 1.0f;
+        d = fmodf((float)M_PI - start_rad, 2.0f * (float)M_PI);
+        if (d < 0.0f) d += 2.0f * (float)M_PI;
+        if (d <= sweep_rad) cosmin = -1.0f;
+        d = fmodf((float)(M_PI * 0.5) - start_rad, 2.0f * (float)M_PI);
+        if (d < 0.0f) d += 2.0f * (float)M_PI;
+        if (d <= sweep_rad) sinmax = 1.0f;
+        d = fmodf((float)(M_PI * 1.5) - start_rad, 2.0f * (float)M_PI);
+        if (d < 0.0f) d += 2.0f * (float)M_PI;
+        if (d <= sweep_rad) sinmin = -1.0f;
+
+        // 包围盒需同时考虑内外半径：
+        // 扇形的角点有 4 个（内/外半径 × 起/止角度），且 cos/sin 为负时
+        // 极值来自内半径角点（如 9 点钟方向的小扇形，其最右端在内半径处）
+        float r_min = r_inner - 1.0f;   // 内半径向外扩 1px（含 AA 带）
+        px_lo = (int)floorf((cosmin >= 0.0f ? r_min : r_max) * cosmin) - 1;
+        px_hi = (int)ceilf((cosmax >= 0.0f ? r_max : r_min) * cosmax) + 1;
+        py_lo = (int)floorf((sinmin >= 0.0f ? r_min : r_max) * sinmin) - 1;
+        py_hi = (int)ceilf((sinmax >= 0.0f ? r_max : r_min) * sinmax) + 1;
+        if (px_lo < -extent) px_lo = -extent;
+        if (px_hi > extent) px_hi = extent;
+        if (py_lo < -extent) py_lo = -extent;
+        if (py_hi > extent) py_hi = extent;
+    }
+
     // 批量绘制：收集所有需要绘制的点
     // 使用静态缓冲区避免频繁分配
-    #define MAX_ARC_POINTS 8192
     static SDL_Point points[MAX_ARC_POINTS];
     static Uint8 point_alphas[MAX_ARC_POINTS];
     int point_count = 0;
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    // 遍历边界框，收集需要绘制的点
-    for (int py = -extent; py <= extent; py++) {
-        for (int px = -extent; px <= extent; px++) {
+    // 遍历包围盒，收集需要绘制的点
+    // 预计算边界区域的平方距离（AA 带向外扩 1px，边缘像素按覆盖率渐变）
+    float r_inner_skip = r_inner - 1.0f;
+    float r_outer_skip = r_outer + 1.0f;
+    float r_inner_skip_sq = r_inner_skip * r_inner_skip;
+    float r_outer_skip_sq = r_outer_skip * r_outer_skip;
+    float r_inner_plus_sq = (r_inner + 1.0f) * (r_inner + 1.0f);
+    float r_outer_minus_sq = (r_outer - 1.0f) * (r_outer - 1.0f);
+    
+    for (int py = py_lo; py <= py_hi; py++) {
+        for (int px = px_lo; px <= px_hi; px++) {
             float dx = px + 0.5f;
             float dy = py + 0.5f;
             float dist_sq = dx * dx + dy * dy;
+            float c1 = 0.0f, c2 = 0.0f, dot_s = 0.0f, dot_e = 0.0f;
 
-            // 快速跳过：使用平方距离避免 sqrt
-            float r_inner_minus = r_inner - 1.0f;
-            float r_outer_plus = r_outer + 1.0f;
-            if (dist_sq < r_inner_minus * r_inner_minus ||
-                dist_sq > r_outer_plus * r_outer_plus) continue;
+            // 快速跳过：只跳过完全在 AA 带之外的像素
+            if (dist_sq < r_inner_skip_sq || dist_sq > r_outer_skip_sq) continue;
 
-            float dist = sqrtf(dist_sq);
-
-            // 快速跳过：距离太远或太近
-            if (dist < r_inner - 1.0f || dist > r_outer + 1.0f) continue;
-
-            // 检查角度是否在弧线范围内
-            float angle = atan2f(dy, dx);
-
-            // 归一化角度到 [start_rad, start_rad + 2π) 范围
-            while (angle < start_rad) angle += 2.0f * M_PI;
-            while (angle > start_rad + 2.0f * M_PI) angle -= 2.0f * M_PI;
-
-            // 角度边缘的抗锯齿
+            // 角度判断（叉积）与角度边缘抗锯齿（替代 atan2f + 归一化循环）
             float angle_aa = 1.0f;
             if (!is_full_circle) {
-                float pixel_angle = 1.0f / (dist > 0 ? dist : 1.0f);
+                // c1 = |p|*sin(angle-start)，c2 = |p|*sin(end-angle)
+                c1 = ux_s * dy - uy_s * dx;
+                c2 = dx * uy_e - dy * ux_e;
 
-                if (angle < start_rad + pixel_angle) {
-                    angle_aa = (angle - start_rad) / pixel_angle;
-                } else if (angle > end_rad - pixel_angle) {
-                    angle_aa = (end_rad - angle) / pixel_angle;
-                } else if (angle > end_rad) {
-                    continue;
+                // 判断像素角度是否落在 [start, end] 扇形内
+                // （放宽 0.5px：像素中心在扇形外但像素与边缘重叠时仍参与 AA）
+                if (sweep_le_pi) {
+                    if (c1 < -0.5f || c2 < -0.5f) continue;
+                } else {
+                    if (c1 < -0.5f && c2 < -0.5f) continue;
+                }
+
+                // 角度边缘抗锯齿：alpha 按像素对边缘线的覆盖率衰减
+                // c 为像素中心到边缘线的有符号距离（正=扇形内侧），
+                // 像素跨 ±0.5px，覆盖率 = clamp(0.5 + c)，
+                // 否则边缘恰好落在像素边界时会产生半透明横条
+                dot_s = ux_s * dx + uy_s * dy;   // dist*cos(angle-start)
+                dot_e = ux_e * dx + uy_e * dy;   // dist*cos(end-angle)
+                if (c1 < 0.5f && dot_s > 0.0f) {
+                    angle_aa = 0.5f + c1;
+                } else if (c2 < 0.5f && dot_e > 0.0f) {
+                    angle_aa = 0.5f + c2;
                 }
                 if (angle_aa <= 0.0f) continue;
                 if (angle_aa > 1.0f) angle_aa = 1.0f;
-            } else if (angle > end_rad) {
-                continue;
             }
 
-            // 径向抗锯齿
+            // 径向抗锯齿：只在边界区域计算 sqrtf
             float radial_aa = 1.0f;
-            if (dist < r_inner) {
-                radial_aa = 1.0f - (r_inner - dist);
-            } else if (dist > r_outer) {
-                radial_aa = 1.0f - (dist - r_outer);
+            if (dist_sq < r_inner_plus_sq || dist_sq > r_outer_minus_sq) {
+                // 边界区域：需要精确距离做抗锯齿
+                float dist = sqrtf(dist_sq);
+                if (dist < r_inner) {
+                    radial_aa = 1.0f - (r_inner - dist);
+                } else if (dist > r_outer) {
+                    radial_aa = 1.0f - (dist - r_outer);
+                }
+                if (radial_aa <= 0.0f) continue;
+                if (radial_aa > 1.0f) radial_aa = 1.0f;
             }
-            if (radial_aa <= 0.0f) continue;
-            if (radial_aa > 1.0f) radial_aa = 1.0f;
 
             // 组合alpha
             float final_alpha = angle_aa * radial_aa;
             Uint8 a = (Uint8)(final_alpha * color.a);
-            if (a == 0) continue;
+            if (a < 3) continue;   // 原分组循环最小 alpha 组为 7（|a-7|<=4）
 
             // 收集点
             if (point_count < MAX_ARC_POINTS) {
@@ -4058,23 +4378,8 @@ void backend_render_arc(int center_x, int center_y, int radius, float start_angl
         }
     }
 
-    // 批量绘制：按 alpha 分组绘制，减少 SDL_SetRenderDrawColor 调用
-    // 使用简单的分组策略：将 alpha 相同的点一起绘制
-    for (int alpha_group = 255; alpha_group > 0; alpha_group -= 8) {
-        SDL_Point group_points[MAX_ARC_POINTS];
-        int group_count = 0;
-
-        for (int i = 0; i < point_count; i++) {
-            if (abs(point_alphas[i] - alpha_group) <= 4) {
-                group_points[group_count++] = points[i];
-            }
-        }
-
-        if (group_count > 0) {
-            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, alpha_group);
-            SDL_RenderDrawPoints(renderer, group_points, group_count);
-        }
-    }
+    // 批量绘制：按 alpha 分桶一次性提交
+    arc_draw_bucketed(points, point_alphas, point_count, color);
 
     // 如果需要缓存，创建纹理并缓存
     if (use_cache && point_count > 0) {
@@ -4095,27 +4400,14 @@ void backend_render_arc(int center_x, int center_y, int radius, float start_angl
             }
 
             // 批量绘制到纹理
-            for (int alpha_group = 255; alpha_group > 0; alpha_group -= 8) {
-                SDL_Point group_points[MAX_ARC_POINTS];
-                int group_count = 0;
-
-                for (int i = 0; i < point_count; i++) {
-                    if (abs(point_alphas[i] - alpha_group) <= 4) {
-                        group_points[group_count++] = points[i];
-                    }
-                }
-
-                if (group_count > 0) {
-                    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, alpha_group);
-                    SDL_RenderDrawPoints(renderer, group_points, group_count);
-                }
-            }
+            arc_draw_bucketed(points, point_alphas, point_count, color);
 
             SDL_SetRenderTarget(renderer, NULL);
 
             // 存入缓存
             int cache_idx = find_available_arc_cache_entry();
             if (cache_idx >= 0) {
+                arc_cache[cache_idx].hash = arc_cache_hash(radius, line_width, start_angle, end_angle, color);
                 arc_cache[cache_idx].texture = tex;
                 arc_cache[cache_idx].radius = radius;
                 arc_cache[cache_idx].line_width = line_width;
