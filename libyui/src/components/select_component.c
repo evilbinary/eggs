@@ -277,7 +277,7 @@ SelectComponent* select_component_create_from_json(Layer* layer, cJSON* json_obj
     
     // 加载组件专用字体
     if (layer->font && strlen(layer->font->path) > 0) {
-        char font_path[MAX_PATH];
+        char font_path[YUI_MAX_PATH];
         snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
         component->font = backend_load_font(font_path, component->font_size);
     }
@@ -347,7 +347,7 @@ SelectComponent* select_component_create_from_json(Layer* layer, cJSON* json_obj
     
     // 加载组件专用字体（如果还没有加载的话）
     if (!component->font && layer->font && strlen(layer->font->path) > 0) {
-        char font_path[MAX_PATH];
+        char font_path[YUI_MAX_PATH];
         snprintf(font_path, sizeof(font_path), "%s", layer->font->path);
         component->font = backend_load_font(font_path, component->font_size);
     }
@@ -697,7 +697,7 @@ void select_component_set_font_size(SelectComponent* component, int font_size) {
     
     // 重新加载字体
     if (component->layer && component->layer->font && strlen(component->layer->font->path) > 0) {
-        char font_path[MAX_PATH];
+        char font_path[YUI_MAX_PATH];
         snprintf(font_path, sizeof(font_path), "%s", component->layer->font->path);
         component->font = backend_load_font(font_path, component->font_size);
     }
@@ -778,7 +778,7 @@ void select_component_expand(SelectComponent* component) {
     component->just_expanded = 1;
 
     if (!popup_manager_contains_layer(component->dropdown_layer)) {
-        PopupLayer* popup = popup_layer_create(component->dropdown_layer, POPUP_TYPE_DROPDOWN, 100);
+        PopupLayer* popup = popup_layer_create(component->dropdown_layer, POPUP_TYPE_DROPDOWN, 100, component->layer);
         if (popup) {
             popup->auto_close = false;
             popup->close_callback = select_component_popup_close_callback;

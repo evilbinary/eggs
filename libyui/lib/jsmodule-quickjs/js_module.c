@@ -319,6 +319,28 @@ static JSValue js_log(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
     return JS_UNDEFINED;
 }
 
+// YUI.checkHeap(tag): 内存探针。ESP 上打印 C 堆余量，其它平台仅打印 tag。
+static JSValue js_check_heap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    const char *tag = "";
+    if (argc > 0) {
+        const char* s = JS_ToCString(ctx, argv[0]);
+        if (s) { tag = s; }
+    }
+#if defined(YUI_ESP_PLATFORM)
+    {
+        extern size_t heap_caps_get_free_size(int caps);
+        extern size_t heap_caps_get_largest_free_block(int caps);
+        printf("YUI: [heap-probe] tag=%s free=%u largest=%u\n", tag,
+               (unsigned)heap_caps_get_free_size(4),
+               (unsigned)heap_caps_get_largest_free_block(4));
+    }
+#else
+    printf("YUI: [heap-probe] tag=%s (non-ESP, skipped)\n", tag);
+#endif
+    return JS_UNDEFINED;
+}
+
 static int append_layer_child_qjs(Layer* parent, Layer* child) {
     if (!parent || !child) return -1;
     Layer** new_children = realloc(parent->children, sizeof(Layer*) * (parent->child_count + 1));
@@ -514,8 +536,12 @@ static JSValue js_theme_load(JSContext *ctx, JSValueConst this_val, int argc, JS
         // 是JSON字符串，从JSON加载
         theme = theme_manager_load_theme_from_json(theme_input);
     } else {
-        // 是文件路径，从文件加载
-        theme = theme_manager_load_theme(theme_input);
+        // 是文件路径，从文件加载（走 js_module_read_file，与 YUI.readFile 相同 fs_root/base_path 解析）
+        char* content = js_module_read_file(theme_input);
+        if (content) {
+            theme = theme_manager_load_theme_from_json(content);
+            free(content);
+        }
     }
 
     JS_FreeCString(ctx, theme_input);
@@ -1345,6 +1371,25 @@ static JSValue js_yui_find(JSContext* ctx, JSValueConst this_val, int argc, JSVa
 // 注册 C API 到 JS
 /* ====================== YUI.call Bridge ====================== */
 
+/* ====================== Global gc ====================== */
+
+static JSValue js_gc(JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    if (!g_js_rt) return JS_UNDEFINED;
+
+    JSMemoryUsage before, after;
+    JS_ComputeMemoryUsage(g_js_rt, &before);
+    JS_RunGC(g_js_rt);
+    JS_ComputeMemoryUsage(g_js_rt, &after);
+    printf("[gc] memory %lld -> %lld bytes (objects %lld -> %lld)\n",
+           (long long)before.memory_used_size,
+           (long long)after.memory_used_size,
+           (long long)before.memory_used_count,
+           (long long)after.memory_used_count);
+    return JS_UNDEFINED;
+}
+
 void* js_module_get_context(void) {
     return g_js_ctx;
 }
@@ -1477,6 +1522,12 @@ void js_module_register_api(void)
     // 注册 print 到全局对象（与 log 功能相同）
     JS_SetPropertyStr(g_js_ctx, global_obj, "print", JS_NewCFunction(g_js_ctx, js_log, "print", 1));
 
+    // 注册全局 gc 函数（手动触发 GC 并打印内存使用）
+    JS_SetPropertyStr(g_js_ctx, global_obj, "gc", JS_NewCFunction(g_js_ctx, js_gc, "gc", 0));
+    // YUI.gc / YUI.checkHeap（与 mquickjs 适配器保持一致，watch-os app.js 依赖）
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "gc", JS_NewCFunction(g_js_ctx, js_gc, "gc", 0));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "checkHeap", JS_NewCFunction(g_js_ctx, js_check_heap, "checkHeap", 1));
+
     // 注册 YUI.call 桥接（C 事件处理器调用入口）
     JS_SetPropertyStr(g_js_ctx, yui_obj, "call", JS_NewCFunction(g_js_ctx, js_native_call, "call", 2));
     printf("JS(QuickJS): Registered YUI.call bridge\n");
@@ -1546,6 +1597,7 @@ static void print_quickjs_exception(JSContext* ctx, JSValueConst exception, cons
 }
 
 // 加载并执行 JS 文件
+extern uint8_t* load_file(const char *filename, int *plen);
 int js_module_load_file(const char* filename)
 {
     if (!g_js_ctx) {
@@ -1555,32 +1607,17 @@ int js_module_load_file(const char* filename)
 
     printf("JS(QuickJS): Loading file %s...\n", filename);
 
-    // 读取文件 (使用二进制模式避免 Windows 文本模式转换)
-    FILE* f = fopen(filename, "rb");
-    if (!f) {
+    // 读取文件：走共享 load_file（对相对路径应用 g_js_root 回退，
+    // 与 js_module_read_file 一致，避免 "apps/xxx.js" 缺 app/watch-os 前缀）
+    int size = 0;
+    uint8_t* buf = load_file(filename, &size);
+    if (!buf) {
         printf("JS(QuickJS): Failed to open file %s\n", filename);
         return -1;
     }
 
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char* buf = (char*)malloc(size + 1);
-    if (!buf) {
-        fclose(f);
-        printf("JS(QuickJS): Failed to allocate memory for file\n");
-        return -1;
-    }
-
-    size_t read_size = fread(buf, 1, size, f);
-    buf[read_size] = '\0';
-    fclose(f);
-    
-    printf("JS(QuickJS): Read %ld bytes from file\n", (long)read_size);
-
     // 使用 QuickJS 加载并运行代码
-    JSValue val = JS_Eval(g_js_ctx, buf, read_size, filename, JS_EVAL_TYPE_GLOBAL);
+    JSValue val = JS_Eval(g_js_ctx, (const char*)buf, size, filename, JS_EVAL_TYPE_GLOBAL);
     free(buf);
 
     if (JS_IsException(val)) {
@@ -1787,8 +1824,10 @@ JSValue js_read_file(JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
     char* content = js_module_read_file(file_path);
     JS_FreeCString(ctx, file_path);
 
+    /* 与 mquickjs 的 js_read_file 一致：文件不存在返回 null，
+       让 JS 层 (if (!raw) return default) 走默认分支，而不是抛异常。 */
     if (!content) {
-        return JS_ThrowInternalError(ctx, "Failed to read file");
+        return JS_NULL;
     }
 
     JSValue result = JS_NewString(ctx, content);
@@ -2119,7 +2158,34 @@ JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         else need_free = 1;
     }
 
-    DIR* dir = opendir(dir_path);
+    /* 与 js_module_read_file 相同的路径解析：先原样，再 root/path */
+    const char* root = js_module_get_root();
+    char resolved[1024];
+    const char* open_dir = NULL;
+
+    if (dir_path[0] == '/') {
+        open_dir = dir_path;
+    } else {
+        DIR* dir_test = opendir(dir_path);
+        if (dir_test) {
+            closedir(dir_test);
+            open_dir = dir_path;
+        } else if (root && root[0]) {
+            snprintf(resolved, sizeof(resolved), "%s/%s", root, dir_path);
+            open_dir = resolved;
+        } else {
+            open_dir = dir_path;
+        }
+    }
+
+    DIR* dir = opendir(open_dir);
+    if (!dir) {
+        /* 回退：再尝试 root/path */
+        if (root && root[0] && open_dir != resolved) {
+            snprintf(resolved, sizeof(resolved), "%s/%s", root, dir_path);
+            dir = opendir(resolved);
+        }
+    }
     if (!dir) {
         if (need_free) JS_FreeCString(ctx, dir_path);
         return JS_NULL;
@@ -2136,7 +2202,7 @@ JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         JS_SetPropertyStr(ctx, item, "name", JS_NewString(ctx, entry->d_name));
 
         char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        snprintf(full_path, sizeof(full_path), "%s/%s", open_dir, entry->d_name);
         struct stat st;
         int is_dir = (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) ? 1 : 0;
         JS_SetPropertyStr(ctx, item, "isDir", JS_NewBool(ctx, is_dir));

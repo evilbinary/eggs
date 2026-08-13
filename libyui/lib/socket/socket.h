@@ -24,6 +24,14 @@
 // #endif
 
 #else
+#ifdef ESP_PLATFORM
+#include <lwip/sockets.h>
+#include <lwip/netdb.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <string.h>
+#else
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -34,6 +42,9 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <netdb.h>
+#endif
 #endif
 
 #ifdef ANDROID
@@ -60,5 +71,13 @@ int _getpeername(int socket, struct sockaddr *address, socklen_t *address_len);
 int _setsockopt(int socket, int level, int option_name, const void *option_value, socklen_t option_len);
 int _getsockopt(int socket, int level, int option_name, void *option_value, socklen_t *option_len);
 ssize_t _send(int socket, const void *buffer, size_t length, int flags);
+uint16_t _htons(uint16_t v);
+uint32_t _htonl(uint32_t v);
+uint16_t _ntohs(uint16_t v);
+char* _inet_ntoa(struct in_addr in);
+int _getaddrinfo(const char* nodename, const char* servname,
+                 const struct addrinfo* hints, struct addrinfo** res);
+void _freeaddrinfo(struct addrinfo* res);
+const char* _gai_strerror(int errcode);
 
 #endif

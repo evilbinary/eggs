@@ -765,6 +765,11 @@ void backend_quit(void)
 static int g_lvgl_exit_code = 0;
 static int g_lvgl_auto_frames = -1;
 
+static YuiRenderMode g_render_mode = YUI_RENDER_MODE_DIRTY;
+
+void backend_set_render_mode(YuiRenderMode mode) { g_render_mode = mode; }
+YuiRenderMode backend_get_render_mode(void) { return g_render_mode; }
+
 void backend_set_auto_frames(int frames) { g_lvgl_auto_frames = frames; }
 void backend_request_quit(int exit_code)
 {
@@ -959,7 +964,7 @@ DFont* backend_load_font(char* font_path, int size)
 DFont* backend_load_font_with_weight(char* font_path, int size, const char* weight)
 {
 #if defined(YUI_LVGL_PORT_SDL)
-    char weighted_path[MAX_PATH];
+    char weighted_path[YUI_MAX_PATH];
     TTF_Font* font = NULL;
     const char* candidates[12];
     int count = 0;
@@ -1279,7 +1284,9 @@ static void backend_lvgl_frame(void)
         }
     }
 
-    backend_render_clear_color(30, 30, 30, 255);
+    if (g_render_mode == YUI_RENDER_MODE_FULL) {
+        backend_render_clear_color(30, 30, 30, 255);
+    }
     if (g_ui_root) {
         perf_frame_begin();
         perf_render_tree_begin();

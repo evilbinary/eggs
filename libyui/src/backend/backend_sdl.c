@@ -16,10 +16,12 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Compatibility: bundled SDL_ttf (< 2.20) lacks TTF_GlyphIsProvided32(Uint32);
-   fall back to the 16-bit API. Supplementary-plane codepoints (>0xFFFF) cannot
-   be queried reliably with the old API and are treated as absent. */
-#ifndef TTF_GlyphIsProvided32
+/* TTF_GlyphIsProvided32 是函数而非宏（SDL_ttf.h 声明 extern），
+   不能用 #ifndef 探测，必须用版本宏判断。
+   SDL_ttf >= 2.0.18 提供 32 位 API；更旧版本只有 16 位 API，
+   且 supplementary-plane codepoints(>0xFFFF) 无法可靠查询（如 emoji），
+   按缺失处理。 */
+#if !defined(SDL_TTF_VERSION_ATLEAST) || !SDL_TTF_VERSION_ATLEAST(2, 0, 18)
 #define TTF_GlyphIsProvided32(font, cp) TTF_GlyphIsProvided((font), (Uint16)(cp))
 #endif
 
@@ -55,6 +57,53 @@ static int g_auto_frames = -1; /* -1 = run forever */
 static int g_request_quit = 0;
 static int g_exit_code = 0;
 static int g_headless = -1; /* -1 = unset (read YUI_HEADLESS), 0/1 = explicit */
+
+/* DIRTY 模式持久画布：渲染到纹理，整帧 blit 到屏幕（双缓冲的 backbuffer
+ * 在 present 后内容未定义，直接画上去会闪）。 */
+static SDL_Texture* g_canvas = NULL;
+static int g_canvas_w = 0;
+static int g_canvas_h = 0;
+
+static int sdl_ensure_canvas(void) {
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window, &w, &h);
+    if (w <= 0 || h <= 0) {
+        return 0;
+    }
+    if (g_canvas && g_canvas_w == w && g_canvas_h == h) {
+        return 1;
+    }
+    if (g_canvas) {
+        SDL_DestroyTexture(g_canvas);
+        g_canvas = NULL;
+    }
+    g_canvas = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                 SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!g_canvas) {
+        printf("canvas: CreateTexture failed: %s\n", SDL_GetError());
+        return 0;
+    }
+    g_canvas_w = w;
+    g_canvas_h = h;
+    /* 首次创建时清空，避免未初始内容上屏 */
+    SDL_SetRenderTarget(renderer, g_canvas);
+    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+    SDL_RenderClear(renderer);
+    SDL_SetRenderTarget(renderer, NULL);
+    return 1;
+}
+
+static YuiRenderMode g_render_mode = YUI_RENDER_MODE_DIRTY;
+
+void backend_set_render_mode(YuiRenderMode mode)
+{
+    g_render_mode = mode;
+}
+
+YuiRenderMode backend_get_render_mode(void)
+{
+    return g_render_mode;
+}
 
 void backend_set_headless(int on)
 {
@@ -107,7 +156,7 @@ static ResizeCallback resize_callback = NULL;
 // 字体缓存结构
 typedef struct {
     uint64_t hash;          // 预计算的哈希值
-    char font_path[MAX_PATH];
+    char font_path[YUI_MAX_PATH];
     int size;
     char weight[32];  // "normal", "bold", "light"
     TTF_Font* font;
@@ -304,7 +353,7 @@ static void backend_texture_cache_store_entry(int cache_index, uint64_t key_hash
     texture_cache[cache_index].pinned = pinned ? 1 : 0;
 }
 
-static char g_font_fallback_path[MAX_PATH] = "";
+static char g_font_fallback_path[YUI_MAX_PATH] = "";
 
 void backend_set_font_fallback_path(const char* path) {
     if (!path) {
@@ -917,8 +966,13 @@ void backend_main_loop(void) {
     game_update(-1.0f);
 #endif
 
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_RenderClear(renderer);
+    if (g_render_mode == YUI_RENDER_MODE_FULL) {
+        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+        SDL_RenderClear(renderer);
+    } else {
+        sdl_ensure_canvas();
+        SDL_SetRenderTarget(renderer, g_canvas);
+    }
 
     perf_frame_begin();
     perf_render_tree_begin();
@@ -933,6 +987,11 @@ void backend_main_loop(void) {
     // 渲染弹出层
     popup_manager_render();
     perf_frame_end();
+
+    if (g_render_mode == YUI_RENDER_MODE_DIRTY) {
+        SDL_SetRenderTarget(renderer, NULL);
+        SDL_RenderCopy(renderer, g_canvas, NULL, NULL);
+    }
 
     SDL_RenderPresent(renderer);
 }
@@ -1210,8 +1269,8 @@ void add_font_to_cache(const char* font_path, int size, const char* weight, TTF_
         
         // 添加新字体到缓存
         font_cache[cache_index].hash = hash;
-        strncpy(font_cache[cache_index].font_path, font_path, MAX_PATH - 1);
-        font_cache[cache_index].font_path[MAX_PATH - 1] = '\0';
+        strncpy(font_cache[cache_index].font_path, font_path, YUI_MAX_PATH - 1);
+        font_cache[cache_index].font_path[YUI_MAX_PATH - 1] = '\0';
         font_cache[cache_index].size = size;
         strncpy(font_cache[cache_index].weight, weight, 31);
         font_cache[cache_index].weight[31] = '\0';
@@ -1565,8 +1624,19 @@ int backend_init(){
         printf("Error: Failed to create window: %s\n", SDL_GetError());
         return -1;
     }
-
+#if defined(__linux__) && !defined(LINUX)
     SDL_SetWindowMinimumSize(window, 900, 720);
+#endif
+
+    /* 调试窗口置于屏幕右下角，避免遮挡/频繁切换 */
+    // {
+    //     SDL_DisplayMode dm;
+    //     if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
+    //         int w = 0, h = 0;
+    //         SDL_GetWindowSize(window, &w, &h);
+    //         SDL_SetWindowPosition(window, dm.w - w - 40, dm.h - h - 80);
+    //     }
+    // }
 
     if (window && backend_is_headless()) {
         SDL_HideWindow(window);
@@ -2207,8 +2277,14 @@ void backend_run(Layer* ui_root){
         game_update(-1.0f);
 #endif
 
-        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-        SDL_RenderClear(renderer);
+        if (g_render_mode == YUI_RENDER_MODE_FULL) {
+            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+            SDL_RenderClear(renderer);
+        } else {
+            /* DIRTY：画到持久画布，下方整帧 blit 到屏幕 */
+            sdl_ensure_canvas();
+            SDL_SetRenderTarget(renderer, g_canvas);
+        }
 
         perf_frame_begin();
         perf_render_tree_begin();
@@ -2223,6 +2299,11 @@ void backend_run(Layer* ui_root){
         // 渲染弹出层
         popup_manager_render();
         perf_frame_end();
+
+        if (g_render_mode == YUI_RENDER_MODE_DIRTY) {
+            SDL_SetRenderTarget(renderer, NULL);
+            SDL_RenderCopy(renderer, g_canvas, NULL, NULL);
+        }
 
         SDL_RenderPresent(renderer);
 
@@ -2277,8 +2358,13 @@ void backend_tick(Layer* ui_root) {
     game_update(-1.0f);
 #endif
 
-    SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
-    SDL_RenderClear(renderer);
+    if (g_render_mode == YUI_RENDER_MODE_FULL) {
+        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+        SDL_RenderClear(renderer);
+    } else {
+        sdl_ensure_canvas();
+        SDL_SetRenderTarget(renderer, g_canvas);
+    }
 
     perf_frame_begin();
     perf_render_tree_begin();
@@ -2291,6 +2377,11 @@ void backend_tick(Layer* ui_root) {
     perf_draw_overlay(ui_root);
     popup_manager_render();
     perf_frame_end();
+
+    if (g_render_mode == YUI_RENDER_MODE_DIRTY) {
+        SDL_SetRenderTarget(renderer, NULL);
+        SDL_RenderCopy(renderer, g_canvas, NULL, NULL);
+    }
 
     SDL_RenderPresent(renderer);
 }
@@ -2396,7 +2487,7 @@ DFont* backend_load_font_with_weight(char* font_path,int size,const char* weight
         return cached_font;
     }
 
-    char full_path[MAX_PATH];
+    char full_path[YUI_MAX_PATH];
     TTF_Font* default_font = NULL;
 
 #ifdef __EMSCRIPTEN__
@@ -2532,6 +2623,11 @@ void backend_get_windowsize(int* width,int * height){
 }
 
 void backend_set_windowsize(int width,int  height){
+    /* 同步最小尺寸：否则 SDL_SetWindowMinimumSize(900,720) 会把小窗口
+     * (如 watch-os 240x240) 钳制回 900x720，导致窗口与 app.json size 不一致 */
+    if (window && width > 0 && height > 0) {
+        SDL_SetWindowMinimumSize(window, width, height);
+    }
     SDL_SetWindowSize(window, width, height);
     backend_apply_display_scale();
 }

@@ -61,8 +61,13 @@ int parse_int_array(cJSON* array, int* a, int* b) {
 // ====================== 脏标记管理 ======================
 
 void mark_layer_dirty(Layer* layer, unsigned int flags) {
+    Layer* p;
     if (!layer) return;
-    layer->dirty_flags |= flags;
+    /* 向上传播到所有祖先：父层的 dirty 表示「自身或后代有变化」，
+     * 渲染管线据此决定该子树是否需要重绘。 */
+    for (p = layer; p != NULL; p = p->parent) {
+        p->dirty_flags |= flags;
+    }
 }
 
 void clear_dirty_flags(Layer* layer) {
@@ -125,8 +130,10 @@ int yui_remove_child(Layer* parent, const char* child_id) {
     
     // 销毁子图层
     destroy_layer(parent->children[index]);
+    /* 销毁后立即置 NULL：事件分发遍历判 NULL 跳过，避免访问已释放的 child */
+    parent->children[index] = NULL;
     
-    // 移动后续元素
+    // 移动后续元素（压缩，保持数组无空洞；被销毁项已置 NULL 不影响后续遍历判空）
     for (int i = index; i < parent->child_count - 1; i++) {
         parent->children[i] = parent->children[i + 1];
     }

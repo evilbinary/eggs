@@ -7,6 +7,7 @@
 #include "theme_manager.h"
 #include "theme.h"
 #include "backend.h"
+#include "render.h"
 #include "component_registry.h"
 #include "log.h"
 #include "perf/perf.h"
@@ -242,6 +243,7 @@ static void layer_init_strings(Layer* layer) {
   layer->label = NULL;
   layer->text = NULL;
   layer->text_size = 0;
+  layer->source = NULL;
 }
 
 static void layer_set_string(char** target, const char* value) {
@@ -317,6 +319,10 @@ static void layer_free_strings(Layer* layer) {
     free(layer->text);
     layer->text = NULL;
   }
+  if (layer->source) {
+    free(layer->source);
+    layer->source = NULL;
+  }
 }
 
 void layer_set_label(Layer* layer, const char* value) {
@@ -373,8 +379,13 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
   if(layer==NULL){
     layer = malloc(sizeof(Layer));
     memset(layer, 0, sizeof(Layer));
-    layer->parent = parent;
-    layer_init_strings(layer);
+    if(layer!=NULL){
+      layer->parent = parent;
+      layer_init_strings(layer);
+    }else{
+      printf("malloc layer failed\n");
+      return NULL;
+    }
   }
 
   if (!layer->handle_pointer_event) {
@@ -396,7 +407,9 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
 
   // 解析基础属性
   if (cJSON_HasObjectItem(json_obj, "id")) {
-    strcpy(layer->id, cJSON_GetObjectItem(json_obj, "id")->valuestring);
+    strncpy(layer->id, cJSON_GetObjectItem(json_obj, "id")->valuestring,
+            sizeof(layer->id) - 1);
+    layer->id[sizeof(layer->id) - 1] = '\0';
   }
   if (cJSON_HasObjectItem(json_obj, "connectable")) {
     cJSON* connectable_item = cJSON_GetObjectItem(json_obj, "connectable");
@@ -475,11 +488,11 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
     
     // 设置字体路径（优先级：直接属性 > style > 默认）
     if (font && font->valuestring) {
-      strncpy(layer->font->path, font->valuestring, MAX_PATH - 1);
-      layer->font->path[MAX_PATH - 1] = '\0';
+      strncpy(layer->font->path, font->valuestring, YUI_MAX_PATH - 1);
+      layer->font->path[YUI_MAX_PATH - 1] = '\0';
     } else if (styleFont && styleFont->valuestring) {
-      strncpy(layer->font->path, styleFont->valuestring, MAX_PATH - 1);
-      layer->font->path[MAX_PATH - 1] = '\0';
+      strncpy(layer->font->path, styleFont->valuestring, YUI_MAX_PATH - 1);
+      layer->font->path[YUI_MAX_PATH - 1] = '\0';
     } else {
       strcpy(layer->font->path, "Roboto-Regular.ttf");  // 默认字体
     }
@@ -534,7 +547,7 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
   {
     cJSON* font_fallback = cJSON_GetObjectItem(json_obj, "fontFallback");
     if (font_fallback && cJSON_IsString(font_fallback) && font_fallback->valuestring[0]) {
-      char fallback_path[MAX_PATH];
+      char fallback_path[YUI_MAX_PATH];
       if (layer->assets && layer->assets->path[0] != '\0') {
         snprintf(fallback_path, sizeof(fallback_path), "%s/%s",
                  layer->assets->path, font_fallback->valuestring);
@@ -720,11 +733,12 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
     layer->layout_manager->type = LAYOUT_VERTICAL;
   }
 
-  // 默认背景颜色
+  // 默认背景颜色（含不透明，否则 render 因 a==0 跳过填色）
   if (layer->bg_color.a == 0) {
     layer->bg_color.r = 0xF5;
     layer->bg_color.g = 0xF5;
     layer->bg_color.b = 0xF5;
+    layer->bg_color.a = 0xFF;
   }
   // 解析样式
   if (style) {
@@ -830,7 +844,10 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
   // 解析资源路径
   cJSON* source = cJSON_GetObjectItem(json_obj, "source");
   if (source) {
-    strcpy(layer->source, source->valuestring);
+    if (layer->source) {
+      free(layer->source);
+    }
+    layer->source = strdup(source->valuestring);
     if (layer->type != IMAGE) {
       cJSON* sub = parse_json(source->valuestring);
       if (sub != NULL) {
@@ -855,7 +872,9 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
       if (handler_id[0] == '@') {
         lookup_name = handler_id + 1;
       }
-      strcpy(layer->event->click_name, lookup_name);
+      strncpy(layer->event->click_name, lookup_name,
+              sizeof(layer->event->click_name) - 1);
+      layer->event->click_name[sizeof(layer->event->click_name) - 1] = '\0';
 
       EventHandler handler = find_event_by_name(lookup_name);
       layer->event->click = handler;
@@ -872,7 +891,9 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
       if (handler_id[0] == '@') {
         lookup_name = handler_id + 1;
       }
-      strcpy(layer->event->scroll_name, lookup_name);
+      strncpy(layer->event->scroll_name, lookup_name,
+              sizeof(layer->event->scroll_name) - 1);
+      layer->event->scroll_name[sizeof(layer->event->scroll_name) - 1] = '\0';
 
       EventHandler handler = find_event_by_name(lookup_name);
       layer->event->scroll = handler;
@@ -889,7 +910,9 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
       if (handler_id[0] == '@') {
         lookup_name = handler_id + 1;
       }
-      strcpy(layer->event->touch_name, lookup_name);
+      strncpy(layer->event->touch_name, lookup_name,
+              sizeof(layer->event->touch_name) - 1);
+      layer->event->touch_name[sizeof(layer->event->touch_name) - 1] = '\0';
 
       EventHandler handler = find_event_by_name(lookup_name);
       layer->event->touch = handler;
@@ -905,7 +928,9 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
       if (handler_id[0] == '@') {
         lookup_name = handler_id + 1;
       }
-      strcpy(layer->event->resize_name, lookup_name);
+      strncpy(layer->event->resize_name, lookup_name,
+              sizeof(layer->event->resize_name) - 1);
+      layer->event->resize_name[sizeof(layer->event->resize_name) - 1] = '\0';
 
       EventHandler handler = find_event_by_name(lookup_name);
       if (handler) {
@@ -1095,6 +1120,11 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
 void destroy_layer(Layer* layer) {
     if (!layer) return;
 
+    /* 若销毁的是当前聚焦层，清除全局 focused_layer，避免悬空指针 */
+    if (focused_layer == layer) {
+        focused_layer = NULL;
+    }
+
     layer_lifecycle_before_destroy(layer);
     
     // 递归销毁子图层
@@ -1120,6 +1150,7 @@ void destroy_layer(Layer* layer) {
     
     // 销毁动画
     if (layer->animation) {
+        render_animation_released(layer);
         free(layer->animation);
         layer->animation = NULL;
     }
@@ -1187,6 +1218,7 @@ void destroy_layer(Layer* layer) {
 
     layer_free_strings(layer);
     perf_layer_destroyed(layer);
+    render_ctx_free(layer);
     free(layer);
 }
 

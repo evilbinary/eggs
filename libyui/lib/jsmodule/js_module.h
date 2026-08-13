@@ -17,6 +17,14 @@ typedef struct cJSON cJSON;
 // 初始化 JS 引擎
 int js_module_init(void);
 
+// 设置统一基准路径前缀（相对路径解析为 root/path）
+// 空串表示未设置。绝对路径（如嵌入式挂载点 "/spiffs"）同时作为
+// ../ 上跳 clamp 根；相对路径（如桌面 "app/watch-os"）仅作资源前缀。
+void js_module_set_root(const char* root);
+
+// 读取已设置的 root（供 listDir 等按同样规则解析相对路径）
+const char* js_module_get_root(void);
+
 // 清理 JS 引擎
 void js_module_cleanup(void);
 
@@ -33,6 +41,11 @@ void js_module_register_api(void);
 // append=0: 清空事件表、初始化生命周期树（应用启动）
 // append=1: 仅追加 JS 与事件，不清空、不触发 onLoad（动态页面）
 int js_module_load_from_json(cJSON* root_json, const char* json_file_path, int append);
+
+// 两阶段加载（嵌入式堆紧张时使用）：阶段1 在 cJSON 树存活时收集 JS 路径 + 注册事件
+int js_module_collect_from_json(cJSON* root_json, const char* json_file_path, int append);
+// 阶段2 在 JS 引擎初始化后，加载阶段1收集的文件
+int js_module_load_collected(void);
 
 // 应用退出：根 Layer onHide/onUnload
 void js_module_shutdown(void);
@@ -89,6 +102,9 @@ const char* js_module_get_select_value(const char* layer_id);
 // 文件读取函数，用于JavaScript环境
 char* js_module_read_file(const char* file_path);
 
+/* 解析可读路径：原样 → base_path/ → fs_root/。成功写入 out 并返回 0。 */
+int js_module_resolve_path(const char* in, char* out, size_t out_sz);
+
 // 按 layout_base 等比缩放根布局并调整窗口尺寸
 int js_module_resize_root(int width, int height);
 
@@ -96,6 +112,9 @@ int js_module_set_event(const char* layer_id, const char* event_name, const char
 
 // YUI.call 桥接函数
 void* js_module_get_context(void);
+
+// 驱动 setTimeout/clearTimeout：周期调用以执行到期定时器（mquickjs）
+void js_module_pump_timers(void);
 
 #ifdef __cplusplus
 }

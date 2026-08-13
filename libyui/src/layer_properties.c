@@ -101,8 +101,8 @@ static int handle_font(Layer* layer, cJSON* value, int is_creating) {
         strcpy(layer->font->weight, "normal");
     }
     if (layer->font) {
-        strncpy(layer->font->path, value->valuestring, MAX_PATH - 1);
-        layer->font->path[MAX_PATH - 1] = '\0';
+        strncpy(layer->font->path, value->valuestring, YUI_MAX_PATH - 1);
+        layer->font->path[YUI_MAX_PATH - 1] = '\0';
         if (!is_creating) {
             mark_layer_dirty(layer, DIRTY_TEXT);
         }
@@ -480,8 +480,10 @@ static int handle_rotation(Layer* layer, cJSON* value, int is_creating) {
 
 static int handle_source(Layer* layer, cJSON* value, int is_creating) {
     if (!cJSON_IsString(value)) return 0;
-    strncpy(layer->source, value->valuestring, sizeof(layer->source) - 1);
-    layer->source[sizeof(layer->source) - 1] = '\0';
+    if (layer->source) {
+        free(layer->source);
+    }
+    layer->source = strdup(value->valuestring);
     if (!is_creating) {
         mark_layer_dirty(layer, DIRTY_STYLE);
     }
@@ -753,7 +755,8 @@ cJSON* layer_get_property_as_json(Layer* layer, const char* key) {
         return cJSON_CreateNumber(layer->radius);
     }
     else if (strcmp(key, "source") == 0) {
-        return cJSON_CreateString(layer->source);
+        return layer->source ? cJSON_CreateString(layer->source)
+                             : cJSON_CreateString("");
     }
     else if (strcmp(key, "size") == 0) {
         return create_size_json(layer->rect);

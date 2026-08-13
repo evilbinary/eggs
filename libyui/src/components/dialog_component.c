@@ -382,7 +382,8 @@ bool dialog_component_show(DialogComponent* component, int x, int y) {
     
     // 创建弹出层并添加到弹出管理器
     PopupLayer* popup = popup_layer_create(component->popup_layer, POPUP_TYPE_DIALOG, 
-                                          component->is_modal ? 200 : 150);
+                                          component->is_modal ? 200 : 150,
+                                          component->layer);
     if (!popup) {
         free(component->popup_layer);
         component->popup_layer = NULL;
@@ -976,9 +977,13 @@ int dialog_component_handle_pointer_event(Layer* layer, PointerEvent* event) {
 
     if (event->phase == POINTER_MOVE) {
         if (component->dragging) {
+            Rect old_rect = layer->rect;
             layer->rect.x = event->x - component->drag_offset_x;
             layer->rect.y = event->y - component->drag_offset_y;
             dialog_clamp_to_window(layer);
+            if (old_rect.x != layer->rect.x || old_rect.y != layer->rect.y) {
+                render_request_redraw_rect(component->layer, old_rect); /* 局部擦除旧位置 */
+            }
             return 0;
         }
         if (component->scrollbar_dragging && has_scrollbar) {

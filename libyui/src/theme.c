@@ -150,6 +150,32 @@ void theme_add_rule(Theme* theme, ThemeRule* rule) {
 }
 
 // 从JSON创建规则
+/* theme_merge_style 已提取为标量字段的 style 键:纯此类键的规则无需
+ * 深拷贝 style_json,apply 时标量已直接写入 layer。 */
+static int theme_style_key_is_scalar(const char* key) {
+    static const char* scalar_keys[] = {
+        "color", "bgColor", "fontSize", "fontWeight", "radius",
+        "borderRadius", "borderWidth", "borderSize", "border-color",
+        "borderColor", "border", "spacing", "padding", "opacity",
+        "width", "height", NULL
+    };
+    for (int i = 0; scalar_keys[i]; i++) {
+        if (strcmp(key, scalar_keys[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int theme_style_all_scalar(cJSON* style) {
+    for (cJSON* child = style->child; child; child = child->next) {
+        if (child->string && !theme_style_key_is_scalar(child->string)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 ThemeRule* theme_rule_create_from_json(cJSON* json) {
     if (!json || !cJSON_IsObject(json)) {
         return NULL;
@@ -307,7 +333,14 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
         rule->height = height_obj->valueint;
     }
 
-        rule->style_json = cJSON_Duplicate(style_obj, 1);
+        /* style_json 深拷贝仅用于 theme_apply_component_style 的扩展属性
+         * (set_style / layer_set_properties_from_json)。已被 merge_style 提取
+         * 为标量字段的键(颜色/字号/边距等)无需保留:dark/light 主题 191 个
+         * style 键全部是标量,深拷贝 68 份纯属浪费,置 NULL 省 ~25KB。 */
+        rule->style_json = NULL;
+        if (!theme_style_all_scalar(style_obj)) {
+            rule->style_json = cJSON_Duplicate(style_obj, 1);
+        }
     }
 
     rule->next = NULL;
@@ -605,17 +638,27 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
     if (rule->font_size > 0) {
         if (!layer->font) {
             layer->font = (Font*)malloc(sizeof(Font));
-            memset(layer->font, 0, sizeof(Font));
-            strcpy(layer->font->path, "Roboto-Regular.ttf");
-            strcpy(layer->font->weight, "normal");
-            layer->font->size = 16;
+            if (!layer->font) {
+                printf("[Theme] OOM: cannot allocate Font for layer id='%s', skipping font\n", layer->id);
+            } else {
+                memset(layer->font, 0, sizeof(Font));
+                strcpy(layer->font->path, "Roboto-Regular.ttf");
+                strcpy(layer->font->weight, "normal");
+                layer->font->size = 16;
+            }
         } else if (layer->parent && layer->parent->font == layer->font) {
+            // 与父级共享字体：需要复制成独立字体。OOM 时回退继续使用共享字体，不再 memcpy。
             Font* shared = layer->font;
-            layer->font = (Font*)malloc(sizeof(Font));
-            memcpy(layer->font, shared, sizeof(Font));
-            layer->font->default_font = NULL;
+            Font* copy = (Font*)malloc(sizeof(Font));
+            if (!copy) {
+                printf("[Theme] OOM duplicating shared font for layer id='%s', keeping shared font\n", layer->id);
+            } else {
+                memcpy(copy, shared, sizeof(Font));
+                layer->font = copy;
+                layer->font->default_font = NULL;
+            }
         }
-        if (layer->font->size != rule->font_size) {
+        if (layer->font && layer->font->size != rule->font_size) {
             layer->font->size = rule->font_size;
             layer->font->default_font = NULL;
             mark_layer_dirty(layer, DIRTY_TEXT | DIRTY_LAYOUT);

@@ -6,6 +6,9 @@
 #include <string.h>
 #include "cJSON.h"
 
+/* 渲染上下文前向声明（完整定义见 render.h） */
+struct RenderCtx;
+
 /* 嵌入式后端共用无 SDL 的类型系统（YuiTexture/YuiFont）：
    esp32/stm32 定义 YUI_BACKEND_EMBEDDED；android/ios 的 YUI_BACKEND_MOBILE 统一到这里 */
 #if defined(YUI_BACKEND_MOBILE)
@@ -310,8 +313,23 @@ typedef struct Rect {
 
 
 
-#define MAX_PATH 1024
+#ifndef YUI_MAX_PATH
+#define YUI_MAX_PATH 1024
+#endif
 #define MAX_TEXT 256
+
+// 图层内嵌字符串缓冲大小。默认桌面值；嵌入式(esp32)由 ya.py / CMakeLists
+// 传 -DYUI_LAYER_ID_MAX=32 等收紧，缩 sizeof(Layer)。修改必须保证所有
+// 编译单元一致，否则 sizeof(Layer) 不匹配导致 ABI 越界。
+#ifndef YUI_LAYER_ID_MAX
+#define YUI_LAYER_ID_MAX 50
+#endif
+#ifndef YUI_LAYER_VARIANT_MAX
+#define YUI_LAYER_VARIANT_MAX 128
+#endif
+#ifndef YUI_LIFECYCLE_NAME_MAX
+#define YUI_LIFECYCLE_NAME_MAX 128
+#endif
 
 // 图标对齐常量（用于 Label/Button/Input 等组件）
 #define ICON_ALIGN_LEFT    0
@@ -399,7 +417,7 @@ typedef struct LayoutManager {
 
 // 添加数据绑定结构
 typedef struct Binding {
-    char path[MAX_PATH];
+    char path[YUI_MAX_PATH];
 } Binding;
 
 typedef struct Data {
@@ -409,13 +427,13 @@ typedef struct Data {
 
 typedef struct Font {
     char weight[20];      // 字体粗细：normal, bold, light, etc.
-    char path[MAX_PATH];
+    char path[YUI_MAX_PATH];
     int size;
     DFont* default_font;  // 添加默认字体
 } Font;
 
 typedef struct Assets {
-    char path[MAX_PATH];
+    char path[YUI_MAX_PATH];
     int size;
 } Assets;
 // 滚动条方向枚举
@@ -487,7 +505,9 @@ typedef struct WindowEvent {
     int y;
 } WindowEvent;
 
+#ifndef MAX_EVENT
 #define MAX_EVENT 512
+#endif
 
 // 定义事件处理函数类型
 typedef void* (*EventHandler)(void* data);
@@ -499,19 +519,25 @@ typedef struct {
 } EventEntry;
 
 
+/* 事件处理器名称缓冲：处理器名实际都很短（如 "@onLauncherAppClick"），
+   无需 YUI_MAX_PATH 那么大。缩小可省 sizeof(Event)（每个带事件图层约 768B）。 */
+#ifndef YUI_MAX_EVENT_NAME
+#define YUI_MAX_EVENT_NAME 64
+#endif
+
 typedef struct Event {
-    char click_name[MAX_PATH];
+    char click_name[YUI_MAX_EVENT_NAME];
     EventHandler click;
     EventHandler press;
     // 添加滚动事件回调函数指针
-    char scroll_name[MAX_PATH];
+    char scroll_name[YUI_MAX_EVENT_NAME];
     EventHandler scroll;
 
     // 合并的触屏事件
-    char touch_name[MAX_PATH];
+    char touch_name[YUI_MAX_EVENT_NAME];
     EventHandler touch;
 
-    char resize_name[MAX_PATH];
+    char resize_name[YUI_MAX_EVENT_NAME];
     void (*resize)(Layer* layer, const ResizeEvent* event);
 } Event;
 
@@ -579,8 +605,8 @@ typedef  int (*set_property_fun_t)(Layer* layer, const char* key, cJSON* value, 
 typedef void (*set_style_fun_t)(Layer* layer, cJSON* style);
 
 typedef struct Layer {
-    char id[50];
-    char variant[128];
+    char id[YUI_LAYER_ID_MAX];
+    char variant[YUI_LAYER_VARIANT_MAX];
     int index;
     LayerType type;
     Rect rect;
@@ -588,7 +614,7 @@ typedef struct Layer {
     Color bg_color;
     int radius; // 圆角半径
     int padding[4]; // style.padding: top, right, bottom, left
-    char source[MAX_PATH];
+    char* source; /* 资源路径（IMAGE 等使用；按需分配，destroy 时释放） */
     Texture* texture;
     Layer** children;
     int child_count;
@@ -603,10 +629,10 @@ typedef struct Layer {
 
     // Layer 生命周期：声明位 + 运行时状态，见 layer_lifecycle.h
     unsigned char lifecycle_flags;
-    char lifecycle_on_load[128];
-    char lifecycle_on_show[128];
-    char lifecycle_on_hide[128];
-    char lifecycle_on_unload[128];
+    char lifecycle_on_load[YUI_LIFECYCLE_NAME_MAX];
+    char lifecycle_on_show[YUI_LIFECYCLE_NAME_MAX];
+    char lifecycle_on_hide[YUI_LIFECYCLE_NAME_MAX];
+    char lifecycle_on_unload[YUI_LIFECYCLE_NAME_MAX];
 
     //动画
     Animation* animation;
@@ -699,6 +725,10 @@ typedef struct Layer {
     
     // 增量更新支持：脏标记
     unsigned int dirty_flags; // 标记哪些属性被修改
+
+    /* 渲染上下文（每棵渲染树独立）：root 层持有分配后的 RenderCtx，
+     * 子层创建时继承父层指针。多窗口/多树各自渲染不串扰。 */
+    struct RenderCtx* render_ctx;
 
     // inspect
     int inspect_enabled;     // 是否启用Inspect调试模式

@@ -17,11 +17,21 @@
 extern "C" {
 #endif
 
+#ifndef GAME_MAX_ENTITIES
 #define GAME_MAX_ENTITIES 128
+#endif
+#ifndef GAME_MAX_PARTICLES
 #define GAME_MAX_PARTICLES 256
+#endif
+#ifndef GAME_ID_LEN
 #define GAME_ID_LEN 64
+#endif
+#ifndef GAME_PATH_LEN
 #define GAME_PATH_LEN 256
+#endif
+#ifndef GAME_ANIM_FRAMES
 #define GAME_ANIM_FRAMES 16
+#endif
 
 typedef struct GameEntity {
     int alive;
@@ -106,7 +116,7 @@ void game_destroy_by_id(const char* id);
 GameEntity* game_find(const char* id);
 GameEntity* game_find_by_tag(const char* tag);
 int game_find_all_by_tag(const char* tag, GameEntity** out, int max_out);
-GameEntity* game_entities(int* out_count);
+GameEntity** game_entities(int* out_count);
 
 /* Object pool: acquire by prefab tag, release back */
 GameEntity* game_pool_acquire(const char* prefab);

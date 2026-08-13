@@ -12,6 +12,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <sys/stat.h>
 
 // 全局 UI 根图层
 struct Layer* g_layer_root = NULL;
@@ -20,7 +21,9 @@ struct Layer* g_layer_root = NULL;
 typedef void (*CEventHandler)(Layer* layer, const char* event_type);
 
 // C 事件处理器注册表
-#define MAX_C_EVENT_HANDLERS 128
+#ifndef MAX_C_EVENT_HANDLERS
+#define MAX_C_EVENT_HANDLERS 32
+#endif
 typedef struct {
     char event_name[128];
     CEventHandler handler;
@@ -30,7 +33,12 @@ static CEventEntry g_c_event_handlers[MAX_C_EVENT_HANDLERS];
 static int g_c_event_handler_count = 0;
 
 // JS 事件映射表（存储 JS 函数名）
-#define MAX_JS_EVENTS 512
+#ifndef MAX_JS_EVENTS
+#define MAX_JS_EVENTS 256
+#endif
+#ifndef YUI_PATH_MAX
+#define YUI_PATH_MAX YUI_MAX_PATH
+#endif
 typedef struct {
     char event_name[128];
     char func_name[128];
@@ -92,8 +100,8 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
     // 检查 click 事件
     if (strcmp(event_name, "click") == 0 || strcmp(event_name, "onClick") == 0) {
         if (event_func_name) {
-            strncpy(layer->event->click_name, event_func_name, MAX_PATH - 1);
-            layer->event->click_name[MAX_PATH - 1] = '\0';
+            strncpy(layer->event->click_name,event_func_name,sizeof(layer->event->click_name) - 1);
+            layer->event->click_name[sizeof(layer->event->click_name) - 1] = '\0';
         }
         layer->event->click = (EventHandler)event_handler;
         return 0;
@@ -106,8 +114,8 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
     // 检查 scroll 事件
     if (strcmp(event_name, "scroll") == 0 || strcmp(event_name, "onScroll") == 0) {
         if (event_func_name) {
-            strncpy(layer->event->scroll_name, event_func_name, MAX_PATH - 1);
-            layer->event->scroll_name[MAX_PATH - 1] = '\0';
+            strncpy(layer->event->scroll_name,event_func_name,sizeof(layer->event->scroll_name) - 1);
+            layer->event->scroll_name[sizeof(layer->event->scroll_name) - 1] = '\0';
         }
         layer->event->scroll = (EventHandler)event_handler;
         return 0;
@@ -115,8 +123,8 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
     // 检查 touch 事件
     if (strcmp(event_name, "touch") == 0 || strcmp(event_name, "onTouch") == 0) {
         if (event_func_name) {
-            strncpy(layer->event->touch_name, event_func_name, MAX_PATH - 1);
-            layer->event->touch_name[MAX_PATH - 1] = '\0';
+            strncpy(layer->event->touch_name,event_func_name,sizeof(layer->event->touch_name) - 1);
+            layer->event->touch_name[sizeof(layer->event->touch_name) - 1] = '\0';
         }
         layer->event->touch = (EventHandler)event_handler;
         return 0;
@@ -133,8 +141,8 @@ int js_module_set_layer_event(Layer* layer, const char* event_name, const char* 
     // 检查 resize 事件
     if (strcmp(event_name, "resize") == 0 || strcmp(event_name, "onResize") == 0) {
         if (event_func_name) {
-            strncpy(layer->event->resize_name, event_func_name, MAX_PATH - 1);
-            layer->event->resize_name[MAX_PATH - 1] = '\0';
+            strncpy(layer->event->resize_name,event_func_name,sizeof(layer->event->resize_name) - 1);
+            layer->event->resize_name[sizeof(layer->event->resize_name) - 1] = '\0';
         }
         layer->event->resize = js_layer_resize_handler;
         return 0;
@@ -279,6 +287,37 @@ static EventHandler get_event_handler_by_type(const char* event_type)
 }
 
 // 辅助函数：构建完整的 JS 文件路径（相对于 JSON 文件目录）
+// 统一基准路径前缀：空串表示未设置。
+// 嵌入式 SPIFFS 挂载在 /spiffs 时设为 "/spiffs"；宿主桌面资源在
+// "app/watch-os" 时设为 "app/watch-os"。相对路径解析统一为 原样 -> root/。
+static char g_js_root[YUI_MAX_PATH] = "";
+
+static void strip_trailing_slash(char* s)
+{
+    size_t n;
+    if (!s) return;
+    n = strlen(s);
+    while (n > 1 && (s[n - 1] == '/' || s[n - 1] == '\\')) {
+        s[--n] = '\0';
+    }
+}
+
+void js_module_set_root(const char* root)
+{
+    if (!root || !root[0]) {
+        g_js_root[0] = '\0';
+        return;
+    }
+    strncpy(g_js_root,root,sizeof(g_js_root) - 1);
+    g_js_root[YUI_MAX_PATH - 1] = '\0';
+    strip_trailing_slash(g_js_root);
+}
+
+const char* js_module_get_root(void)
+{
+    return g_js_root;
+}
+
 static void build_js_path(const char* js_path, const char* json_dir, char* full_path, size_t max_len)
 {
     if (js_path[0] == '/') {
@@ -289,21 +328,30 @@ static void build_js_path(const char* js_path, const char* json_dir, char* full_
         snprintf(full_path, max_len, "%s%s", json_dir, js_path + 1);
     } else if (js_path[0] == '.' && js_path[1] == '.') {
         // ../ 开头的路径，需要处理相对路径
-        char temp_dir[MAX_PATH];
-        strncpy(temp_dir, json_dir, MAX_PATH - 1);
-        temp_dir[MAX_PATH - 1] = '\0';
+        char temp_dir[YUI_PATH_MAX];
+        strncpy(temp_dir, json_dir, sizeof(temp_dir) - 1);
+        temp_dir[sizeof(temp_dir) - 1] = '\0';
         
         const char* path_ptr = js_path;
         
         // 处理每个 ../ 
         while (path_ptr[0] == '.' && path_ptr[1] == '.' && (path_ptr[2] == '/' || path_ptr[2] == '\\')) {
+            // 已到文件系统根，不再上跳，消耗剩余 ../（仅绝对 root 参与 clamp，
+            // 宿主相对 root（如 app/watch-os）不截断，避免 ../lib 解析错误）
+            if (g_js_root[0] == '/' && strcmp(temp_dir, g_js_root) == 0) {
+                while (path_ptr[0] == '.' && path_ptr[1] == '.' &&
+                       (path_ptr[2] == '/' || path_ptr[2] == '\\')) {
+                    path_ptr += 3;
+                }
+                break;
+            }
             // 从目录中移除最后一部分
             char* last_sep = strrchr(temp_dir, '/');
             char* last_sep_win = strrchr(temp_dir, '\\');
-            
+
             // 使用最后的分隔符
             char* sep = (last_sep_win > last_sep) ? last_sep_win : last_sep;
-            
+
             if (sep) {
                 *sep = '\0';  // 截断到最后一个分隔符之前
             } else {
@@ -311,7 +359,7 @@ static void build_js_path(const char* js_path, const char* json_dir, char* full_
                 strcpy(temp_dir, ".");
                 break;
             }
-            
+
             // 移动到路径的下一部分
             path_ptr += 3;  // 跳过 "../"
         }
@@ -324,6 +372,9 @@ static void build_js_path(const char* js_path, const char* json_dir, char* full_
         // 构建最终路径
         if (strlen(temp_dir) > 0 && strcmp(temp_dir, ".") != 0) {
             snprintf(full_path, max_len, "%s/%s", temp_dir, path_ptr);
+        } else if (temp_dir[0] == '\0') {
+            // 目录已上跳到根 (json_dir="/" 时)，结果仍是绝对路径
+            snprintf(full_path, max_len, "/%s", path_ptr);
         } else {
             strncpy(full_path, path_ptr, max_len - 1);
         }
@@ -369,30 +420,18 @@ static void get_file_dir(const char* filepath, char* dir, size_t max_len)
 
 uint8_t* load_file(const char *filename, int *plen)
 {
-    FILE *f;
-    uint8_t *buf;
-    int buf_len;
+    char *content;
+    size_t len;
 
-    f = fopen(filename, "rb");
-    if (!f) {
-        printf("JS: Cannot open file %s\n", filename);
+    /* 与 js_module_read_file 一致：对相对路径应用 base_path/fs_root 回退，
+       使 "apps/xxx.js"（未带 /spiffs 前缀）也能从 /spiffs 下正确打开。 */
+    content = js_module_read_file(filename);
+    if (!content)
         return NULL;
-    }
-
-    fseek(f, 0, SEEK_END);
-    buf_len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    buf = malloc(buf_len + 1);
-    if (!buf) {
-        fclose(f);
-        return NULL;
-    }
-    fread(buf, 1, buf_len, f);
-    buf[buf_len] = '\0';
-    fclose(f);
-
-    if (plen) *plen = buf_len;
-    return buf;
+    len = strlen(content);
+    if (plen)
+        *plen = (int)len;
+    return (uint8_t *)content;
 }
 
 static int is_page_lifecycle_event(const char* event_name)
@@ -568,9 +607,12 @@ static void layer_lifecycle_js_dispatch(Layer* layer, const char* event_type)
         return;
     }
 
+    char handler_buf[128];
     const char* handler_name = layer_lifecycle_handler_name(layer, event_type);
     if (handler_name) {
-        js_module_call_event(handler_name, layer);
+        strncpy(handler_buf, handler_name, sizeof(handler_buf) - 1);
+        handler_buf[sizeof(handler_buf) - 1] = '\0';
+        js_module_call_event(handler_buf, layer);
         return;
     }
 
@@ -642,8 +684,8 @@ static int load_js_recursive(cJSON* json, const char* json_dir)
         // 支持字符串格式（单个JS文件）
         if (cJSON_IsString(js_file)) {
             const char* js_path = js_file->valuestring;
-            char full_path[MAX_PATH];
-            build_js_path(js_path, json_dir, full_path, MAX_PATH);
+            char full_path[YUI_PATH_MAX];
+            build_js_path(js_path, json_dir, full_path, YUI_PATH_MAX);
 
             printf("JS: Loading JS file from config: %s -> %s\n", js_path, full_path);
             if (js_module_load_file(full_path) == 0) {
@@ -657,8 +699,8 @@ static int load_js_recursive(cJSON* json, const char* json_dir)
                 cJSON* js_item = cJSON_GetArrayItem(js_file, i);
                 if (js_item && cJSON_IsString(js_item)) {
                     const char* js_path = js_item->valuestring;
-                    char full_path[MAX_PATH];
-                    build_js_path(js_path, json_dir, full_path, MAX_PATH);
+                    char full_path[YUI_PATH_MAX];
+                    build_js_path(js_path, json_dir, full_path, YUI_PATH_MAX);
 
                     printf("JS: Loading JS files from config[%d]: %s -> %s\n", i, js_path, full_path);
                     if (js_module_load_file(full_path) == 0) {
@@ -683,6 +725,170 @@ static int load_js_recursive(cJSON* json, const char* json_dir)
     return loaded_count;
 }
 
+// ====================== 两阶段 JS 加载（嵌入式内存优化） ======================
+// 嵌入式端（ESP32）堆紧张：必须先释放 cJSON 树，再初始化 JS 引擎 64KB 池。
+// 故把 js_module_load_from_json 拆成：
+//   1) js_module_collect_from_json  —— cJSON 树还活着时收集 JS 路径 + 注册事件（不依赖引擎）
+//   2) js_module_load_collected      —— 引擎就绪后按收集的路径逐个加载
+#define MAX_COLLECTED_JS 16
+static char g_collected_js_paths[MAX_COLLECTED_JS][128];
+static int g_collected_js_count = 0;
+
+// 递归遍历 JSON，收集 "js" 字段指定的文件路径（不加载、不执行）
+static int collect_js_recursive(cJSON* json, const char* json_dir)
+{
+    if (!json) return 0;
+
+    int collected = 0;
+
+    cJSON* js_file = cJSON_GetObjectItem(json, "js");
+    if (js_file) {
+        if (cJSON_IsString(js_file)) {
+            const char* js_path = js_file->valuestring;
+            char full_path[YUI_PATH_MAX];
+            build_js_path(js_path, json_dir, full_path, YUI_PATH_MAX);
+            if (g_collected_js_count < MAX_COLLECTED_JS) {
+                strncpy(g_collected_js_paths[g_collected_js_count], full_path, 127);
+                g_collected_js_paths[g_collected_js_count][127] = '\0';
+                g_collected_js_count++;
+                collected++;
+            }
+        } else if (cJSON_IsArray(js_file)) {
+            int array_size = cJSON_GetArraySize(js_file);
+            for (int i = 0; i < array_size; i++) {
+                cJSON* js_item = cJSON_GetArrayItem(js_file, i);
+                if (js_item && cJSON_IsString(js_item)) {
+                    const char* js_path = js_item->valuestring;
+                    char full_path[YUI_PATH_MAX];
+                    build_js_path(js_path, json_dir, full_path, YUI_PATH_MAX);
+                    if (g_collected_js_count < MAX_COLLECTED_JS) {
+                        strncpy(g_collected_js_paths[g_collected_js_count], full_path, 127);
+                        g_collected_js_paths[g_collected_js_count][127] = '\0';
+                        g_collected_js_count++;
+                        collected++;
+                    }
+                }
+            }
+        }
+    }
+
+    // 注册事件映射（纯字符串表，不依赖 JS 引擎）
+    // onTouch 等会走 js_module_set_layer_event → 坏 Event* 导致 Store access fault
+    // scan_and_register_events(json);   // BISECT: keep disabled; lifecycle uses Layer fields
+
+    // 递归遍历子节点
+    cJSON* child = json->child;
+    while (child) {
+        collected += collect_js_recursive(child, json_dir);
+        child = child->next;
+    }
+
+    return collected;
+}
+
+// 阶段 1：从 JSON 收集 JS 文件路径 + 注册事件。可在 JS 引擎初始化前调用。
+int js_module_collect_from_json(cJSON* root_json, const char* json_file_path, int append)
+{
+    if (!root_json) {
+        printf("JS: root_json is NULL\n");
+        return 0;
+    }
+
+    if (!append) {
+        js_module_clear_events();
+    }
+
+    char json_dir[YUI_PATH_MAX];
+    if (json_file_path && json_file_path[0] != '\0') {
+        get_file_dir(json_file_path, json_dir, YUI_PATH_MAX);
+    } else if (append) {
+        strcpy(json_dir, ".");
+    } else {
+        strcpy(json_dir, "app/mquickjs");
+    }
+
+    /* 未显式设置 root 时，默认以 json 所在目录为基准：
+       apps/、themes/、readFile(...) 等相对路径直接相对 app.json 解析。
+       显式 set_root（如 esp32 的 "/spiffs"）优先，不覆盖。 */
+    if (g_js_root[0] == '\0') {
+        js_module_set_root(json_dir);
+    }
+
+    LOGD("js", "%s JS from JSON directory: %s", append ? "Appending" : "Loading", json_dir);
+
+    g_collected_js_count = 0;
+    int total = collect_js_recursive(root_json, json_dir);
+    LOGD("js", "Collected %d JS file(s) from JSON", total);
+
+    return total;
+}
+
+// 阶段 2：加载已收集的 JS 文件（须在 JS 引擎初始化之后调用）。
+typedef struct {
+    unsigned char flags;
+    char on_load[128];
+    char on_show[128];
+    char on_hide[128];
+    char on_unload[128];
+} LifecycleSnap;
+
+static void lifecycle_snap_save(Layer* layer, LifecycleSnap* snap)
+{
+    if (!layer || !snap) return;
+    snap->flags = layer->lifecycle_flags;
+    memcpy(snap->on_load, layer->lifecycle_on_load, sizeof(snap->on_load));
+    memcpy(snap->on_show, layer->lifecycle_on_show, sizeof(snap->on_show));
+    memcpy(snap->on_hide, layer->lifecycle_on_hide, sizeof(snap->on_hide));
+    memcpy(snap->on_unload, layer->lifecycle_on_unload, sizeof(snap->on_unload));
+}
+
+static void lifecycle_snap_restore(Layer* layer, const LifecycleSnap* snap)
+{
+    if (!layer || !snap) return;
+    layer->lifecycle_flags = snap->flags;
+    memcpy(layer->lifecycle_on_load, snap->on_load, sizeof(layer->lifecycle_on_load));
+    memcpy(layer->lifecycle_on_show, snap->on_show, sizeof(layer->lifecycle_on_show));
+    memcpy(layer->lifecycle_on_hide, snap->on_hide, sizeof(layer->lifecycle_on_hide));
+    memcpy(layer->lifecycle_on_unload, snap->on_unload, sizeof(layer->lifecycle_on_unload));
+}
+
+/* mquickjs 在 64/96KB 池里 eval 大脚本时会踩到相邻堆上的 Layer（lifecycle 字段）。
+ * 加载前后保存/恢复根层 lifecycle，避免 onLoad 处理器名被改成垃圾（曾见 "ormal"）。 */
+int js_module_load_collected(void)
+{
+    LifecycleSnap root_life;
+    int have_root_life = 0;
+
+    if (g_layer_root) {
+        lifecycle_snap_save(g_layer_root, &root_life);
+        have_root_life = 1;
+    }
+
+    int total_loaded = 0;
+    for (int i = 0; i < g_collected_js_count; i++) {
+        if (js_module_load_file(g_collected_js_paths[i]) == 0) {
+            total_loaded++;
+        }
+        if (have_root_life) {
+            lifecycle_snap_restore(g_layer_root, &root_life);
+        }
+    }
+
+    if (have_root_life) {
+        lifecycle_snap_restore(g_layer_root, &root_life);
+        /* 确保根层可见，否则 init_tree 不会派发 onLoad */
+        if (g_layer_root->visible == IN_VISIBLE) {
+            g_layer_root->visible = VISIBLE;
+        }
+    }
+
+    if (g_layer_root) {
+        layer_lifecycle_init_tree(g_layer_root);
+    }
+
+    return total_loaded;
+}
+
 // 清空事件映射表
 void js_module_clear_events(void)
 {
@@ -703,13 +909,18 @@ int js_module_load_from_json(cJSON* root_json, const char* json_file_path, int a
         js_module_clear_events();
     }
 
-    char json_dir[MAX_PATH];
+    char json_dir[YUI_PATH_MAX];
     if (json_file_path && json_file_path[0] != '\0') {
-        get_file_dir(json_file_path, json_dir, MAX_PATH);
+        get_file_dir(json_file_path, json_dir, YUI_PATH_MAX);
     } else if (append) {
         strcpy(json_dir, ".");
     } else {
         strcpy(json_dir, "app/mquickjs");
+    }
+
+    /* 与 collect 阶段一致：未显式设置 root 时默认 json 所在目录 */
+    if (g_js_root[0] == '\0') {
+        js_module_set_root(json_dir);
     }
 
     LOGD("js", "%s JS from JSON directory: %s", append ? "Appending" : "Loading", json_dir);
@@ -977,31 +1188,126 @@ const char* js_module_get_select_value(const char* layer_id) {
 
 // ====================== 文件读取功能 ======================
 
-// 文件读取函数，用于JavaScript环境
+static FILE* js_try_fopen(const char* path, const char** used)
+{
+    FILE* f;
+    if (!path || !path[0]) return NULL;
+    f = fopen(path, "rb");
+    if (f && used) *used = path;
+    return f;
+}
+
+static int js_path_exists(const char* path)
+{
+    struct stat st;
+    if (!path || !path[0]) return 0;
+    return stat(path, &st) == 0;
+}
+
+/* 解析可读路径：原样 → base_path/ → fs_root/。成功写入 out 并返回 0。 */
+int js_module_resolve_path(const char* in, char* out, size_t out_sz)
+{
+    char path_buf[YUI_PATH_MAX];
+
+    if (!in || !out || out_sz == 0) return -1;
+
+    if (js_path_exists(in)) {
+        strncpy(out, in, out_sz - 1);
+        out[out_sz - 1] = '\0';
+        return 0;
+    }
+    if (in[0] == '/') return -1;
+
+    /* 仅绝对 root 参与 ../ 上跳 clamp；相对 root 只用于 resolve/read 前缀 */
+    if (g_js_root[0]) {
+        snprintf(path_buf, sizeof(path_buf), "%s/%s", g_js_root, in);
+        if (js_path_exists(path_buf)) {
+            strncpy(out, path_buf, out_sz - 1);
+            out[out_sz - 1] = '\0';
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* 相对路径：先原样，再 root/（通用，各平台相同）。 */
 char* js_module_read_file(const char* file_path) {
+    char path_buf[YUI_PATH_MAX];
+    const char* open_path = file_path;
+    FILE* f = NULL;
+    long file_size;
+    char* buffer;
+    size_t bytes_read;
+
     if (!file_path) return NULL;
-    
-    FILE *f = fopen(file_path, "r");
+
+    f = js_try_fopen(file_path, &open_path);
+    if (!f && file_path[0] != '/') {
+        if (g_js_root[0]) {
+            snprintf(path_buf, sizeof(path_buf), "%s/%s", g_js_root, file_path);
+            f = js_try_fopen(path_buf, &open_path);
+        }
+    }
     if (!f) {
         printf("JS: Cannot open file %s\n", file_path);
         return NULL;
     }
 
-    fseek(f, 0, SEEK_END);
-    long file_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    /* 默认用原始 ftell 逻辑（SPIFFS 对多数文件有效）；ftell 失败(<=0)时
+       回退到 stat()/fread 循环。 */
+    file_size = -1;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        file_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+    }
+    if (file_size <= 0) {
+        /* 回退：优先 stat() 拿精确大小；失败则 fread 循环读到 EOF */
+        struct stat st;
+        if (stat(open_path, &st) == 0 && st.st_size > 0) {
+            file_size = st.st_size;
+        } else {
+            size_t cap = 4096;
+            size_t size = 0;
+            size_t n;
+            buffer = malloc(cap + 1);
+            if (!buffer) {
+                fclose(f);
+                return NULL;
+            }
+            while ((n = fread(buffer + size, 1, cap - size, f)) > 0) {
+                size += n;
+                if (size == cap) {
+                    char *tmp = realloc(buffer, cap * 2 + 1);
+                    if (!tmp) {
+                        free(buffer);
+                        fclose(f);
+                        return NULL;
+                    }
+                    buffer = tmp;
+                    cap *= 2;
+                }
+            }
+            buffer[size] = '\0';
+            fclose(f);
+            return buffer;
+        }
+    }
+    if (file_size < 0) {
+        fclose(f);
+        return NULL;
+    }
 
-    char *buffer = malloc(file_size + 1);
+    buffer = malloc((size_t)file_size + 1);
     if (!buffer) {
         fclose(f);
         return NULL;
     }
 
-    size_t bytes_read = fread(buffer, 1, file_size, f);
+    bytes_read = fread(buffer, 1, (size_t)file_size, f);
     buffer[bytes_read] = '\0';
     fclose(f);
 
-    printf("JS: Successfully read %ld bytes from file %s\n", bytes_read, file_path);
+    printf("JS: Successfully read %ld bytes from file %s\n", (long)bytes_read, open_path);
     return buffer;
 }
 

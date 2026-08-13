@@ -21,7 +21,9 @@
 #include "stb_truetype.h"
 
 #define EMBED_TEXT_CACHE_KEY_MAX 127   /* 文本 key 最大长度（超长不缓存） */
+#ifndef EMBED_TEXT_CACHE_DEFAULT
 #define EMBED_TEXT_CACHE_DEFAULT 64    /* 默认缓存槽数 */
+#endif
 
 typedef struct {
     unsigned char* data;     /* ttf 文件数据（可能指向 Flash） */
@@ -366,7 +368,7 @@ Texture* embed_font_render_nocache(DFont* font, const char* text, Color color) {
         stbtt_GetCodepointHMetrics(&ef->info, cp, &advance, &lsb);
         stbtt_GetCodepointBitmapBox(&ef->info, cp, ef->scale, ef->scale, &x0, &y0, &x1, &y1);
         gw = x1 - x0; gh = y1 - y0;
-        glyph_bitmap = stbtt_GetCodepointBitmap(&ef->info, 0, ef->scale, cp, &gw, &gh, 0, 0);
+        glyph_bitmap = stbtt_GetCodepointBitmap(&ef->info, ef->scale, ef->scale, cp, &gw, &gh, 0, 0);
         if (glyph_bitmap) {
             dst_x = pen_x + x0 - min_x;
             dst_y = baseline + y0 - min_y;
@@ -406,6 +408,9 @@ Texture* embed_font_render_nocache(DFont* font, const char* text, Color color) {
 }
 
 /* ====================== 渲染（带缓存） ====================== */
+#ifndef EMBED_TEXT_CACHE_MAX_TEX_SIZE
+#define EMBED_TEXT_CACHE_MAX_TEX_SIZE (16 * 1024)   /* 大纹理不入缓存，帧末即释放 */
+#endif
 Texture* embed_font_render(DFont* font, const char* text, Color color) {
     Texture* tex;
     EmbedTexture* et;
@@ -424,6 +429,12 @@ Texture* embed_font_render(DFont* font, const char* text, Color color) {
     tex = embed_font_render_nocache(font, text, color);
     if (!tex) return NULL;
     et = (EmbedTexture*)tex->priv;
+    /* 大纹理（如整屏大字号时钟）不入缓存：缓存只淘汰 refcount==0 的槽，
+     * 而大纹理常驻会让 LRU 无法及时回收，导致堆在首帧就耗尽。 */
+    if ((size_t)et->w * (size_t)et->h * 4 > EMBED_TEXT_CACHE_MAX_TEX_SIZE) {
+        et->cached = 0;
+        return tex;
+    }
     et->cached = 1;
     cache_store(tex, font, text, color);
     return tex;
