@@ -726,6 +726,10 @@ typedef struct Layer {
     // 增量更新支持：脏标记
     unsigned int dirty_flags; // 标记哪些属性被修改
 
+    /* 本层 + 子孙中正在运行的动画数。DIRTY 模式下祖先不能整棵跳过，
+     * 须照常绘制自身（背景）并走子层，否则同级静态 Button/文本永远画不上。 */
+    int animating_ref;
+
     /* 渲染上下文（每棵渲染树独立）：root 层持有分配后的 RenderCtx，
      * 子层创建时继承父层指针。多窗口/多树各自渲染不串扰。 */
     struct RenderCtx* render_ctx;

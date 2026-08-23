@@ -336,6 +336,12 @@ void layer_set_text(Layer* layer, const char* value) {
   if (!layer) {
     return;
   }
+  if (value && layer->text && strcmp(layer->text, value) == 0) {
+    return;
+  }
+  if (!value && !layer->text) {
+    return;
+  }
   layer_set_text_with_size(layer, value);
   mark_layer_dirty(layer, DIRTY_TEXT);
 }
@@ -589,6 +595,27 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
   if (cJSON_HasObjectItem(json_obj, "height")) {
     layer->fixed_height = cJSON_GetObjectItem(json_obj, "height")->valueint;
     layer->rect.h = layer->fixed_height;  // 同时设置rect.h
+  }
+
+  /* rect: [x, y, w, h] — glass 等示例用绝对坐标，嵌入 launcher 时作相对父层的基准 */
+  {
+    cJSON* rect = cJSON_GetObjectItem(json_obj, "rect");
+    if (rect && cJSON_IsArray(rect) && cJSON_GetArraySize(rect) >= 4) {
+      cJSON* rx = cJSON_GetArrayItem(rect, 0);
+      cJSON* ry = cJSON_GetArrayItem(rect, 1);
+      cJSON* rw = cJSON_GetArrayItem(rect, 2);
+      cJSON* rh = cJSON_GetArrayItem(rect, 3);
+      if (rx && cJSON_IsNumber(rx)) layer->rect.x = rx->valueint;
+      if (ry && cJSON_IsNumber(ry)) layer->rect.y = ry->valueint;
+      if (rw && cJSON_IsNumber(rw)) {
+        layer->rect.w = rw->valueint;
+        layer->fixed_width = layer->rect.w;
+      }
+      if (rh && cJSON_IsNumber(rh)) {
+        layer->rect.h = rh->valueint;
+        layer->fixed_height = layer->rect.h;
+      }
+    }
   }
 
   // 解析弹性比例
@@ -941,7 +968,7 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
 
   // 解析动画属性配置
   cJSON* animation = cJSON_GetObjectItem(json_obj, "animation");
-  if (animation) {
+  if (animation && cJSON_IsObject(animation)) {
     // 解析持续时间
     float duration = 1.0f;  // 默认1秒
     if (cJSON_HasObjectItem(animation, "duration")) {
@@ -1196,13 +1223,34 @@ void destroy_layer(Layer* layer) {
         layer->scrollbar_h = NULL;
     }
     
-    // 释放自有 font/assets（与父层共享时不释放）
-    if (layer->font && (!layer->parent || layer->font != layer->parent->font)) {
-        free(layer->font);
+    /* 主题改 fontSize 会给当前层拷一份 Font，子孙仍可能指向更上层同一块。
+     * 销毁时沿祖先链判断共享，只比直接父层会误释放 launcher 根字体。 */
+    if (layer->font) {
+        int shared = 0;
+        Layer* p;
+        for (p = layer->parent; p; p = p->parent) {
+            if (p->font == layer->font) {
+                shared = 1;
+                break;
+            }
+        }
+        if (!shared) {
+            free(layer->font);
+        }
         layer->font = NULL;
     }
-    if (layer->assets && (!layer->parent || layer->assets != layer->parent->assets)) {
-        free(layer->assets);
+    if (layer->assets) {
+        int shared = 0;
+        Layer* p;
+        for (p = layer->parent; p; p = p->parent) {
+            if (p->assets == layer->assets) {
+                shared = 1;
+                break;
+            }
+        }
+        if (!shared) {
+            free(layer->assets);
+        }
         layer->assets = NULL;
     }
 

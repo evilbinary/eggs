@@ -3,6 +3,7 @@
 #include "../backend.h"
 #include "../util.h"
 #include "../layer_update.h"
+#include "../animate.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -13,7 +14,6 @@
 #define printf
 
 static void progress_component_apply_theme_style(Layer* layer, cJSON* style);
-
 static void progress_layer_destroy(Layer* layer) {
     if (!layer || !layer->component) {
         return;
@@ -25,6 +25,18 @@ static void progress_layer_destroy(Layer* layer) {
 // 辅助函数：绘制圆弧（用于圆形进度条）- 使用后端抗锯齿渲染
 static void render_circle_arc(int center_x, int center_y, int radius, int start_angle, int end_angle, Color color, int line_width) {
     backend_render_arc(center_x, center_y, radius, (float)start_angle, (float)end_angle, color, line_width);
+}
+
+/* 圆环中空处应露出父层背景。DIRTY 模式下每帧只画新百分比，必须先擦掉旧字。 */
+static Color progress_hole_color(Layer* layer) {
+    Layer* p = layer ? layer->parent : NULL;
+    while (p) {
+        if (p->bg_color.a == 255) {
+            return p->bg_color;
+        }
+        p = p->parent;
+    }
+    return (Color){255, 255, 255, 255};
 }
 
 // 创建进度条组件
@@ -44,6 +56,7 @@ ProgressComponent* progress_component_create(Layer* layer) {
     component->target_progress = 0.0f;
     component->animation_speed = 0.1f; // 默认动画速度
     component->animating = 0;
+    component->animation_enabled = 1; // 默认启动画,可用 JSON "animation" 关闭
     component->shape = PROGRESS_SHAPE_RECTANGLE; // 默认为长条形
     component->direction = PROGRESS_DIRECTION_HORIZONTAL;
     component->fill_color = (Color){50, 150, 255, 255};
@@ -101,26 +114,6 @@ ProgressComponent* progress_component_create_from_json(Layer* layer, cJSON* json
     
     // 从 JSON 配置中读取属性
     if (json_obj) {
-        // 读取进度值
-        if (cJSON_HasObjectItem(json_obj, "value")) {
-            cJSON* value_item = cJSON_GetObjectItem(json_obj, "value");
-            if (cJSON_IsNumber(value_item)) {
-                int value = value_item->valueint;
-                // 将0-100的值转换为0.0-1.0
-                float progress = value / 100.0f;
-                progress_component_set_progress(component, progress);
-                value_specified = 1;
-            }
-        } else if (cJSON_HasObjectItem(json_obj, "data")) {
-            cJSON* data_item = cJSON_GetObjectItem(json_obj, "data");
-            if (cJSON_IsNumber(data_item)) {
-                int value = data_item->valueint;
-                float progress = value / 100.0f;
-                progress_component_set_progress(component, progress);
-                value_specified = 1;
-            }
-        }
-        
         // 读取形状配置
             cJSON* shape_item = cJSON_GetObjectItem(json_obj, "shape");
         if (!shape_item && style) {
@@ -173,11 +166,40 @@ ProgressComponent* progress_component_create_from_json(Layer* layer, cJSON* json
             }
         }
         
+        // 读取是否启用动画
+        if (cJSON_HasObjectItem(json_obj, "animation")) {
+            cJSON* anim_item = cJSON_GetObjectItem(json_obj, "animation");
+            if (cJSON_IsBool(anim_item)) {
+                component->animation_enabled = cJSON_IsTrue(anim_item) ? 1 : 0;
+            }
+        }
+
         // 读取动画速度
         if (cJSON_HasObjectItem(json_obj, "animationSpeed")) {
             cJSON* speed_item = cJSON_GetObjectItem(json_obj, "animationSpeed");
             if (cJSON_IsNumber(speed_item)) {
                 component->animation_speed = speed_item->valuedouble;
+            }
+        }
+        
+        // 读取进度值（在 animation / animationSpeed 之后解析，
+        // 保证 set_progress 时 animation_enabled 已生效，instant 模式不会误启动画）
+        if (cJSON_HasObjectItem(json_obj, "value")) {
+            cJSON* value_item = cJSON_GetObjectItem(json_obj, "value");
+            if (cJSON_IsNumber(value_item)) {
+                int value = value_item->valueint;
+                // 将0-100的值转换为0.0-1.0
+                float progress = value / 100.0f;
+                progress_component_set_progress(component, progress);
+                value_specified = 1;
+            }
+        } else if (cJSON_HasObjectItem(json_obj, "data")) {
+            cJSON* data_item = cJSON_GetObjectItem(json_obj, "data");
+            if (cJSON_IsNumber(data_item)) {
+                int value = data_item->valueint;
+                float progress = value / 100.0f;
+                progress_component_set_progress(component, progress);
+                value_specified = 1;
             }
         }
         
@@ -232,9 +254,21 @@ void progress_component_set_progress(ProgressComponent* component, float progres
         progress = 1.0f;
     }
     
-    // 设置目标进度并标记为动画中
+    // 设置目标进度:若启用动画则标记为动画中,否则直接跳到目标值
     component->target_progress = progress;
-    component->animating = 1;
+    if (component->animation_enabled) {
+        component->animating = 1;
+        /* DIRTY 模式：挂 keep-alive 动画，保证动画期间每帧渲染 */
+        animation_keep_alive(component->layer);
+    } else {
+        component->progress = progress;
+        component->animating = 0;
+        animation_stop_keep_alive(component->layer);
+    }
+    /* 触发至少一次重绘 */
+    if (component->layer) {
+        mark_layer_dirty(component->layer, DIRTY_COLOR);
+    }
 }
 
 // 设置进度条方向
@@ -327,6 +361,8 @@ void progress_component_render(Layer* layer) {
             // 如果差值很小，直接设置为目标值并停止动画
             component->progress = component->target_progress;
             component->animating = 0;
+            /* DIRTY 模式：动画完成，释放 keep-alive，恢复脏跳过 */
+            animation_stop_keep_alive(layer);
         } else {
             // 否则，根据动画速度更新进度
             component->progress += diff * component->animation_speed;
@@ -344,6 +380,21 @@ void progress_component_render(Layer* layer) {
         
         if (radius <= 0) {
             return; // 半径太小，无法绘制
+        }
+
+        /* 先填满内圆（父层底色），擦除上一帧百分比，避免脏模式文字重叠 */
+        {
+            int inner_r = radius - component->circle_width;
+            if (inner_r < 4) {
+                inner_r = 4;
+            }
+            Rect hole_rect = {
+                center_x - inner_r,
+                center_y - inner_r,
+                inner_r * 2,
+                inner_r * 2
+            };
+            backend_render_rounded_rect(&hole_rect, progress_hole_color(layer), inner_r);
         }
         
         // 绘制背景圆环（灰色）
@@ -409,7 +460,9 @@ void progress_component_render(Layer* layer) {
             if (layer->color.a > 0) {
                 text_color = layer->color;
             } else {
-                text_color = (Color){255, 255, 255, 255}; // 默认白色
+                Color hole = progress_hole_color(layer);
+                int lum = (hole.r * 299 + hole.g * 587 + hole.b * 114) / 1000;
+                text_color = lum > 140 ? (Color){0, 0, 0, 255} : (Color){255, 255, 255, 255};
             }
         } else {
             text_color = (Color){0, 0, 0, 255};

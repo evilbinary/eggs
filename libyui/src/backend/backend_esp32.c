@@ -135,14 +135,8 @@ const void* backend_esp32_bc_rom_base(size_t* psize) {
 }
 
 /* 编译期宏：是否启用 LCD 软件 framebuffer（RGB565，240x240 约 115KB）。
- *   - 默认 0（不启用）：不分配 s_fb，backend_render_* 不跳过，而是经
- *     direct_draw_point 逐点直写 LCD；无面板（QEMU/headless）时像素落点
- *     为空操作，但渲染调用链（组件渲染/字体光栅化/逐像素循环）完整执行。
- *     RAM 占用最小，适合真实 LCD 硬件与内存紧张场景。
- *   - 定义 YUI_ESP32_LCD_BUFFER=1 时分配 s_fb，backend_render_* 写入
- *     framebuffer，经脏矩形批量推送（esp32_flush_dirty）。
- *   - QEMU 构建（YUI_ESP32_QEMU）强制为 1，但 s_fb 不 calloc——指向虚拟
- *     RGB 面板的专属 framebuffer（不占内部 SRAM），见 backend_init。 */
+ *   - 默认 0（不启用）：不分配 s_fb，backend_render_* 经 blit 直写 LCD。
+ *   - QEMU 强制为 1，s_fb 指向虚拟 RGB 面板显存。 */
 #ifdef YUI_ESP32_QEMU
 #ifndef YUI_ESP32_LCD_BUFFER
 #define YUI_ESP32_LCD_BUFFER 1
@@ -314,7 +308,6 @@ static int s_touch_x = 0, s_touch_y = 0;
 static void esp32_flush_dirty(void) {
     if (!s_has_dirty) return;
     if (!s_fb && s_fb_seg_count == 0) { dirty_reset(); return; }
-    /* 分段 framebuffer：按段边界拆分成行 run，保证每 run 内行连续可一次推。 */
     if (s_fb_seg_count > 0) {
         int y = s_dirty.y;
         int y_end = s_dirty.y + s_dirty.h;
@@ -533,6 +526,9 @@ void backend_render_text_destroy(Texture* texture) {
 #define YUI_SPI_LINE_MAX 320
 static uint16_t s_spi_line[YUI_SPI_LINE_MAX];
 static uint16_t s_spi_block[YUI_SPI_LINE_MAX * 16];
+/* Label 先 fill 再 blit 字：透明像素用这次底色填，整行一次 SPI，避免字形镂空拆事务 */
+static uint16_t s_text_backdrop_px;
+static int s_text_backdrop_valid;
 
 /* fill 纯色大块：合并为 16 行块 SPI 事务，避免每行一次 setcol/ramwr 开销 */
 static void spi_draw_block(int x, int y, int w, int h, uint16_t px)
@@ -640,6 +636,10 @@ void backend_render_fill_rect(Rect* rect, Color color) {
     if (color.a == 0 || (!s_blit_rect && !s_panel)) return;
     {
         uint16_t px = color_to_rgb565(color);
+        if (color.a == 255) {
+            s_text_backdrop_px = px;
+            s_text_backdrop_valid = 1;
+        }
         spi_draw_block(r.x, r.y, r.w, r.h, px);
     }
 #else
@@ -1180,8 +1180,44 @@ void backend_render_text_copy(Texture* texture, const Rect* srcrect, const Rect*
     }
     dirty_add(dst.x, dst.y, dst.w, dst.h);
 #elif defined(ESP_PLATFORM) && !defined(YUI_ESP32_QEMU)
-    /* 行缓冲 SPI：先合成一行 RGB565，再一次 draw_bitmap */
+    /* 有底色时按 16 行块合成 RGB565（透明处填 backdrop），一次 RAMWR 多行。
+     * 无底色则退回按不透明 run 拆行，避免把未擦除区域写成黑块。 */
     if (!s_blit_rect && !s_panel) return;
+    if (s_text_backdrop_valid && dst.w > 0 && dst.w <= YUI_SPI_LINE_MAX) {
+        int row;
+        uint16_t bg = s_text_backdrop_px;
+        for (row = 0; row < dst.h; row += 16) {
+            int hh = dst.h - row;
+            int yy, xx;
+            if (hh > 16) hh = 16;
+            for (yy = 0; yy < hh; yy++) {
+                int sy = src_r.y + ((row + yy) * src_r.h) / (dstrect->h > 0 ? dstrect->h : 1);
+                uint16_t* out = s_spi_block + (size_t)yy * dst.w;
+                if (sy < 0 || sy >= sh) {
+                    for (xx = 0; xx < dst.w; xx++) out[xx] = bg;
+                    continue;
+                }
+                for (xx = 0; xx < dst.w; xx++) {
+                    int sx = src_r.x + (xx * src_r.w) / (dstrect->w > 0 ? dstrect->w : 1);
+                    size_t si;
+                    unsigned a;
+                    if (sx < 0 || sx >= sw) {
+                        out[xx] = bg;
+                        continue;
+                    }
+                    si = ((size_t)sy * sw + sx) * 4;
+                    a = src[si + 3];
+                    if (a == 0) {
+                        out[xx] = bg;
+                    } else {
+                        out[xx] = color_to_rgb565(
+                            (Color){src[si], src[si + 1], src[si + 2], 255});
+                    }
+                }
+            }
+            panel_blit(dst.x, dst.y + row, dst.w, hh, s_spi_block);
+        }
+    } else {
     for (y = 0; y < dst.h; y++) {
         int sy = src_r.y + (y * src_r.h) / (dstrect->h > 0 ? dstrect->h : 1);
         int run_x0 = -1, run_n = 0;
@@ -1216,6 +1252,7 @@ void backend_render_text_copy(Texture* texture, const Rect* srcrect, const Rect*
             spi_draw_line_buf(dst.x + run_x0, dst.y + y, run_n, s_spi_line);
         }
         if ((y & 15) == 15) vTaskDelay(0);
+    }
     }
 #else
     /* 直接写屏：逐点绘制（无混合读回，仅按 alpha 跳过透明像素） */
@@ -1386,7 +1423,6 @@ void backend_tick(Layer* ui_root) {
     for (i = 0; i < s_update_cb_count; i++) {
         if (s_update_cb[i]) s_update_cb[i]();
     }
-    // backend_render_clear_color(30, 60, 120, 255);
     if (s_frame_count == 0) {
         /* 根层透明 + 不每帧 clear：首帧必须把 GRAM 初始化成全黑，
          * 否则 LCD 未写入区域保持出厂灰/白，产生「灰黑交替刷屏」观感。 */
@@ -1396,23 +1432,43 @@ void backend_tick(Layer* ui_root) {
     }
     if (ui_root) render_layer(ui_root);
     { int64_t t_frame = esp_timer_get_time() - t0;
+    int visit = 0, skip = 0, draw = 0, root_aref = 0;
+    unsigned root_dirty = 0;
     popup_manager_render();
     backend_render_present();
-    /* 仅绘制帧打印（静态帧 0ms 会刷屏 UART，跳过） */
-    if (t_frame > 1000) {
-        printf("YUI: frm=%lldms px=%lld\n",
-               (long long)(t_frame / 1000), s_frame_written_px);
+    render_last_stats(&visit, &skip, &draw, &root_dirty, &root_aref);
+    /* 慢帧必打；快帧前几帧 + 每 30 帧打一次，确认脏跳过是否生效 */
+    if (t_frame > 1000 || s_frame_count < 4 || (s_frame_count % 30) == 0) {
+        const char* d0 = render_last_draw_id(0);
+        printf("YUI: frm=%lldms px=%lld visit=%d skip=%d draw=%d dirty=%x aref=%d\n",
+               (long long)(t_frame / 1000), s_frame_written_px,
+               visit, skip, draw, root_dirty, root_aref);
+        if (d0) {
+            printf("YUI: draw %s %s %s %s %s %s %s %s\n",
+                   d0,
+                   render_last_draw_id(1) ? render_last_draw_id(1) : "",
+                   render_last_draw_id(2) ? render_last_draw_id(2) : "",
+                   render_last_draw_id(3) ? render_last_draw_id(3) : "",
+                   render_last_draw_id(4) ? render_last_draw_id(4) : "",
+                   render_last_draw_id(5) ? render_last_draw_id(5) : "",
+                   render_last_draw_id(6) ? render_last_draw_id(6) : "",
+                   render_last_draw_id(7) ? render_last_draw_id(7) : "");
+        }
     }
     s_frame_written_px = 0; }
 #ifdef YUI_ESP32_QEMU
     if (s_frame_count == 0) {
         /* 首帧调试：检查 framebuffer 是否被写入 */
         int i, nonzero = 0;
-        for (i = 0; i < s_fb_w * s_fb_h; i++) {
-            if (s_fb[i] != 0) { nonzero++; }
+        if (!s_fb) {
+            printf("YUI: fb debug: s_fb is NULL (w=%d h=%d)\n", s_fb_w, s_fb_h);
+        } else {
+            for (i = 0; i < s_fb_w * s_fb_h; i++) {
+                if (s_fb[i] != 0) { nonzero++; }
+            }
+            printf("YUI: fb debug: %d/%d nonzero pixels, fb[0]=0x%04x fb[100]=0x%04x\n",
+                   nonzero, s_fb_w * s_fb_h, s_fb[0], s_fb[100]);
         }
-        printf("YUI: fb debug: %d/%d nonzero pixels, fb[0]=0x%04x fb[100]=0x%04x\n",
-               nonzero, s_fb_w * s_fb_h, s_fb[0], s_fb[100]);
     }
     if ((s_frame_count % 10) == 0) printf("YUI: frame %d done\n", s_frame_count);
     if (s_frame_count == 2 && s_fb && s_fb_w > 0) {
