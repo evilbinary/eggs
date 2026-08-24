@@ -1,5 +1,6 @@
 #include "animate.h"
 #include "render.h"
+#include "layer.h"
 #include "layer_update.h"
 
 #include <math.h>

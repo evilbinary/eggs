@@ -463,7 +463,7 @@ static void render_layer_impl(Layer* layer, int force, RenderCtx* ctx) {
         if (render_dirty_mode() && ctx->rendered_once && !ctx->force_full_redraw &&
             !ctx->local_rect_active) {
             draw_cover_bg = (layer->dirty_flags & (DIRTY_RECT | DIRTY_LAYOUT | DIRTY_LAYOUT_RECT |
-                                                   DIRTY_CHILDREN | DIRTY_COLOR | DIRTY_STYLE)) ? 1 : 0;
+                                                   DIRTY_CHILDREN | DIRTY_VISIBLE | DIRTY_COLOR | DIRTY_STYLE)) ? 1 : 0;
         }
         if (draw_cover_bg && (layer->bg_gradient.enabled || layer->bg_color.a > 0 ||
             layer->shadow.enabled || layer_border_visible(&layer->border))) {
@@ -497,11 +497,14 @@ static void render_layer_impl(Layer* layer, int force, RenderCtx* ctx) {
     if (render_dirty_mode() && ctx->rendered_once && !ctx->force_full_redraw &&
         !ctx->local_rect_active) {
         skip_cover_bg = !(layer->dirty_flags & (DIRTY_RECT | DIRTY_LAYOUT | DIRTY_LAYOUT_RECT |
-                                                DIRTY_CHILDREN | DIRTY_COLOR | DIRTY_STYLE));
+                                                DIRTY_CHILDREN | DIRTY_VISIBLE | DIRTY_COLOR | DIRTY_STYLE));
     }
     int painted_over = !skip_cover_bg && layer_paints_over_children(layer);
+    /* DIRTY_VISIBLE：页面 show/hide 只标在该层和祖先上，子孙仍是 DIRTY_NONE。
+     * 持久 FB 上还是上一页像素，必须强制子树重绘，否则启动器等 keepAlive 页空白。 */
     int force_children = force || painted_over ||
-            (layer->dirty_flags & (DIRTY_RECT | DIRTY_LAYOUT | DIRTY_LAYOUT_RECT | DIRTY_CHILDREN));
+            (layer->dirty_flags & (DIRTY_RECT | DIRTY_LAYOUT | DIRTY_LAYOUT_RECT |
+                                   DIRTY_CHILDREN | DIRTY_VISIBLE));
 
     for (int i = 0; i < layer->child_count; i++) {
         if (!layer->children) {
