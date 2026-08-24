@@ -39,6 +39,6 @@ elif get_plat() in ("android", "ios"):
 else:
     add_files("backend/backend_sdl.c")
     add_cflags("-DYUI_USE_SDL_BACKEND")
-    add_deps("sdl2","sdl2-ttf","sdl2-image")
-    if get_plat() in ['raspi2']:
-        add_cflags("-D__YIYIYA__")
+    add_deps("sdl2","sdl2-ttf","sdl2-image","freetype")
+    add_includedirs('../../libfreetype/include')
+    add_cflags("-D__YIYIYA__")
