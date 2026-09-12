@@ -192,6 +192,18 @@ int event_init() {
     xwin_mouse_dirty = 0;
     xwin_key_value = 0;
     xwin_key_state = 0;
+    /* 【修复·实体按键无输入】xwin 模式原来在这里直接 return ⇒ /dev/joystick
+     * 从未打开，配合 event_read_joystick() 里的 xwin_mode 提前返回 ⇒ 实体按键
+     * （PCAL6416A 十字键/A/B/Start）永远送不到应用：infones/gnuboy 收不到任何键
+     * ⇒ 画面正常但停在静音标题画面。
+     * xwin 只决定"鼠标/键盘"走 xwin 事件路径，与手柄设备无关 ⇒ 这里照样打开它
+     * （内核驱动已就绪，启动日志：pcal6416a ok, input ff）。 */
+    event_info.joystick_fd = open("/dev/joystick", 0);
+    if (event_info.joystick_fd < 0) {
+      printf("open joystick failed\n");
+    } else {
+      printf("joystick fd %d (xwin mode)\n", event_info.joystick_fd);
+    }
     return 1;
   }
 
@@ -302,7 +314,9 @@ int event_read_key(u32* key) {
 }
 
 int event_read_joystick(u32* key) {
-  if (event_info.xwin_mode) return -1;
+  /* 【修复·实体按键无输入】原为 `if (event_info.xwin_mode) return -1;`
+   * ⇒ xwin 模式下应用永远收不到手柄按键（见 event_init 里同一处说明）。
+   * 现在 xwin 模式同样从 /dev/joystick 取键（非阻塞：无按键时驱动返回 0）。 */
   if (event_info.joystick_fd < 0) {
     return -1;
   }
