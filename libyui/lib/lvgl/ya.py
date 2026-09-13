@@ -34,6 +34,8 @@ _EXTRA_CORE = [
 target("lvgl")
 set_kind("static")
 
+add_flags()  # libc 头文件路径（musl 等），设备平台没有系统头文件可用
+
 add_files(
     'src/core/*.c',
     'src/draw/*.c',
@@ -49,9 +51,18 @@ add_cflags('-DLV_CONF_INCLUDE_SIMPLE')
 
 add_includedirs('.', './src', public=True)
 
-if get_plat() == "yiyiya":
+if get_plat() == "yiyiya" or not is_host_plat():
+    # 设备平台（raspi2/3/5、v3s 等）用 YiYiYa 原生 framebuffer 端口
     add_files('port_yiyiya/*.c')
     add_cflags('-DYUI_LVGL_PORT_YIYIYA', public=True)
+    # screen.h / event.h 在 libgui 里（ymake 的 include 相对路径是按构建目录
+    # 拼接的，这里必须用绝对路径，直接走 -I cflags 最稳妥）
+    _yiyiya_root = os.path.normpath(os.path.join(_LVGL_DIR, '..', '..', '..', '..'))
+    _libgui_dir = os.path.join(_yiyiya_root, 'eggs', 'libgui')
+    _duck_libs = os.path.join(_yiyiya_root, 'duck', 'libs', 'include')
+    _duck_dir = os.path.join(_yiyiya_root, 'duck')
+    add_cflags('-I' + _libgui_dir, '-I' + _duck_libs, '-I' + _duck_dir,
+               public=True)
 elif get_plat() in ("esp32", "stm32"):
     # 嵌入式平台用 YUI 原生后端，不依赖 LVGL，不编译任何 port
     pass
