@@ -33,7 +33,9 @@ if has_config("app"):
         'libsdl-gfx',
         'libquickjs',
         'libyui',
-        'libcjson'
+        'libcjson',
+        # armv5（无 LDREX）专用：补 libgcc 缺失的 __sync_xxx/__atomic_xxx
+        'libatomic'
 
     ]
 
@@ -52,7 +54,9 @@ if has_config("app"):
             'libsdl-gfx',
             'libquickjs',
             'libyui',
-            'libcjson'
+            'libcjson',
+            # armv5（无 LDREX）专用：补 libgcc 缺失的 __sync_xxx/__atomic_xxx
+            'libatomic'
         ]
     
 
