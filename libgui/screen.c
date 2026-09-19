@@ -773,6 +773,24 @@ void screen_init_with_mode(screen_mode_t mode) {
           printf("screen init xwin %dx%d fb=%p (buffer, cached render)\n",
                  gscreen.width, gscreen.height, (void*)fb);
         } else {
+#ifdef NV12
+          /* 【照旧模型：显示链路是 NV12 ⇒ 应用画 RGB 的画布必须与显示缓冲分离】
+           * 旧代码（FB 模式 + DB_BUFFER）就是这样：应用画 RGB 到独立画布，
+           * rgb2nv12() 转成 NV12 写进显示缓冲。XWIN 的 DIRECT 直绘会破坏这个模型
+           * （应用直写显示缓冲 ⇒ 转换结果被下一帧 RGB 覆盖/互相踩）。
+           * 因此这里保留 malloc 画布给应用画，LCD FB 只在 flush 时被写入 NV12。 */
+          gscreen.fb.frambuffer = fb; /* LCD FB：flush 时写 NV12 的目标 */
+          gscreen.buffer_length = gscreen.width * gscreen.height * 2; /* 16bpp 画布 */
+          if (gscreen.buffer == NULL || gscreen.buffer == (u32*)fb) {
+            gscreen.buffer = malloc(gscreen.buffer_length);
+            if (gscreen.buffer != NULL) {
+              memset(gscreen.buffer, 0, gscreen.buffer_length);
+            }
+          }
+          gscreen.pbuffer = gscreen.buffer;
+          printf("screen init xwin canvas %dx%d fb=%p (NV12 pipeline)\n",
+                 gscreen.width, gscreen.height, (void*)fb);
+#else
           /* DIRECT 模式：buffer 直接指向 LCD FB（零拷贝）。
            * 适用于原子渲染的 app（infones, gnuboy 等）。 */
           if (gscreen.buffer != NULL) {
@@ -783,6 +801,7 @@ void screen_init_with_mode(screen_mode_t mode) {
           gscreen.fb.frambuffer = fb;
           printf("screen init xwin DIRECT %dx%d fb=%p\n",
                  gscreen.width, gscreen.height, (void*)gscreen.buffer);
+#endif
         }
       } else {
         printf("screen init xwin mode %dx%d (fb=%p addr=%x, blit path)\n",
@@ -887,6 +906,39 @@ void screen_set_size(u32 width, u32 height) {
 
 screen_info_t *screen_info() { return &gscreen; }
 
+#ifdef NV12
+/* 【画布(16bpp RGB555) → NV12 → LCD FB】照旧模型：应用画 RGB 画布，这里转成
+ * YUV420SP 写进显示缓冲。面板倒装（原 libgui 注释里的 ROTATE_180 = 上下+左右 = 180°）
+ * 在取源像素时顺带完成。色彩一律用 rgb2y()/rgb2uv()（与旧管线逐字节一致）。 */
+static void screen_canvas_to_nv12(u8 *dst, const u16 *src, int w, int h) {
+  int x, y;
+  u8 *yplane = dst;
+  u8 *uvplane = dst + (u32)w * (u32)h;
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      int sx = x;
+      int sy = y;
+      u8 px[3];
+      u16 c;
+      /* miyoo 面板倒装 = 旋转 180°（上下 + 左右） */
+      sx = w - 1 - x;
+      sy = h - 1 - y;
+      c = src[(u32)sy * w + sx];
+      px[0] = (u8)((((u32)c & 0x1f) << 3) | (((u32)c & 0x1f) >> 2)); /* B */
+      px[1] = (u8)(((((u32)c >> 5) & 0x1f) << 3) |
+                   ((((u32)c >> 5) & 0x1f) >> 2));                  /* G */
+      px[2] = (u8)(((((u32)c >> 10) & 0x1f) << 3) |
+                   ((((u32)c >> 10) & 0x1f) >> 2));                 /* R */
+      yplane[(u32)y * w + x] = (u8)rgb2y(px);
+      if ((y & 1) == 0 && (x & 1) == 0) {
+        u32 o = (u32)(y / 2) * (u32)w + (u32)x;
+        rgb2uv(px, &uvplane[o]); /* 先 U 后 V（与 rgb2nv12 同序） */
+      }
+    }
+  }
+}
+#endif
+
 void screen_flush() {
   u32 t0, t1;
 
@@ -902,6 +954,23 @@ void screen_flush() {
       g_stats_inited = 1;
       printf("gui: stats fill/blit/update/render (ms sum per 60 frames)\n");
     }
+#ifdef NV12
+    /* 【照旧模型】画布(RGB) → NV12 → LCD FB：画布与显示缓冲是两块
+     * （见 screen_init_with_mode 的 NV12 分支），这里做唯一一次转换。 */
+    if (gscreen.fb.frambuffer != NULL && gscreen.buffer != NULL &&
+        (u16 *)gscreen.buffer != (u16 *)gscreen.fb.frambuffer) {
+      t0 = screen_now_ms();
+      screen_canvas_to_nv12((u8 *)gscreen.fb.frambuffer,
+                            (const u16 *)gscreen.buffer, gscreen.width,
+                            gscreen.height);
+      t1 = screen_now_ms();
+      g_acc_blit_ms += t1 - t0;
+      xwin_update(gscreen.xwin_handle);
+      xwin_render();
+      screen_stats_frame_done();
+      return;
+    }
+#endif
     /* DIRECT: buffer=LCD FB, 跳过拷贝; BUFFER: cached buffer 一次性 blit */
     t0 = screen_now_ms();
     if (gscreen.buffer != NULL &&
