@@ -780,7 +780,11 @@ void screen_init_with_mode(screen_mode_t mode) {
            * （应用直写显示缓冲 ⇒ 转换结果被下一帧 RGB 覆盖/互相踩）。
            * 因此这里保留 malloc 画布给应用画，LCD FB 只在 flush 时被写入 NV12。 */
           gscreen.fb.frambuffer = fb; /* LCD FB：flush 时写 NV12 的目标 */
-          gscreen.buffer_length = gscreen.width * gscreen.height * 2; /* 16bpp 画布 */
+          /* 【画布深度必须与向应用申报的 bpp 一致 ✗✓】
+           * 原来这里写死 16bpp（RGB555）✗，而 gscreen.bpp（screen_read_fb_info 申报给
+           * 应用的）是 32 ✗ ⇒ 应用按 32bpp 画（DOOM/infones 都是 ✓）⇒ 每像素 4 字节
+           * 挤进 2 字节的格子 ⇒ 颜色全乱/越界 ✓✓。改成与 bpp 一致 ✓，转换器按深度选 ✓。 */
+          gscreen.buffer_length = gscreen.width * gscreen.height * 4; /* 32bpp 画布 ✓ */
           if (gscreen.buffer == NULL || gscreen.buffer == (u32*)fb) {
             gscreen.buffer = malloc(gscreen.buffer_length);
             if (gscreen.buffer != NULL) {
@@ -937,6 +941,34 @@ static void screen_canvas_to_nv12(u8 *dst, const u16 *src, int w, int h) {
     }
   }
 }
+#ifdef NV12
+/* 【画布(32bpp ARGB = 0xAARRGGBB) → NV12 → LCD FB】
+ * 与上面 16bpp 版同样做面板 180° 旋转；只是像素源改成 32bpp（应用按申报的 bpp=32 画 ✓）。
+ * 为什么要它：XWIN_BUFFER 模式下应用画布是 32bpp ✗，而之前 flush 直接把它拷进显示缓冲 ✗
+ * ⇒ GPU/面板申报的是 NV12 ✓ ⇒ 颜色全乱（实测"整屏发黄" ✓✓）。 */
+static void screen_canvas32_to_nv12(u8 *dst, const u32 *src, int w, int h) {
+  int x, y;
+  u8 *yplane = dst;
+  u8 *uvplane = dst + (u32)w * (u32)h;
+  for (y = 0; y < h; y++) {
+    for (x = 0; x < w; x++) {
+      u8 px[3];
+      u32 c;
+      /* miyoo 面板倒装 = 旋转 180°（上下 + 左右） */
+      c = src[(u32)(h - 1 - y) * w + (u32)(w - 1 - x)];
+      px[0] = (u8)(c & 0xff);         /* B */
+      px[1] = (u8)((c >> 8) & 0xff);  /* G */
+      px[2] = (u8)((c >> 16) & 0xff); /* R */
+      yplane[(u32)y * w + x] = (u8)rgb2y(px);
+      if ((y & 1) == 0 && (x & 1) == 0) {
+        u32 o = (u32)(y / 2) * (u32)w + (u32)x;
+        rgb2uv(px, &uvplane[o]); /* 先 U 后 V（与 rgb2nv12 同序） */
+      }
+    }
+  }
+}
+#endif
+
 #endif
 
 void screen_flush() {
@@ -960,9 +992,34 @@ void screen_flush() {
     if (gscreen.fb.frambuffer != NULL && gscreen.buffer != NULL &&
         (u16 *)gscreen.buffer != (u16 *)gscreen.fb.frambuffer) {
       t0 = screen_now_ms();
-      screen_canvas_to_nv12((u8 *)gscreen.fb.frambuffer,
-                            (const u16 *)gscreen.buffer, gscreen.width,
-                            gscreen.height);
+      /* 【按画布真实深度选转换器 ✗✓】不能看 gscreen.bpp ✗：
+       * 内核 GPU 驱动申报的是 BPP 16（SSD202D 的 NV12 链路 ✓），
+       * 而 libgui 给应用的画布是【32bpp】（buffer_length = w*h*4 ✓，
+       * SDL 后端注释也写明行距 width*4 ✓）⇒ 若按申报值走 16bpp 分支 ✗，
+       * 就会把 32bpp 画布当 16bpp 读 ⇒ 颜色全乱（"doom 还是黄的" ✓✓）。
+       * 这里直接用【画布字节/像素】判断 ✓，永远与画布一致 ✓。 */
+      u32 cpp = 0;
+      if (gscreen.width > 0 && gscreen.height > 0 && gscreen.buffer_length > 0) {
+        cpp = (u32)gscreen.buffer_length /
+              ((u32)gscreen.width * (u32)gscreen.height);
+      }
+      {
+        static int dbg_once = 0;
+        if (!dbg_once) {
+          dbg_once = 1;
+          printf("screen flush: canvas %u byte/px, fb bpp=%d -> NV12 %s\n", cpp,
+                 gscreen.bpp, cpp >= 4 ? "(32bpp)" : "(16bpp)");
+        }
+      }
+      if (cpp >= 4) {
+        screen_canvas32_to_nv12((u8 *)gscreen.fb.frambuffer,
+                                (const u32 *)gscreen.buffer, gscreen.width,
+                                gscreen.height);
+      } else {
+        screen_canvas_to_nv12((u8 *)gscreen.fb.frambuffer,
+                              (const u16 *)gscreen.buffer, gscreen.width,
+                              gscreen.height);
+      }
       t1 = screen_now_ms();
       g_acc_blit_ms += t1 - t0;
       xwin_update(gscreen.xwin_handle);
