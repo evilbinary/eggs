@@ -206,10 +206,19 @@ typedef void (*SDL_KernelMemoryBarrierFunc)();
 #define SDL_MemoryBarrierRelease()   __cpu_membarrier()
 #define SDL_MemoryBarrierAcquire()   __cpu_membarrier()
 #else
-#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_7S__) || defined(__ARM_ARCH_8A__)
+#if defined(__ARM_ARCH_5TE__) || defined(__ARM_ARCH_5__)
+/* 【YiYiYa/裸机 ARMv5】ARM926 既没有 DMB 指令，用户态也不能访问 CP15：
+ * 原定义 `mcr p15, 0, %0, c7, c10, 5` 是 ARM Linux 用户态靠 kuser 辅助页
+ * （0xffff0fa0）才成立的写法，裸机下会触发 UNDEF（实测 ymain 崩在
+ * SDL_AtomicUnlock 前的这条屏障，cpsr=user、pc 指向该 mcr）。
+ * 单核场景下编译器屏障即足够；__sync_synchronize() 在 armv5 由
+ * eggs/libatomic 提供（非 armv5 架构由 GCC 内联成真屏障）。 */
+#define SDL_MemoryBarrierRelease()   __sync_synchronize()
+#define SDL_MemoryBarrierAcquire()   __sync_synchronize()
+#elif defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__ARM_ARCH_7EM__) || defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_7S__) || defined(__ARM_ARCH_8A__)
 #define SDL_MemoryBarrierRelease()   __asm__ __volatile__ ("dmb ish" : : : "memory")
 #define SDL_MemoryBarrierAcquire()   __asm__ __volatile__ ("dmb ish" : : : "memory")
-#elif defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6T2__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6ZK__) || defined(__ARM_ARCH_5TE__)
+#elif defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6T2__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6ZK__)
 #ifdef __thumb__
 /* The mcr instruction isn't available in thumb mode, use real functions */
 #define SDL_MEMORY_BARRIER_USES_FUNCTION
