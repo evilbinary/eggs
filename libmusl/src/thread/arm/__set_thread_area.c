@@ -24,16 +24,31 @@ extern hidden const unsigned char
 
 extern hidden uintptr_t __a_barrier_ptr, __a_cas_ptr, __a_gettp_ptr;
 
-static inline int cpu_cmpxchg(volatile void* ptr, int old_value, int new_value) {
-//   volatile asm(
-// 	".word 0xf57ff05f\n" 
-// 	".word 0xe1923f9f\n" 
-// 	".word 0xe0530000\n" 
-// 	".word 0x01820f91\n" 
-// 	".word 0xf57ff05f\n" 
-// 	".word 0xe12fff1e\n"
-//   );
-	return 0;
+/* 【修复】ARMv5（ARM926）没有 LDREX/STREX，用户态本无法实现 CAS（上游 musl
+ * 靠内核 kuser helper 0xffff0fc0）。本 fork 之前把它换成了 "return 0" 的桩：
+ * 而 a_cas 的契约是"返回 0 = 比较交换成功且内存已写入" —— 于是 ARMv5 上
+ * musl 的全部原子操作（mallocng 维护 avail_mask/freed_mask、锁、计数）都成了
+ * 无声 no-op，堆元数据必然损坏；raspi2(armv7) 正常是因为这段
+ * #if __ARM_ARCH < 7 根本不参与编译。
+ * 这里用 swp（原子读-写，ARMv2+ 即有）实现真 CAS：
+ *   成功：swp 换入新值，返回 0；
+ *   失败：swp 把旧值换回去（a_cas 包装层会自己重读 *p 并返回实际值，
+ *         所以必须真正还原内存，否则包装层会在 for(;;) 里死转）。
+ * 局限：swp 原子，但"比较+还原"两步之间若被抢占仍可能丢更新 —— 纯 UP 且
+ * 用户态互斥依赖 musl 自身锁时安全；将来若上抢占式多线程用户程序，应改成
+ * 内核态 CAS（trap 进内核关中断完成）。 */
+__attribute__((naked, noinline)) static int cpu_cmpxchg(volatile void* ptr, int old_value, int new_value) {
+	/* 调用方（atomic_arch.h 的 a_cas）约定：r0=old_value, r1=new_value,
+	 * r2=ptr；只允许破坏 r0/r3/ip/lr/flags，r1/r2 必须原样保留。 */
+	__asm__ __volatile__(
+		"swp   r3, r1, [r2]   \n" /* r3 = 旧值; [r2] = 新值   */
+		"cmp   r3, r0         \n" /* 旧值 == 期望值 ?         */
+		"moveq r0, #0         \n" /* 成功                     */
+		"beq   1f             \n"
+		"swp   ip, r3, [r2]   \n" /* 失败：把旧值换回去       */
+		"mov   r0, #1         \n"
+		"1: bx  lr            \n"
+	);
 }
 
 static inline int barrier(){
