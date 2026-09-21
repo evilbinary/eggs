@@ -9,6 +9,8 @@ set_kind("static")
 
 add_packages(get_config('default_libc'))
 add_deps("gui")
+if has_config('app'):
+    add_deps("atomic")
 
 add_files(
     'src/*.c',
