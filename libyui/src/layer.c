@@ -9,6 +9,7 @@
 #include "backend.h"
 #include "render.h"
 #include "component_registry.h"
+#include "focus.h"
 #include "log.h"
 #include "perf/perf.h"
 
@@ -499,8 +500,11 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
     } else if (styleFont && styleFont->valuestring) {
       strncpy(layer->font->path, styleFont->valuestring, YUI_MAX_PATH - 1);
       layer->font->path[YUI_MAX_PATH - 1] = '\0';
+    } else if (parent && parent->font && parent->font->path[0]) {
+      strncpy(layer->font->path, parent->font->path, YUI_MAX_PATH - 1);
+      layer->font->path[YUI_MAX_PATH - 1] = '\0';
     } else {
-      strcpy(layer->font->path, "Roboto-Regular.ttf");  // 默认字体
+      strcpy(layer->font->path, "Roboto-Regular.ttf");
     }
     
     // 设置字体大小（优先级：直接属性 > style > 默认）
@@ -760,13 +764,8 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
     layer->layout_manager->type = LAYOUT_VERTICAL;
   }
 
-  // 默认背景颜色（含不透明，否则 render 因 a==0 跳过填色）
-  if (layer->bg_color.a == 0) {
-    layer->bg_color.r = 0xF5;
-    layer->bg_color.g = 0xF5;
-    layer->bg_color.b = 0xF5;
-    layer->bg_color.a = 0xFF;
-  }
+  /* 默认透明：不填 #F5F5F5。底色由 JSON/主题显式 bgColor 决定，
+   * 子层叠在父层上；脏刷新时由不透明祖先擦除。 */
   // 解析样式
   if (style) {
     if (cJSON_HasObjectItem(style, "color")) {
@@ -964,6 +963,55 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
         layer->event->resize = (void (*)(Layer*, const ResizeEvent*))handler;
       }
     }
+    // 解析焦点事件
+    if (cJSON_HasObjectItem(events, "onFocus")) {
+      if (!layer->event) {
+        layer->event = malloc(sizeof(Event));
+        memset(layer->event, 0, sizeof(Event));
+      }
+      const char* handler_id =
+          cJSON_GetObjectItem(events, "onFocus")->valuestring;
+      const char* lookup_name = handler_id;
+      if (handler_id[0] == '@') {
+        lookup_name = handler_id + 1;
+      }
+      strncpy(layer->event->focus_name, lookup_name,
+              sizeof(layer->event->focus_name) - 1);
+      layer->event->focus_name[sizeof(layer->event->focus_name) - 1] = '\0';
+      layer->event->focus = find_event_by_name(lookup_name);
+    }
+    if (cJSON_HasObjectItem(events, "onBlur")) {
+      if (!layer->event) {
+        layer->event = malloc(sizeof(Event));
+        memset(layer->event, 0, sizeof(Event));
+      }
+      const char* handler_id =
+          cJSON_GetObjectItem(events, "onBlur")->valuestring;
+      const char* lookup_name = handler_id;
+      if (handler_id[0] == '@') {
+        lookup_name = handler_id + 1;
+      }
+      strncpy(layer->event->blur_name, lookup_name,
+              sizeof(layer->event->blur_name) - 1);
+      layer->event->blur_name[sizeof(layer->event->blur_name) - 1] = '\0';
+      layer->event->blur = find_event_by_name(lookup_name);
+    }
+    if (cJSON_HasObjectItem(events, "onKey")) {
+      if (!layer->event) {
+        layer->event = malloc(sizeof(Event));
+        memset(layer->event, 0, sizeof(Event));
+      }
+      const char* handler_id =
+          cJSON_GetObjectItem(events, "onKey")->valuestring;
+      const char* lookup_name = handler_id;
+      if (handler_id[0] == '@') {
+        lookup_name = handler_id + 1;
+      }
+      strncpy(layer->event->key_name, lookup_name,
+              sizeof(layer->event->key_name) - 1);
+      layer->event->key_name[sizeof(layer->event->key_name) - 1] = '\0';
+      layer->event->key = find_event_by_name(lookup_name);
+    }
   }
 
   // 解析动画属性配置
@@ -1106,6 +1154,19 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
 
   yui_component_instantiate(layer, json_obj, parent, &has_custom_children);
 
+  /* 焦点属性在组件实例化之后应用：组件默认可能把自己设为可聚焦，
+     显式 JSON focusable/focusChildren 应能覆盖该默认值。 */
+  {
+    cJSON* focusable = cJSON_GetObjectItem(json_obj, "focusable");
+    if (focusable) {
+      layer->focusable = cJSON_IsTrue(focusable) ? 1 : 0;
+    }
+    cJSON* focus_children = cJSON_GetObjectItem(json_obj, "focusChildren");
+    if (focus_children) {
+      layer->focus_children = cJSON_IsTrue(focus_children) ? 1 : 0;
+    }
+  }
+
   const YuiComponentOps* type_ops = yui_type_get_ops(layer->type);
   if (type_ops && (type_ops->flags & YUI_COMP_SKIP_CHILDREN)) {
     skip_children = 1;
@@ -1147,10 +1208,8 @@ Layer* parse_layer_from_json(Layer* layer,cJSON* json_obj, Layer* parent) {
 void destroy_layer(Layer* layer) {
     if (!layer) return;
 
-    /* 若销毁的是当前聚焦层，清除全局 focused_layer，避免悬空指针 */
-    if (focused_layer == layer) {
-        focused_layer = NULL;
-    }
+    /* 若销毁的是当前聚焦层，清除焦点引用，避免悬空指针 */
+    focus_on_layer_destroy(layer);
 
     layer_lifecycle_before_destroy(layer);
     

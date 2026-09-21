@@ -176,6 +176,8 @@ static int theme_style_all_scalar(cJSON* style) {
     return 1;
 }
 
+static int theme_selector_has_state(const char* selector);
+
 ThemeRule* theme_rule_create_from_json(cJSON* json) {
     if (!json || !cJSON_IsObject(json)) {
         return NULL;
@@ -198,9 +200,13 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
     const char* selector = selector_obj->valuestring;
     strncpy(rule->selector, selector, sizeof(rule->selector) - 1);
     rule->selector[sizeof(rule->selector) - 1] = '\0';
-    
+    /* CSS 风格状态伪类统一成 .state，复用复合选择器解析 */
+    for (char* c = rule->selector; *c; c++) {
+        if (*c == ':') *c = '.';
+    }
+
     // 解析选择器类型
-    rule->selector_type = theme_parse_selector_type(selector);
+    rule->selector_type = theme_parse_selector_type(rule->selector);
     
     // 解析样式属性（兼容 style 与 properties 两种字段名）
     cJSON* style_obj = cJSON_GetObjectItem(json, "style");
@@ -247,6 +253,7 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
     if (bg_color_obj && cJSON_IsString(bg_color_obj)) {
         printf("[Theme] Parsing bgColor: %s\n", bg_color_obj->valuestring);
         parse_color(bg_color_obj->valuestring, &rule->bg_color);
+        rule->has_bg_color = 1;
         printf("[Theme] Parsed bgColor RGBA: %d, %d, %d, %d\n", rule->bg_color.r, rule->bg_color.g, rule->bg_color.b, rule->bg_color.a);
     }
     
@@ -338,7 +345,7 @@ ThemeRule* theme_rule_create_from_json(cJSON* json) {
          * 为标量字段的键(颜色/字号/边距等)无需保留:dark/light 主题 191 个
          * style 键全部是标量,深拷贝 68 份纯属浪费,置 NULL 省 ~25KB。 */
         rule->style_json = NULL;
-        if (!theme_style_all_scalar(style_obj)) {
+        if (!theme_style_all_scalar(style_obj) || theme_selector_has_state(rule->selector)) {
             rule->style_json = cJSON_Duplicate(style_obj, 1);
         }
     }
@@ -398,10 +405,22 @@ static int theme_variant_contains(const char* variant_str, const char* modifier)
     return 0;
 }
 
-static int theme_variant_contains_all(const char* variant_str, const char* modifiers) {
+/* 状态修饰符 → LayerState 位。返回 0 表示不是状态修饰符（按 variant 处理）。 */
+static int theme_state_bit(const char* modifier, unsigned int* bit) {
+    if (!modifier || !bit) return 0;
+    if (strcmp(modifier, "focused") == 0) { *bit = LAYER_STATE_FOCUSED; return 1; }
+    if (strcmp(modifier, "hover") == 0) { *bit = LAYER_STATE_HOVER; return 1; }
+    if (strcmp(modifier, "pressed") == 0) { *bit = LAYER_STATE_PRESSED; return 1; }
+    if (strcmp(modifier, "disabled") == 0) { *bit = LAYER_STATE_DISABLED; return 1; }
+    if (strcmp(modifier, "active") == 0) { *bit = LAYER_STATE_ACTIVE; return 1; }
+    return 0;
+}
+
+/* 复合选择器的修饰符：状态词匹配 layer->state，其余匹配 layer->variant */
+static int theme_modifiers_match(const char* modifiers, const Layer* layer) {
     const char* p;
 
-    if (!variant_str || variant_str[0] == '\0' || !modifiers || modifiers[0] != '.') {
+    if (!layer || !modifiers || modifiers[0] != '.') {
         return 0;
     }
 
@@ -413,12 +432,20 @@ static int theme_variant_contains_all(const char* variant_str, const char* modif
     while (*p) {
         char modifier[32];
         int i = 0;
+        unsigned int bit = 0;
 
         while (*p && *p != '.' && i < (int)sizeof(modifier) - 1) {
             modifier[i++] = *p++;
         }
         modifier[i] = '\0';
-        if (i == 0 || !theme_variant_contains(variant_str, modifier)) {
+        if (i == 0) {
+            return 0;
+        }
+        if (theme_state_bit(modifier, &bit)) {
+            if (!(layer->state & bit)) {
+                return 0;
+            }
+        } else if (!theme_variant_contains(layer->variant, modifier)) {
             return 0;
         }
         if (*p == '.') {
@@ -430,13 +457,13 @@ static int theme_variant_contains_all(const char* variant_str, const char* modif
 }
 
 static int theme_match_compound_selector(const char* selector, const char* id,
-                                         const char* type, const char* variant) {
+                                         const char* type, const Layer* layer) {
     const char* dot = strchr(selector, THEME_COMPOUND_MARKER[0]);
     if (!dot || dot == selector) {
         return 0;
     }
 
-    if (!theme_variant_contains_all(variant, dot)) {
+    if (!theme_modifiers_match(dot, layer)) {
         return 0;
     }
 
@@ -454,6 +481,27 @@ static int theme_match_compound_selector(const char* selector, const char* id,
     }
 }
 
+/* 选择器是否含状态修饰符（决定是否保留 style_json 供组件 set_style 同步状态色） */
+static int theme_selector_has_state(const char* selector) {
+    const char* p;
+    if (!selector) return 0;
+    p = selector;
+    while ((p = strchr(p, '.')) != NULL) {
+        char modifier[32];
+        int i = 0;
+        unsigned int bit = 0;
+        p++;
+        while (*p && *p != '.' && i < (int)sizeof(modifier) - 1) {
+            modifier[i++] = *p++;
+        }
+        modifier[i] = '\0';
+        if (theme_state_bit(modifier, &bit)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int theme_rule_matches(ThemeRule* rule, Layer* layer, const char* id, const char* type) {
     if (!rule || !layer || !id || !type) {
         return 0;
@@ -463,7 +511,7 @@ static int theme_rule_matches(ThemeRule* rule, Layer* layer, const char* id, con
         const char* selector_id = rule->selector + 1;
         const char* dot = strchr(selector_id, '.');
         if (dot) {
-            return theme_match_compound_selector(rule->selector, id, type, layer->variant);
+            return theme_match_compound_selector(rule->selector, id, type, layer);
         }
         return strcmp(selector_id, id) == 0;
     }
@@ -473,7 +521,7 @@ static int theme_rule_matches(ThemeRule* rule, Layer* layer, const char* id, con
     }
 
     if (rule->selector_type == THEME_SELECTOR_COMPOUND) {
-        return theme_match_compound_selector(rule->selector, id, type, layer->variant);
+        return theme_match_compound_selector(rule->selector, id, type, layer);
     }
 
     return 0;
@@ -614,18 +662,11 @@ void theme_merge_style(ThemeRule* rule, Layer* layer) {
         mark_layer_dirty(layer, DIRTY_COLOR);
     }
     
-    // 背景颜色（主题总是覆盖图层背景色）
-    {
-        printf("[Theme] Applying bg_color to layer id='%s' (rule bg_color RGBA=%d,%d,%d,%d, old bg_color RGBA=%d,%d,%d,%d)\n", 
-               layer->id, rule->bg_color.r, rule->bg_color.g, rule->bg_color.b, rule->bg_color.a,
-               layer->bg_color.r, layer->bg_color.g, layer->bg_color.b, layer->bg_color.a);
+    // 背景：仅当规则写了 bgColor 才覆盖。未写则保持图层原值（默认 a=0 不绘制）。
+    // transparent 也算写了：has_bg_color=1 且 a=0，明确不铺底。
+    if (rule->has_bg_color) {
         layer->bg_color = rule->bg_color;
-        printf("[Theme] Layer bg_color set to RGBA=%d,%d,%d,%d\n", 
-               layer->bg_color.r, layer->bg_color.g, layer->bg_color.b, layer->bg_color.a);
-        
-        // 标记图层需要重绘
         mark_layer_dirty(layer, DIRTY_COLOR);
-        printf("[Theme] Layer marked dirty for redraw: id='%s'\n", layer->id);
     }
     
     // 圆角半径
