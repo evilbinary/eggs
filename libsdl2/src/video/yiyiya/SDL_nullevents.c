@@ -49,6 +49,25 @@ DUMMY_TranslateMouseButton(Uint32 button)
 static SDL_Scancode
 DUMMY_KeyToScancode(Uint32 key)
 {
+    /* 先判特殊键：xwin 给方向键等的 keycode（0x47-0x53 等）与 ASCII 大写
+     * 字母编码重叠，若不先判会被下面的 A-Z 分支吃掉（Up→'H'）。 */
+    switch (key) {
+    case 0x48: return SDL_SCANCODE_UP;
+    case 0x50: return SDL_SCANCODE_DOWN;
+    case 0x4B: return SDL_SCANCODE_LEFT;
+    case 0x4D: return SDL_SCANCODE_RIGHT;
+    case 0x47: return SDL_SCANCODE_HOME;
+    case 0x4F: return SDL_SCANCODE_END;
+    case 0x49: return SDL_SCANCODE_PAGEUP;
+    case 0x51: return SDL_SCANCODE_PAGEDOWN;
+    case 0x52: return SDL_SCANCODE_INSERT;
+    case 0x53: return SDL_SCANCODE_DELETE;
+    case 0x10: return SDL_SCANCODE_LSHIFT;
+    case 0x11: return SDL_SCANCODE_LCTRL;
+    case 0x12: return SDL_SCANCODE_LALT;
+    case 0x14: return SDL_SCANCODE_CAPSLOCK;
+    default: break;
+    }
     if (key >= 'a' && key <= 'z') {
         return (SDL_Scancode)(SDL_SCANCODE_A + (key - 'a'));
     }
