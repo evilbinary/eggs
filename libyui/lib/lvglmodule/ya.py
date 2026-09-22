@@ -2,7 +2,7 @@
 
 target("lvglmodule")
 set_kind("static")
-add_deps("lvgl", "lvgl_extra", "cjson")
+add_deps("yui-lvgl", "yui-lvgl_extra", "cjson")
 add_includedirs("../src", "../src/components", "../cjson", "../lvgl", "../lvgl/src", public=True)
 add_cflags("-DLV_CONF_INCLUDE_SIMPLE")
 if get_plat() in ("esp32", "stm32"):

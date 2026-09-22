@@ -31,7 +31,7 @@ _EXTRA_CORE = [
     'src/extra/themes/mono/lv_theme_mono.c',
 ]
 
-target("lvgl")
+target("yui-lvgl")
 set_kind("static")
 
 add_flags()  # libc 头文件路径（musl 等），设备平台没有系统头文件可用
@@ -73,10 +73,10 @@ else:
     add_files('port_sdl/*.c')
     add_cflags('-DYUI_LVGL_PORT_SDL', public=True)
 
-# 兼容旧依赖名：extra widgets 已并入 lvgl 单库，这里只保留空壳让
-# add_deps("lvgl_extra") 仍能解析到 lvgl。
-target("lvgl_extra")
+# 兼容旧依赖名：extra widgets 已并入 yui-lvgl 单库，这里只保留空壳让
+# add_deps("yui-lvgl_extra") 仍能解析到 yui-lvgl。
+target("yui-lvgl_extra")
 set_kind("static")
-add_deps("lvgl")
+add_deps("yui-lvgl")
 add_cflags('-DLV_CONF_INCLUDE_SIMPLE')
 add_includedirs('.', './src', public=True)

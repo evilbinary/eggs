@@ -21,7 +21,7 @@ if has_config("cpp-apps"):
 if has_config("app"):
     c_libs=[
         'libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
-        'liblvgl', 'liblvgl-8.0.0', 'libuuid',
+        'liblvgl-8.0.0', 'libuuid',
         'liblvqrcode', 'liblz4', 'libfreetype',
         'libwebp', 'libsdl2', 'libsdl2-ttf',
         'libsdl2-image', 'liblua',
@@ -42,7 +42,7 @@ if has_config("app"):
     if default_libc=='c':
         c_libs=[
             'libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
-            'liblvgl', 'liblvgl-8.0.0', 'libuuid',
+            'liblvgl-8.0.0', 'libuuid',
             'liblvqrcode', 'liblz4', 'libfreetype',
             'libwebp', 'libsdl2', 'libsdl2-ttf',
             'libsdl2-image', 'liblua',
