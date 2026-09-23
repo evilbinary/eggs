@@ -73,17 +73,14 @@ int __set_thread_area(void *p)
 			break;
 		}
 	} else {
-		// int ver = *(int *)0xffff0ffc;
-		// __a_gettp_ptr = __a_gettp_kuser;
-		// __a_cas_ptr = __a_cas_kuser;
-		// __a_barrier_ptr = __a_barrier_kuser;
-		// if (ver < 2) a_crash();
-		// if (ver < 3) __a_barrier_ptr = __a_barrier_oldkuser;
-
-		__a_gettp_ptr=(int)__get_tp;
-		__a_cas_ptr= (int)cpu_cmpxchg;
-		__a_barrier_ptr=(int)barrier;
-		
+		/* ARMv5：走内核 kuser helper（由 duck/modules/musl 在 0xffff0000
+		 * 提供自包含指令页）。ver 读自 0xffff0ffc。 */
+		int ver = *(int *)0xffff0ffc;
+		__a_gettp_ptr = __a_gettp_kuser;
+		__a_cas_ptr = __a_cas_kuser;
+		__a_barrier_ptr = __a_barrier_kuser;
+		if (ver < 2) a_crash();
+		if (ver < 3) __a_barrier_ptr = __a_barrier_oldkuser;
 	}
 #endif
 	return __syscall(0xf0005, p);
