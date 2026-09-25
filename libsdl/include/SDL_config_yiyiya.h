@@ -61,8 +61,8 @@ typedef unsigned _Addr uintptr_t;
 /* Enable the stub cdrom driver (src/cdrom/dummy/\*.c) */
 #define SDL_CDROM_DISABLED	1
 
-/* Enable the stub joystick driver (src/joystick/dummy/\*.c) */
-#define SDL_JOYSTICK_DISABLED	1
+/* Enable the YiYiYa GPIO joystick driver (src/joystick/yiyiya/\*.c) */
+// #define SDL_JOYSTICK_DISABLED	1
 
 /* Enable the stub shared object loader (src/loadso/dummy/\*.c) */
 #define SDL_LOADSO_DISABLED	1
@@ -83,7 +83,7 @@ typedef unsigned _Addr uintptr_t;
 
 #define SDL_TIMER_DUMMY 1
 
-#define SDL_JOYSTICK_DUMMY	1
+#define SDL_JOYSTICK_YIYIYA	1
 
 #define HAVE_STDIO_H 1
 

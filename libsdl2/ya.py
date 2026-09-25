@@ -31,6 +31,7 @@ add_files(
     # 'src/hidapi/android/*.cpp',
     'src/joystick/*.c',
     'src/joystick/dummy/*.c',
+    'src/joystick/yiyiya/*.c',
     # 'src/joystick/hidapi/*.c',
     # 'src/joystick/virtual/*.c',
     # 'src/loadso/dlopen/*.c',

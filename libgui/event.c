@@ -198,12 +198,11 @@ int event_init() {
      * ⇒ 画面正常但停在静音标题画面。
      * xwin 只决定"鼠标/键盘"走 xwin 事件路径，与手柄设备无关 ⇒ 这里照样打开它
      * （内核驱动已就绪，启动日志：pcal6416a ok, input ff）。 */
-    event_info.joystick_fd = open("/dev/joystick", 0);
-    if (event_info.joystick_fd < 0) {
-      printf("open joystick failed\n");
-    } else {
-      printf("joystick fd %d (xwin mode)\n", event_info.joystick_fd);
-    }
+    /* 【xwin 模式下不要抢开 /dev/joystick】xwin 的应用现在都走 SDL，手柄由
+     * SDL 的 joystick 后端（SDL_JOYSTICK_YIYIYA）独占打开；内核设备 open 是
+     * 独占的，这里再开会把 SDL 的 open 顶掉（实测 SDL_NumJoysticks()=0、
+     * LibGUI 的 "joystick fd 3"）。需要手柄的非 SDL 程序请自行打开。 */
+    event_info.joystick_fd = -1;
     return 1;
   }
 

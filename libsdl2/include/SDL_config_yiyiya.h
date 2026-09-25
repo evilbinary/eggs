@@ -71,9 +71,8 @@ typedef unsigned long uintptr_t;
 // #define SDL_AUDIO_DRIVER_DUMMY  1
 #define SDL_AUDIO_DRIVER_YIYIYA 1
 
-/* Enable the stub joystick driver (src/joystick/dummy/\*.c) */
-#define SDL_JOYSTICK_DISABLED   1
-// #define SDL_JOYSTICK_DUMMY 1
+/* Enable the YiYiYa GPIO joystick driver (src/joystick/yiyiya/\*.c) */
+#define SDL_JOYSTICK_YIYIYA 1
 
 /* Enable the stub haptic driver (src/haptic/dummy/\*.c) */
 #define SDL_HAPTIC_DISABLED 1
