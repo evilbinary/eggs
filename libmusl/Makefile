@@ -162,10 +162,13 @@ lib/libc.so: $(LOBJS) $(LDSO_OBJS)
 	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
 	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
 
+# 不要用 $(file >...) + @obj/*.rsp：$(file) 需要 GNU make>=4.0，macOS 自带的
+# make 3.81 会把它当未定义变量展开成空，rsp 不生成，ar 报 No such file or
+# directory；且 ar 对 @file 的支持不可靠。AOBJS 约 39KB（1415 个 obj/src/...），
+# 远低于 ARG_MAX，直接展开 $(AOBJS) 即可（即 musl 上游写法）。
 lib/libc.a: $(AOBJS)
 	rm -f $@
-	$(file >obj/libc_objs.rsp,$(AOBJS))
-	$(AR) rc $@ @obj/libc_objs.rsp
+	$(AR) rc $@ $(AOBJS)
 	$(RANLIB) $@
 
 $(EMPTY_LIBS):
