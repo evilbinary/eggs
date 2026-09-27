@@ -16,11 +16,19 @@ add_files(
     'src/filesystem/*.cpp'
 )
 
+# 这里曾有第三项 './include/experimental'，它排在 './include' 之后时无害，
+# 但 target 的 -I 汇总顺序由依赖拓扑决定（多 target 合并时会错位），
+# 一旦 experimental 反超 include，所有 #include <vector> 都会拿到
+# experimental/vector，进而牵出 experimental/memory_resource ->
+# __memory -> __functional_base -> typeinfo -> __availability，
+# 后者 #if 里的 __has_feature 是 clang 语法，GCC 直接报
+# "missing binary operator before token"。
+# 实验头一律写 <experimental/xxx> 前缀，从 './include' 同样能解析到，
+# 这项本来就多余，去掉以消除歧义。
 add_includedirs(
 '.',
 './include',
 # '../../duck/libs/include',
-'./include/experimental'
 )
 add_cxxflags(
     '-ffreestanding -fpic',

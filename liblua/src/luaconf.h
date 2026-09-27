@@ -116,7 +116,10 @@
 /*
 @@ LUA_32BITS enables Lua with 32-bit integers and 32-bit floats.
 */
-#define LUA_32BITS	1
+/* YiYiYa: 保持默认的 64 位整数 + double。fceux 的 Lua 位运算库
+   （lua-engine.cpp 的 barg()/BitNum）依赖 double 位技巧，float 会让
+   32 位地址上的 bit.* 运算算错；本工程调用 lua 的只有 app/fceux 和 app/lua。 */
+#define LUA_32BITS	0
 
 
 /*
