@@ -62,6 +62,8 @@ int g_running=0;
 /* ==================== 游戏手柄 ==================== */
 #define YUI_MAX_GAMEPADS 4
 static SDL_GameController* g_gamepads[YUI_MAX_GAMEPADS];
+/* YiYiYa: 手柄方向诊断打印开关（0=默认静默） */
+#define YUI_PAD_DIAG 0
 static int g_pad_dir_held[4]; /* left, right, up, down */
 static Uint32 g_pad_repeat_at;
 
@@ -125,7 +127,7 @@ static void backend_gamepad_dir(Layer* root, int dir, int down) {
     /* YiYiYa: 诊断打印——UI 侧【真正响应方向】的时刻（SDL ms），
        与内核 [tick]、SDL YIYIYA2 的 t= 一起看，可定位是哪一跳慢。 */
     g_pad_move_t = SDL_GetTicks();
-    printf("YUI: pad dir=%d down=%d t=%u\n", dir, down, (unsigned)g_pad_move_t);
+    if (YUI_PAD_DIAG) printf("YUI: pad dir=%d down=%d t=%u\n", dir, down, (unsigned)g_pad_move_t);
     if (down) {
         focus_move(root, (FocusDirection)(FOCUS_DIR_LEFT + dir));
         g_pad_repeat_at = SDL_GetTicks() + 300;
@@ -269,7 +271,7 @@ static int sdl_end_frame(void) {
     /* YiYiYa: 诊断——"方向变化 → 屏幕真正刷新"的延迟（用户感知的就是这一段） */
     if (g_pad_move_t != 0) {
         Uint32 now = SDL_GetTicks();
-        printf("YUI: pad->present %ums\n", (unsigned)(now - g_pad_move_t));
+        if (YUI_PAD_DIAG) printf("YUI: pad->present %ums\n", (unsigned)(now - g_pad_move_t));
         g_pad_move_t = 0;
     }
     return 1;

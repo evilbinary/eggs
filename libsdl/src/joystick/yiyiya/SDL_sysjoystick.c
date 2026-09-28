@@ -26,6 +26,8 @@
 #define YIYIYA_JOY_DEV "/dev/joystick"
 #define YIYIYA_JOY_NBUTTONS 16
 
+/* YiYiYa: 手柄诊断打印开关（0=默认静默） */
+#define JOY_DIAG 0
 #define YK_UP 5
 #define YK_DOWN 24
 #define YK_LEFT 19
@@ -116,7 +118,7 @@ void SDL_SYS_JoystickUpdate(SDL_Joystick *joystick)
 		n = (int)read(YIYIYA_joy_fd, buf, sizeof(buf));
 		if (dbg_read < 10) {
 			dbg_read++;
-			printf("YIYIYA read ret=%d\n", n);
+			if (JOY_DIAG) printf("YIYIYA read ret=%d\n", n);
 		}
 		if (n <= 0) {
 			break;
@@ -128,7 +130,7 @@ void SDL_SYS_JoystickUpdate(SDL_Joystick *joystick)
 			int b = YIYIYA_KeyToButton(k);
 			/* YiYiYa: 诊断——原来只打前 60 次（之后静默，看不到 app 侧按键），
 			   改为按键边沿都打（低频，开销可忽略），便于核对 app 侧是否收到。 */
-			printf("YIYIYA byte=%02x k=%d b=%d pressed=%d\n", c, k, b, pressed);
+			if (JOY_DIAG) printf("YIYIYA byte=%02x k=%d b=%d pressed=%d\n", c, k, b, pressed);
 			if (b >= 0) {
 				SDL_PrivateJoystickButton(joystick, (Uint8)b,
 				                          pressed ? SDL_PRESSED : SDL_RELEASED);

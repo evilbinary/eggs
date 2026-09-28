@@ -31,6 +31,8 @@
 #define YIYIYA_JOY_NBUTTONS 16
 
 /* Linux input KEY_* 码（与 duck/modules/keyboard/keyboard.h 对齐，不引用内核头） */
+/* YiYiYa: 手柄诊断打印开关（0=默认静默） */
+#define JOY_DIAG 0
 #define YK_UP 5
 #define YK_DOWN 24
 #define YK_LEFT 19
@@ -197,7 +199,7 @@ YIYIYA_JoystickUpdate(SDL_Joystick *joystick)
             int b = YIYIYA_KeyToButton(k);
             /* YiYiYa: 诊断打印——按键边沿就输出（原来只打前 60 次，之后静默），
                带 SDL 毫秒时间戳，便于和内核 [tick]、UI 侧 t= 对齐定位延迟。 */
-            printf("YIYIYA2 byte=%02x k=%d b=%d pressed=%d t=%u\n", c, k, b, pressed,
+            if (JOY_DIAG) printf("YIYIYA2 byte=%02x k=%d b=%d pressed=%d t=%u\n", c, k, b, pressed,
                    (unsigned)SDL_GetTicks());
             if (b >= 0) {
                 SDL_PrivateJoystickButton(joystick, (Uint8)b,

@@ -21,6 +21,8 @@
 #include "../../SDL_internal.h"
 #include "SDL_timer.h"
 #include "SDL_joystick.h"
+/* YiYiYa: 手柄诊断打印开关（0=默认静默） */
+#define JOY_DIAG 0
 #include "screen.h"
 
 #if SDL_VIDEO_DRIVER_DUMMY
@@ -148,12 +150,12 @@ void DUMMY_PumpEvents(_THIS) {
         break;
       case KEY_PRESS_DOWN:
         /* YiYiYa: 诊断——xwin 键盘事件到达 SDL 的时刻（毫秒，与 UI 侧同一钟） */
-        printf("YIYIYA pump key=%x down t=%u\n", (unsigned)e.key,
+        if (JOY_DIAG) printf("YIYIYA pump key=%x down t=%u\n", (unsigned)e.key,
                (unsigned)SDL_GetTicks());
         SDL_SendKeyboardKey(SDL_PRESSED, DUMMY_KeyToScancode(e.key));
         break;
       case KEY_PRESS_UP:
-        printf("YIYIYA pump key=%x up   t=%u\n", (unsigned)e.key,
+        if (JOY_DIAG) printf("YIYIYA pump key=%x up   t=%u\n", (unsigned)e.key,
                (unsigned)SDL_GetTicks());
         SDL_SendKeyboardKey(SDL_RELEASED, DUMMY_KeyToScancode(e.key));
         break;
