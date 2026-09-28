@@ -19,6 +19,8 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 #include "../../SDL_internal.h"
+#include "SDL_timer.h"
+#include "SDL_joystick.h"
 #include "screen.h"
 
 #if SDL_VIDEO_DRIVER_DUMMY
@@ -118,6 +120,13 @@ DUMMY_KeyToScancode(Uint32 key)
 }
 
 void DUMMY_PumpEvents(_THIS) {
+  /* YiYiYa: 像 SDL1 一样在这里刷新手柄状态。
+   * SDL2 默认【不会】在 PumpEvents 里刷手柄（SDL1 会 ✓）；应用若不显式调用
+   * SDL_GameControllerUpdate() 或开事件态，就会很久才拿到一次方向变化 ✗
+   * （实测：要长按很久才有反应、松手后 2~3 秒页面才更新）。
+   * SDL_JoystickUpdate() 自带重入保护 ✓，放在这里最保险——不依赖应用怎么写 ✓。 */
+  SDL_JoystickUpdate();
+
   screen_info_t *screen = screen_info();
   event_t e;
   while (event_poll(&e) > 0) {
@@ -138,9 +147,14 @@ void DUMMY_PumpEvents(_THIS) {
                             DUMMY_TranslateMouseButton(e.mouse.sate));
         break;
       case KEY_PRESS_DOWN:
+        /* YiYiYa: 诊断——xwin 键盘事件到达 SDL 的时刻（毫秒，与 UI 侧同一钟） */
+        printf("YIYIYA pump key=%x down t=%u\n", (unsigned)e.key,
+               (unsigned)SDL_GetTicks());
         SDL_SendKeyboardKey(SDL_PRESSED, DUMMY_KeyToScancode(e.key));
         break;
       case KEY_PRESS_UP:
+        printf("YIYIYA pump key=%x up   t=%u\n", (unsigned)e.key,
+               (unsigned)SDL_GetTicks());
         SDL_SendKeyboardKey(SDL_RELEASED, DUMMY_KeyToScancode(e.key));
         break;
       default:

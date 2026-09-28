@@ -115,10 +115,17 @@ static void backend_gamepad_send_key(Layer* root, int key_code, int down) {
     handle_key_event(root, &ke);
 }
 
+/* YiYiYa: 诊断——最近一次手柄方向变化的时刻，用来量"方向变化 → 屏幕真正刷新"的延迟 */
+static Uint32 g_pad_move_t = 0;
+
 static void backend_gamepad_dir(Layer* root, int dir, int down) {
     if (dir < 0 || dir > 3) return;
     if (down == g_pad_dir_held[dir]) return;
     g_pad_dir_held[dir] = down;
+    /* YiYiYa: 诊断打印——UI 侧【真正响应方向】的时刻（SDL ms），
+       与内核 [tick]、SDL YIYIYA2 的 t= 一起看，可定位是哪一跳慢。 */
+    g_pad_move_t = SDL_GetTicks();
+    printf("YUI: pad dir=%d down=%d t=%u\n", dir, down, (unsigned)g_pad_move_t);
     if (down) {
         focus_move(root, (FocusDirection)(FOCUS_DIR_LEFT + dir));
         g_pad_repeat_at = SDL_GetTicks() + 300;
@@ -259,6 +266,12 @@ static int sdl_end_frame(void) {
     }
     SDL_RenderPresent(renderer);
     g_sdl_presented_once = 1;
+    /* YiYiYa: 诊断——"方向变化 → 屏幕真正刷新"的延迟（用户感知的就是这一段） */
+    if (g_pad_move_t != 0) {
+        Uint32 now = SDL_GetTicks();
+        printf("YUI: pad->present %ums\n", (unsigned)(now - g_pad_move_t));
+        g_pad_move_t = 0;
+    }
     return 1;
 }
 
@@ -2254,6 +2267,12 @@ int backend_init(){
 
     // 初始化SDL
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
+    /* YiYiYa: 打开手柄/控制器事件态 —— SDL2 不像 SDL1 那样在 PumpEvents 里自动
+       刷新手柄状态（这正是 testjoystick(SDL1) 跟手、yui(SDL2) 慢的原因 ✗）。
+       开启后 PumpEvents 每帧都会刷；主循环里另有显式 SDL_GameControllerUpdate()
+       兜底 ✓。四个里任意一个生效都能让手柄每帧刷新 ✓。 */
+    SDL_JoystickEventState(SDL_ENABLE);
+    SDL_GameControllerEventState(SDL_ENABLE);
 
     /* 打开已连接的手柄 */
     memset(g_gamepads, 0, sizeof(g_gamepads));
@@ -3008,6 +3027,14 @@ void backend_run(Layer* ui_root){
             break;
         }
 
+        /* YiYiYa: 每帧显式刷新手柄状态。
+         * 本应用 SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) 之后
+         * 从未调用 SDL_GameControllerUpdate()，也没开事件态 ⇒ SDL2 不会自动
+         * 刷新手柄状态（SDL1 的 PumpEvents 会自动刷，SDL2 不会 ✗）——实测要
+         * 1 秒以上才拿到方向键，且按下/松开被挤在一起读走 ✗。
+         * 这里每帧刷一次，延迟降到 1 帧（~16ms）✓。 */
+        SDL_GameControllerUpdate();
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = 0;
             handle_event(ui_root, &event);
@@ -3082,6 +3109,9 @@ void backend_tick(Layer* ui_root) {
     if (!ui_root || !renderer) {
         return;
     }
+
+    /* YiYiYa: 同 backend_run —— 每帧显式刷新手柄状态（SDL2 不会自动刷） */
+    SDL_GameControllerUpdate();
 
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) {

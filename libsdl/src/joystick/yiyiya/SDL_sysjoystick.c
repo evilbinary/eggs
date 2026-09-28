@@ -126,11 +126,9 @@ void SDL_SYS_JoystickUpdate(SDL_Joystick *joystick)
 			int pressed = !(c & 0x80);
 			int k = c & 0x7F;
 			int b = YIYIYA_KeyToButton(k);
-			static int dbg_byte = 0;
-			if (dbg_byte < 60) {
-				dbg_byte++;
-				printf("YIYIYA byte=%02x k=%d b=%d pressed=%d\n", c, k, b, pressed);
-			}
+			/* YiYiYa: 诊断——原来只打前 60 次（之后静默，看不到 app 侧按键），
+			   改为按键边沿都打（低频，开销可忽略），便于核对 app 侧是否收到。 */
+			printf("YIYIYA byte=%02x k=%d b=%d pressed=%d\n", c, k, b, pressed);
 			if (b >= 0) {
 				SDL_PrivateJoystickButton(joystick, (Uint8)b,
 				                          pressed ? SDL_PRESSED : SDL_RELEASED);

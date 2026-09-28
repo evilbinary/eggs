@@ -619,6 +619,13 @@ static void list_ensure_index_visible(ListComponent* component, int index) {
 int list_component_handle_key_event(Layer* layer, KeyEvent* event) {
     if (!layer || !event || !layer->component) return 0;
 
+    /* YiYiYa: 诊断——列表收到键盘事件的时刻（与 SDL 侧的 t= 同一个毫秒钟），
+       用它减去 "YIYIYA pump key=… t=" 就是"xwin事件→SDL→列表"这跳的延迟。 */
+    if (event->type == KEY_EVENT_DOWN) {
+        printf("YUI: list key=%d t=%u\n", (int)event->data.key.key_code,
+               (unsigned)backend_get_ticks());
+    }
+
     ListComponent* component = (ListComponent*)layer->component;
     if (event->type != KEY_EVENT_DOWN) return 0;
 

@@ -19,6 +19,7 @@
 
 #include "SDL_joystick.h"
 #include "SDL_events.h"
+#include "SDL_timer.h"
 #include "../SDL_sysjoystick.h"
 #include "../SDL_joystick_c.h"
 
@@ -194,11 +195,10 @@ YIYIYA_JoystickUpdate(SDL_Joystick *joystick)
             int pressed = !(c & 0x80);
             int k = c & 0x7F;
             int b = YIYIYA_KeyToButton(k);
-            static int dbg_byte = 0;
-            if (dbg_byte < 60) {
-                dbg_byte++;
-                printf("YIYIYA2 byte=%02x k=%d b=%d pressed=%d\n", c, k, b, pressed);
-            }
+            /* YiYiYa: 诊断打印——按键边沿就输出（原来只打前 60 次，之后静默），
+               带 SDL 毫秒时间戳，便于和内核 [tick]、UI 侧 t= 对齐定位延迟。 */
+            printf("YIYIYA2 byte=%02x k=%d b=%d pressed=%d t=%u\n", c, k, b, pressed,
+                   (unsigned)SDL_GetTicks());
             if (b >= 0) {
                 SDL_PrivateJoystickButton(joystick, (Uint8)b,
                                           pressed ? SDL_PRESSED : SDL_RELEASED);
