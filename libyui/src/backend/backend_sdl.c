@@ -120,6 +120,21 @@ static void backend_gamepad_send_key(Layer* root, int key_code, int down) {
 /* YiYiYa: 诊断——最近一次手柄方向变化的时刻，用来量"方向变化 → 屏幕真正刷新"的延迟 */
 static Uint32 g_pad_move_t = 0;
 
+/* YiYiYa: 手柄方向【当成方向键派发】✓
+ * handle_key_event() 的顺序正是我们要的：先给焦点组件（List 会推进选中项并
+ * focus_scroll_into_view 滚动到可见 ✓），组件没消费才走 focus_handle_key
+ * （控件之间的焦点导航 ✓）。之前直接 focus_move ⇒ 列表只动焦点、不滚动 item ✗ */
+static void backend_pad_do_move(Layer* root, int dir) {
+    KeyEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = KEY_EVENT_DOWN;
+    ev.data.key.key_code = (dir == 0) ? SDLK_LEFT
+                         : (dir == 1) ? SDLK_RIGHT
+                         : (dir == 2) ? SDLK_UP
+                                      : SDLK_DOWN;
+    handle_key_event(root, &ev);
+}
+
 static void backend_gamepad_dir(Layer* root, int dir, int down) {
     if (dir < 0 || dir > 3) return;
     if (down == g_pad_dir_held[dir]) return;
@@ -129,7 +144,7 @@ static void backend_gamepad_dir(Layer* root, int dir, int down) {
     g_pad_move_t = SDL_GetTicks();
     if (YUI_PAD_DIAG) printf("YUI: pad dir=%d down=%d t=%u\n", dir, down, (unsigned)g_pad_move_t);
     if (down) {
-        focus_move(root, (FocusDirection)(FOCUS_DIR_LEFT + dir));
+        backend_pad_do_move(root, dir);
         g_pad_repeat_at = SDL_GetTicks() + 300;
     }
 }
@@ -142,7 +157,7 @@ static void backend_gamepad_update(Layer* root) {
     if (now < g_pad_repeat_at) return;
     for (i = 0; i < 4; i++) {
         if (g_pad_dir_held[i]) {
-            focus_move(root, (FocusDirection)(FOCUS_DIR_LEFT + i));
+            backend_pad_do_move(root, i);
             any = 1;
         }
     }
