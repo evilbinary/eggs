@@ -2407,7 +2407,12 @@ int backend_init(){
         }
     }
 #if defined(__YIYIYA__)
-    g_sdl_persistent_fb = 1;
+    /* YiYiYa: 不能假设窗口 surface 跨帧持久。本机（GPU 渲染器）走的是
+       “离屏画布 + 每帧整帧拷贝”，DIRTY 局部重绘因此始终正确、不闪；
+       若在这里假定持久（直写 surface 并跳过拷贝），局部更新会被内核的
+       翻页/光标等打扰，表现为“按一下整页闪一下”。改为与主机一致：0 ⇒
+       走离屏画布 + 整帧拷贝。 */
+    g_sdl_persistent_fb = 0;
 #endif
     
     // 启用透明度混合

@@ -807,6 +807,20 @@ void screen_init_with_mode(screen_mode_t mode) {
                  gscreen.width, gscreen.height, (void*)gscreen.buffer);
 #endif
         }
+      } else if (fb != NULL && fb_addr == 0x07e00000u) {
+        /* YiYiYa: 仅对 versatilepb（它的 LCD VA 恒为 0x07e00000）走 DIRECT
+           零拷贝：原来这里只打印一行、不绑定，应用画在 malloc 画布上靠
+           xwin_blit 提交，实测 LCD 全黑；直绘进 LCD 才有画面。
+           其它平台（如 miyoo/SSD202D 的 NV12 链路）必须保持原样 —— 早先
+           不加地址限制的版本会把它们也劫持进来，改掉原本的提交路径。 */
+        if (gscreen.buffer != NULL && gscreen.buffer != fb) {
+          free(gscreen.buffer);
+        }
+        gscreen.buffer = fb;
+        gscreen.pbuffer = fb;
+        gscreen.fb.frambuffer = fb;
+        printf("screen init xwin DIRECT %dx%d fb=%p (versatilepb)\n",
+               gscreen.width, gscreen.height, (void*)gscreen.buffer);
       } else {
         printf("screen init xwin mode %dx%d (fb=%p addr=%x, blit path)\n",
                gscreen.width, gscreen.height, (void*)fb, fb_addr);

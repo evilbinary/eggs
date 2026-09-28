@@ -59,7 +59,9 @@ add_files(
     'src/main/dummy/*.c'
 )
 
-add_cflags(' -D__YIYIYA__ -D__GNUC__ ')
+# YiYiYa: 软件渲染/位块拷贝原来没有 -O（gcc 默认 -O0），这里开 -O2；
+# 老代码带类型双关，同时关掉严格别名。
+add_cflags(' -D__YIYIYA__ -D__GNUC__ -O2 -fno-strict-aliasing ')
 
 add_cflags(' -DSDL_DISABLE_ARM_NEON_H ')
 

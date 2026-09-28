@@ -20,6 +20,10 @@ add_files("backend/backend_common.c")
 # YUI_WITH_GAME defaults to 1 in game.h; disable with -DYUI_WITH_GAME=0
 add_cflags("-DYUI_WITH_GAME=1")
 add_cflags("-DYUI_WITH_GAME_AUDIO=1")
+# YiYiYa: UI 框架原来没有任何 -O（gcc 默认 -O0），整屏重绘（文字/字体/
+# 抗锯齿）在模拟 armv5 上会慢到"秒"级。开 -O2；老代码带类型双关，
+# 同时关掉严格别名。
+add_cflags("-O2 -fno-strict-aliasing")
 add_includedirs('../lib/miniaudio')
 
 if get_plat() in ("lvgl", "em-lvgl"):
