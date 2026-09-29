@@ -124,7 +124,12 @@ extra_libs = ' '.join([
     _pyos.path.join(_musl_lib, 'crtn.o'),
 ])
 
-automake("c")
+# 注意：automake() 的参数会被 ymake 当作【产物名】（prefix+name+.a），
+# 它也是"是否已构建过"的判定依据。要和 musl 同构：让产物名指向一个
+# 【真实存在】的库 —— musl 写 "c"（→ musl/lib/libc.a，真实存在，所以不会
+# 重复 configure）；这里写 "avcodec"（→ ffmpeg/lib/libavcodec.a，make install
+# 真实产出）⇒ 第二次起 ymake 直接跳过，不再重复 configure/make install ✓。
+automake("avcodec")
 configure(
     '--cc=' + compile + 'gcc',
     '--ar=' + compile + 'ar',
@@ -158,55 +163,3 @@ configure(
     # 保留 network（player 是 RTSP demo）。若链接期缺 socket 符号，
     # 改为 '--disable-network'（RTSP 用不了但能编过）。
 )
-
-
-# ---- 合并 5 个 .a 成一个 libffmpeg.a（在 ymake 收集之前）----
-# ymake 对 automake target 的库收集是 file_match(<prefix>/lib/*.a)（目录序，
-# 不可控）：ffmpeg 的 av* 依赖链深（avformat→avcodec→avutil），顺序错了静态
-# 链接就满屏 undefined reference（实测：avutil 先被扫过，后面 avformat/
-# swresample/swscale 的 av_* 全缺 ✗）。musl 能直接多 .a 是因为库间依赖浅、
-# 目录序恰好可用；这里按旧 app/sdl2/SConscript 的链接顺序
-# （avformat→swscale→avcodec→swresample→avutil）合并成一个库：符号全在一起，
-# 链接顺序无关，ymake 也只收集到一个产物 ✓。
-# 时机：after_build 在 automake（configure+make install）之后、依赖方（player）
-# 链接收集之前（见 ymake/builder.py 的 gcc_build 流程）。
-def _merge_ffmpeg_libs(target):
-    import os as _pyos
-    libdir = _pyos.path.join(_build, 'ffmpeg', 'lib')
-    if not _pyos.path.isdir(libdir):
-        return
-    order = ['avformat', 'swscale', 'avcodec', 'swresample', 'avutil']
-    srcs = []
-    for name in order:
-        p = _pyos.path.join(libdir, 'lib' + name + '.a')
-        if _pyos.path.exists(p):
-            srcs.append(p)
-    if not srcs:
-        return  # 已合并过（或尚未构建）：保持现状
-    merged = _pyos.path.join(libdir, 'libffmpeg.a')
-    if _pyos.path.exists(merged):
-        _pyos.remove(merged)
-    lines = ['create ' + merged]
-    for p in srcs:
-        lines.append('addlib ' + p)
-    lines += ['save', 'end']
-    mri = _pyos.path.join(libdir, 'merge.mri')
-    with open(mri, 'w') as f:
-        f.write('\n'.join(lines) + '\n')
-    _pyos.system('"%sar" -M < "%s"' % (compile, mri))
-    try:
-        _pyos.remove(mri)
-    except OSError:
-        pass
-    # 删掉原来的库，只留合并后的 libffmpeg.a（否则 ymake 会重复收集）
-    for p in srcs:
-        _pyos.remove(p)
-    print('ffmpeg: merged %d libs -> %s' % (len(srcs), merged))
-
-
-# 注意：ymake 的 gcc_build 对"无 file-objs 的 target（automake）"有个门槛：
-# 只有注册过 on_build 的 target 才会进入 build_hook_target（否则直接
-# warn+return，after_build/after_link 全都不跑 —— 实测第一次合并没生效的原因 ✗）。
-# 所以 on_build 是合并真正生效的入口；after_build 兜底重复构建场景（幂等）。
-on_build(_merge_ffmpeg_libs)
-after_build(_merge_ffmpeg_libs)
