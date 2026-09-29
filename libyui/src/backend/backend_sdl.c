@@ -503,14 +503,16 @@ static int backend_texture_cache_pick_evict_index(uint64_t key_hash) {
     int probe = start;
     int empty_slot = -1;
     int lru_slot = -1;
-    Uint32 oldest_time = SDL_GetTicks();
+    Uint32 oldest_time = 0xFFFFFFFFu; /* YiYiYa: 最大初值，保证一定能选出一个 ✓ */
     int probes = 0;
-    
-    // 探测寻找空槽或 LRU 条目
-    while (probes < 16) {  // 探测最多 16 个位置
+
+    /* YiYiYa: 遍历【全部】槽位 —— 原来只探 16 个 ✗，可能返回 -1 ⇒ 调用者
+     * SDL_DestroyTexture(texture) 但之后的绘制仍引用它 ⇒ 画面出现错乱/放大的
+     * 纹理（"移动时飘出放大的 texture"）。全表扫描 + 兜底 ⇒ 绝不返回 -1 ✓。 */
+    while (probes < TEXTURE_CACHE_SIZE) {
         if (!texture_cache[probe].texture) {
             empty_slot = probe;
-            break;  // 找到空槽，直接使用
+            break; /* 找到空槽 ✓ */
         }
         if (!texture_cache[probe].pinned && texture_cache[probe].last_used < oldest_time) {
             oldest_time = texture_cache[probe].last_used;
@@ -520,9 +522,10 @@ static int backend_texture_cache_pick_evict_index(uint64_t key_hash) {
         probes++;
         if (probe == start) break;
     }
-    
-    // 优先使用空槽，否则使用 LRU 位置
-    return empty_slot >= 0 ? empty_slot : lru_slot;
+
+    if (empty_slot >= 0) return empty_slot;
+    if (lru_slot >= 0) return lru_slot;
+    return start; /* 兜底：全部 pinned ⇒ 覆盖起点，绝不返回 -1 ✓ */
 }
 
 static void backend_texture_cache_store_entry(int cache_index, uint64_t key_hash, DFont* font,
@@ -1859,31 +1862,6 @@ void add_texture_to_cache(DFont* font, const char* text, Color color, int font_s
     if (font_size <= 0) {
         font_size = backend_get_font_size(font);
     }
-    if (!pinned && backend_text_cache_volatile(text)) {
-        /* YiYiYa: 【易变文本不能直接丢 ✗】—— 原先这里直接 return ⇒ 新建的纹理
-         * 既不进缓存、也不销毁 ⇒ 每次渲染泄漏一块（时钟/百分比/计数文本每帧都在
-         * 变 ✗）⇒ 32KB×每帧 ⇒ 页池/堆耗尽 ⇒ ya_sbrk oom / valloc failed 卡死 ✗。
-         * 改为放进【固定 8 槽轮转】：同帧最多 8 段易变文本安全 ✓，第 9 段起
-         * 覆盖最旧的并销毁它 ✓ ⇒ 总量恒定，永不增长 ✓。 */
-        {
-            static SDL_Texture* s_vtex[8];
-            static int s_vslot = 0;
-            int i, found = -1;
-            for (i = 0; i < 8; i++) {
-                if (s_vtex[i] == texture) { found = i; break; }
-            }
-            if (found < 0) {
-                i = s_vslot;
-                s_vslot = (s_vslot + 1) & 7;
-                if (s_vtex[i] != NULL && s_vtex[i] != texture) {
-                    SDL_DestroyTexture(s_vtex[i]);
-                }
-                s_vtex[i] = texture;
-            }
-        }
-        return;
-    }
-
     key_hash = backend_texture_cache_make_hash(font, font_size, color, text);
     cache_index = backend_texture_cache_find_index(key_hash, font, font_size, color, text);
     if (cache_index >= 0) {
