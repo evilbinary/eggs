@@ -1860,6 +1860,27 @@ void add_texture_to_cache(DFont* font, const char* text, Color color, int font_s
         font_size = backend_get_font_size(font);
     }
     if (!pinned && backend_text_cache_volatile(text)) {
+        /* YiYiYa: 【易变文本不能直接丢 ✗】—— 原先这里直接 return ⇒ 新建的纹理
+         * 既不进缓存、也不销毁 ⇒ 每次渲染泄漏一块（时钟/百分比/计数文本每帧都在
+         * 变 ✗）⇒ 32KB×每帧 ⇒ 页池/堆耗尽 ⇒ ya_sbrk oom / valloc failed 卡死 ✗。
+         * 改为放进【固定 8 槽轮转】：同帧最多 8 段易变文本安全 ✓，第 9 段起
+         * 覆盖最旧的并销毁它 ✓ ⇒ 总量恒定，永不增长 ✓。 */
+        {
+            static SDL_Texture* s_vtex[8];
+            static int s_vslot = 0;
+            int i, found = -1;
+            for (i = 0; i < 8; i++) {
+                if (s_vtex[i] == texture) { found = i; break; }
+            }
+            if (found < 0) {
+                i = s_vslot;
+                s_vslot = (s_vslot + 1) & 7;
+                if (s_vtex[i] != NULL && s_vtex[i] != texture) {
+                    SDL_DestroyTexture(s_vtex[i]);
+                }
+                s_vtex[i] = texture;
+            }
+        }
         return;
     }
 
