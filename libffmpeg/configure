@@ -3879,6 +3879,11 @@ mkdir -p ffbuild
 # find source path
 if test -f configure; then
     source_path=.
+    # YiYiYa: out-of-tree 构建支持 —— 构建目录里的 configure 只是转发包装
+    # （eggs/libffmpeg/ya.py 生成），真源码路径写在 .srcdir 文件里。
+    if test -f .srcdir; then
+        source_path=$(cat .srcdir)
+    fi
 elif test -f src/configure; then
     source_path=src
 else
