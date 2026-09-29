@@ -47,7 +47,9 @@
 #define YK_BUTTON_R2 105
 #define YK_BUTTON_SELECT 109
 #define YK_BUTTON_START 108
-#define YK_HOME 0xF0
+#define YK_HOME 0x70           /* 修正：0xF0 自带 bit7，永不命中 ✗ */
+#define YK_VOLUMEUP 0x71
+#define YK_VOLUMEDOWN 0x72
 #define YK_POWER 26
 
 static int YIYIYA_joy_fd = -1;
