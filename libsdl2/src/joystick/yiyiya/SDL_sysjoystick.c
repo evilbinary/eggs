@@ -19,6 +19,7 @@
 
 #include "SDL_joystick.h"
 #include "SDL_events.h"
+#include "SDL_gamecontroller.h"
 #include "SDL_timer.h"
 #include "../SDL_sysjoystick.h"
 #include "../SDL_joystick_c.h"
@@ -86,6 +87,16 @@ YIYIYA_JoystickInit(void)
     if (YIYIYA_joy_fd < 0) {
         return 0; /* 无手柄 */
     }
+    /* YiYiYa: 内置手柄映射 —— 不依赖自动映射生成（GetGamepadMapping 若失败，
+     * SDL_IsGameController() 为假 ⇒ 没有 CONTROLLERDEVICEADDED，
+     * SDL_GameControllerOpen 也会因"找不到 mapping"失败 ⇒ 手柄全线不可用 ✗）。
+     * GUID 与 YIYIYA_JoystickGetDeviceGUID 固定值一致（'Y''Y''J''S' + 12×0）；
+     * 按钮号与 YIYIYA_KeyToButton 一致（dpad=0-3、ABXY=4-7、LR=8/9、L2R2=10/11、
+     * SELECT=12、START=13）。HOME(14)/POWER(15) 故意不映射，留给应用做系统键。 */
+    SDL_GameControllerAddMapping(
+        "59594a53000000000000000000000000,YiYiYa GPIO Joystick,"
+        "a:b4,b:b5,x:b6,y:b7,back:b12,start:b13,leftshoulder:b8,rightshoulder:b9,"
+        "lefttrigger:b10,righttrigger:b11,dpup:b0,dpdown:b1,dpleft:b2,dpright:b3");
     return 0;
 }
 
@@ -145,6 +156,7 @@ YIYIYA_JoystickOpen(SDL_Joystick *joystick, int device_index)
     joystick->nbuttons = YIYIYA_JOY_NBUTTONS;
     joystick->naxes = 0;
     joystick->nhats = 0;
+    printf("YIYIYA SDL2 joy open ok (%d buttons)\n", joystick->nbuttons);
     return 0;
 }
 
