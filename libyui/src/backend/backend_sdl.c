@@ -58,6 +58,8 @@ SDL_Window* window=NULL;
 DFont* default_font=NULL;
 Layer* g_ui_root = NULL;
 int g_running=0;
+/* YiYiYa: HOME 退出开关（默认关 —— console-os 桌面按 HOME 不退出） */
+static int g_home_quit_enable = 0;
 
 /* ==================== 游戏手柄 ==================== */
 #define YUI_MAX_GAMEPADS 4
@@ -326,6 +328,11 @@ void backend_set_auto_frames(int frames)
     g_auto_frames = frames;
     g_request_quit = 0;
     g_exit_code = 0;
+}
+
+void backend_set_home_quit(int enable)
+{
+    g_home_quit_enable = enable ? 1 : 0;
 }
 
 void backend_request_quit(int exit_code)
@@ -2659,6 +2666,23 @@ int pointInLayer(SDL_Point* point, Layer* layer) {
 }
 
 void handle_event(Layer* root, SDL_Event* event) {
+    /* YiYiYa: HOME 键退出 —— 掌机 HOME（YIYIYA SDL 后端 button 14）按下时
+     * 请求退出整个应用（所有 ymain 应用通用：带参启动的应用退出后回
+     * console-os；console-os 自身退出回 shell）。SDL_QUIT 走的也是
+     * backend_request_quit(0)，行为一致 ✓。 */
+    /* 【诊断·可删】joystick 原始事件（定位 HOME 退出链路：事件有没有来/开关值） */
+    if (event->type == SDL_JOYBUTTONDOWN || event->type == SDL_JOYBUTTONUP) {
+        printf("YUI: JOY btn=%d %s home_quit=%d\n",
+               event->jbutton.button,
+               event->type == SDL_JOYBUTTONDOWN ? "down" : "up",
+               g_home_quit_enable);
+    }
+    if (g_home_quit_enable &&
+        event->type == SDL_JOYBUTTONDOWN && event->jbutton.button == 14) {
+        printf("YUI: HOME pressed, quit\n");
+        backend_request_quit(0);
+        return;
+    }
     if (event->type == SDL_WINDOWEVENT) {
         sdl_handle_window_event(root, event);
         return;
