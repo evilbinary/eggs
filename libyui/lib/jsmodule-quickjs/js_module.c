@@ -22,6 +22,8 @@
 #include <time.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include "../../lib/cjson/cJSON.h"
@@ -337,6 +339,49 @@ static JSValue js_key_code(JSContext *ctx, JSValueConst this_val, int argc, JSVa
 }
 
 // 启动外部程序（PC）；嵌入式返回 -1
+/* YiYiYa: 系统音量（软件音量：内核 dsp write 乘系数）。
+ *   YUI.setVolume(0..100)  -> 实际生效值
+ *   YUI.getVolume()        -> 0..100（失败 -1）
+ * ioctl 号与 duck/modules/sound/sound.h 的 SNDCTL_DSP_SETVOLUME 对齐 ✓ */
+#define YUI_SNDCTL_DSP_SETVOLUME 100
+#define YUI_SNDCTL_DSP_GETVOLUME 101
+
+static JSValue js_set_volume(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    int v = 0;
+    int fd;
+    (void)this_val;
+    if (argc < 1) {
+        return JS_NewInt32(ctx, -1);
+    }
+    if (JS_ToInt32(ctx, &v, argv[0]) < 0) {
+        return JS_NewInt32(ctx, -1);
+    }
+    if (v < 0) v = 0;
+    if (v > 100) v = 100;
+    fd = open("/dev/dsp", O_WRONLY);
+    if (fd >= 0) {
+        ioctl(fd, YUI_SNDCTL_DSP_SETVOLUME, &v);
+        close(fd);
+    }
+    return JS_NewInt32(ctx, v);
+}
+
+static JSValue js_get_volume(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    int v = -1;
+    int fd;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    fd = open("/dev/dsp", O_WRONLY);
+    if (fd >= 0) {
+        ioctl(fd, YUI_SNDCTL_DSP_GETVOLUME, &v);
+        close(fd);
+    }
+    return JS_NewInt32(ctx, v);
+}
+
 static JSValue js_spawn(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     int rc = -1;
@@ -1537,6 +1582,8 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "focusGet", JS_NewCFunction(g_js_ctx, js_focus_get, "focusGet", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "keyCode", JS_NewCFunction(g_js_ctx, js_key_code, "keyCode", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "spawn", JS_NewCFunction(g_js_ctx, js_spawn, "spawn", 2));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "setVolume", JS_NewCFunction(g_js_ctx, js_set_volume, "setVolume", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "getVolume", JS_NewCFunction(g_js_ctx, js_get_volume, "getVolume", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "getWindowSize", JS_NewCFunction(g_js_ctx, js_get_window_size, "getWindowSize", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "renderFromJson", JS_NewCFunction(g_js_ctx, js_render_from_json, "renderFromJson", 3));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "update", JS_NewCFunction(g_js_ctx, js_update, "update", 1));
