@@ -343,9 +343,30 @@ static JSValue js_spawn(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     (void)this_val;
     if (argc >= 1) {
         const char* cmd = JS_ToCString(ctx, argv[0]);
+        const char* cwd = NULL;
+        if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+            cwd = JS_ToCString(ctx, argv[1]);
+        }
         if (cmd) {
+            /* YiYiYa: 可选工作目录 —— native 应用要在自身目录里跑，才能找到
+             * 同目录资源（如 doom 的 doom1.wad）。system() 期间 chdir，
+             * 返回后恢复原目录 ✓。 */
+            char old_cwd[512];
+            int have_old = 0;
+            if (cwd && cwd[0]) {
+                if (getcwd(old_cwd, sizeof(old_cwd)) != NULL) {
+                    have_old = 1;
+                }
+                chdir(cwd);
+            }
             rc = backend_spawn(cmd);
+            if (have_old) {
+                chdir(old_cwd);
+            }
             JS_FreeCString(ctx, cmd);
+        }
+        if (cwd) {
+            JS_FreeCString(ctx, cwd);
         }
     }
     return JS_NewInt32(ctx, rc);
@@ -1515,7 +1536,7 @@ void js_module_register_api(void)
     JS_SetPropertyStr(g_js_ctx, yui_obj, "focusClear", JS_NewCFunction(g_js_ctx, js_focus_clear, "focusClear", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "focusGet", JS_NewCFunction(g_js_ctx, js_focus_get, "focusGet", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "keyCode", JS_NewCFunction(g_js_ctx, js_key_code, "keyCode", 0));
-    JS_SetPropertyStr(g_js_ctx, yui_obj, "spawn", JS_NewCFunction(g_js_ctx, js_spawn, "spawn", 1));
+    JS_SetPropertyStr(g_js_ctx, yui_obj, "spawn", JS_NewCFunction(g_js_ctx, js_spawn, "spawn", 2));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "getWindowSize", JS_NewCFunction(g_js_ctx, js_get_window_size, "getWindowSize", 0));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "renderFromJson", JS_NewCFunction(g_js_ctx, js_render_from_json, "renderFromJson", 3));
     JS_SetPropertyStr(g_js_ctx, yui_obj, "update", JS_NewCFunction(g_js_ctx, js_update, "update", 1));
@@ -2242,7 +2263,15 @@ JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
 
         JSValue item = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, item, "name", JS_NewString(ctx, entry->d_name));
+        /* YiYiYa: 文件名可能是 GBK 字节（fatfs FF_CODE_PAGE=936）——
+         * JS_NewString 会按 UTF-8 解码非法字节 ⇒ 丢字节/替换 ✗ ⇒ 之后按
+         * 该名字打开必失败（中文 ROM 加载不了）。JS_NewStringLen 原样保留
+         * 字节，JS_ToCString 往返也不失真，打开成功 ✓。
+         * （显示仍可能乱码：渲染按 UTF-8，GBK 字节画不出来 —— 那是"显示"
+         * 层面的问题，需要 GBK→UTF-8 转码表，另行处理。） */
+        JS_SetPropertyStr(ctx, item, "name",
+                          JS_NewStringLen(ctx, entry->d_name,
+                                          strlen(entry->d_name)));
 
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", open_dir, entry->d_name);
