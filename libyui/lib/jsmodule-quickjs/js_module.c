@@ -26,6 +26,14 @@
 #include <sys/stat.h>
 #include "../../lib/cjson/cJSON.h"
 
+/* musl 的 DT_* 只在 _GNU_SOURCE/_BSD_SOURCE 下定义；本文件没开那两个宏，
+ * 这里按 Linux 值补上（listDir 用 d_type 判断目录，避免逐条 stat）。 */
+#ifndef DT_DIR
+#define DT_UNKNOWN 0
+#define DT_DIR 4
+#define DT_REG 8
+#endif
+
 // Layer 结构的最小定义
 #define MAX_TEXT 256
 
@@ -2336,10 +2344,24 @@ JSValue js_list_dir(JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
                           JS_NewStringLen(ctx, entry->d_name,
                                           strlen(entry->d_name)));
 
-        char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", open_dir, entry->d_name);
-        struct stat st;
-        int is_dir = (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) ? 1 : 0;
+        /* 【性能】原来每个条目都 stat(full_path)：路径逐段查找 + fatfs
+         * f_stat 会【从头重扫目录】⇒ 列 N 个文件要 O(N^2) 次目录扫描
+         * （内核块缓存又是关的，每次真读盘）⇒ roms 下几百个文件时
+         * "读目录像卡死"。
+         * getdents64 已经带类型（fatfs 填 DT_DIR/DT_REG），直接用 d_type；
+         * 只有 DT_UNKNOWN 才回退 stat。 */
+        int is_dir;
+        if (entry->d_type == DT_DIR) {
+            is_dir = 1;
+        } else if (entry->d_type != DT_UNKNOWN) {
+            is_dir = 0;
+        } else {
+            char full_path[1024];
+            snprintf(full_path, sizeof(full_path), "%s/%s", open_dir,
+                     entry->d_name);
+            struct stat st;
+            is_dir = (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) ? 1 : 0;
+        }
         JS_SetPropertyStr(ctx, item, "isDir", JS_NewBool(ctx, is_dir));
 
         JS_SetPropertyUint32(ctx, result, idx++, item);
