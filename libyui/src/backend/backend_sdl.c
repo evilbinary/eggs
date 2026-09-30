@@ -910,13 +910,10 @@ static void backend_apply_font_options(TTF_Font* font) {
     if (!font) {
         return;
     }
-#if defined(__YIYIYA__)
-    /* T113：autohinter + 灰度 AA 每个字形可达数百毫秒；关 hinting/kerning */
-    TTF_SetFontHinting(font, TTF_HINTING_NONE);
-    TTF_SetFontKerning(font, 0);
-#else
+    /* YiYiYa: 曾为 T113 性能关 hinting/kerning（小字号字形定位差 ⇒ 更糊 ✗）。
+     * 统一 LIGHT hinting + kerning（清晰度优先，性能影响很小 ✓）。 */
     TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
-#endif
+    TTF_SetFontKerning(font, 1);
     TTF_SetFontOutline(font, 0);
 }
 
@@ -1258,11 +1255,10 @@ static SDL_Surface* backend_render_blended_utf8(DFont* font, const char* text, S
         return NULL;
     }
     /* 不要先 SizeUTF8 再 Render：SDL_ttf 内部还会 Size 一遍，T113 上等于每个字形 FT_Load_Glyph 两次 */
-#if defined(__YIYIYA__)
-    return TTF_RenderUTF8_Solid(font, text, color);
-#else
+    /* YiYiYa: 曾为 T113 性能用 Solid（1-bit、无抗锯齿 ⇒ 字体锯齿多/发糊 ✗）。
+     * 现在 miyoo 等平台性能足够，统一 Blended（灰度 AA，平滑 ✓）。
+     * 若某平台字形渲染又变慢，可在此按平台条件回退到 Solid。 */
     return TTF_RenderUTF8_Blended(font, text, color);
-#endif
 }
 
 #ifdef __EMSCRIPTEN__
