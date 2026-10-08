@@ -1277,8 +1277,9 @@ void screen_flush() {
     /* 【画布 → 硬件 fb：按格式自动选转换器（本层负责，xwin 不掺和）】
      * 画布默认 ARGB8888（u32）；硬件 fb 的格式由驱动申报（Pi5 固件只给
      * RGB565/16bpp）。若两者不同，这里做唯一一次转换写入硬件 fb；若相同
-     * 或同址，则退回原有 xwin_blit/render 路径（保持老平台行为不变）。
+     * 或同址，则退回原有 xwin_blit 路径（保持老平台行为不变）。
      * 硬件 fb 的 VA 已在 screen_init 时经 xwin_get_fb 映射进本进程。 */
+    int did_convert = 0;
     {
       /* 【尺寸用"画布"的，不是 fb 的】转换的源是应用画布，宽高必须与画布
        * 一致，否则在"fb 尺寸 ≠ 画布尺寸"时会错位（表现为条纹/斜切残留）。 */
@@ -1301,12 +1302,29 @@ void screen_flush() {
         if (screen_commit_to_fb(w, h)) {
           t1 = screen_now_ms();
           g_acc_blit_ms += t1 - t0;
-          /* 不调 xwin_render：它会按 32bpp 重画光标/合成，覆坏刚写的
-           * 16bpp 数据。硬件扫同一块 fb，写进去即生效。 */
-          screen_stats_frame_done();
-          return;
+          did_convert = 1;
         }
       }
+    }
+    /* 【转换后仍要"提交"：让内核做 cache 一致性维护】
+     * 硬件 fb 是【可缓存映射】(PAGE_FB)：只写数据不刷 cache 的话，VideoCore
+     * 扫到的还是 cache 里的旧/半新行 ⇒ 画面出现"一条条的残留"（实测 Pi5）。
+     * xwin_render → xwin_flip_buffer 里的 cpu_flush_dcache_range 正是做这个。
+     * 而 back_buffer 与硬件 fb 同址时 composite/flip memcpy 都会跳过
+     * （src==dst），所以调 xwin_render 不会覆坏刚转换好的 16bpp 数据。 */
+    if (did_convert) {
+      t0 = screen_now_ms();
+      xwin_update(gscreen.xwin_handle);
+      t1 = screen_now_ms();
+      g_acc_update_ms += t1 - t0;
+
+      t0 = t1;
+      xwin_render();
+      t1 = screen_now_ms();
+      g_acc_render_ms += t1 - t0;
+
+      screen_stats_frame_done();
+      return;
     }
     /* DIRECT: buffer=LCD FB, 跳过拷贝; BUFFER: cached buffer 一次性 blit */
     t0 = screen_now_ms();
