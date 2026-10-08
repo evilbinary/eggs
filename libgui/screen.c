@@ -971,7 +971,11 @@ void screen_init_with_mode(screen_mode_t mode) {
     if (gscreen.width == 0) gscreen.width = 480;
     if (gscreen.height == 0) gscreen.height = 320;
     if (gscreen.bpp == 0) gscreen.bpp = 32;
-    gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+    /* 【画布字节数按"画布格式"算】默认 ARGB8888(=4 字节/像素，与历史一致)；
+     * 若应用把 canvas_fmt 设成 RGB555/565，则是 2 字节/像素。
+     * flush 时再按"画布格式 × 硬件格式"自动转换提交。 */
+    gscreen.buffer_length =
+        gscreen.width * gscreen.height * (int)screen_fmt_bytes(screen_canvas_format());
     gscreen.buffer = malloc(gscreen.buffer_length);
     gscreen.pbuffer = gscreen.buffer;
     gscreen.cur.x = 0;
