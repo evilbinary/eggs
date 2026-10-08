@@ -698,6 +698,221 @@ void screen_init_buffer(void) {
   screen_init_with_mode(SCREEN_MODE_XWIN_BUFFER);
 }
 
+/* 【硬件 fb 的真实格式】优先用驱动申报的 format；未申报(0)时按 bpp 推断
+ * （历史约定：16bpp 按 RGB555）。 */
+static u32 screen_fb_format(void) {
+  u32 f = gscreen.fb.format;
+  if (f != 0) {
+    return f;
+  }
+  if (gscreen.fb.bpp == 16) return FB_FMT_RGB555;
+  if (gscreen.fb.bpp == 24) return FB_FMT_RGB888;
+  if (gscreen.fb.bpp == 32) return FB_FMT_ARGB8888;
+  return FB_FMT_UNKNOWN;
+}
+
+/* 【画布格式（应用侧）】默认 ARGB8888（与历史行为一致：buffer 按 w*h*4
+ * 分配、像素 0xAARRGGBB）。gscreen.canvas_fmt 可被驱动/应用覆盖。 */
+static u32 screen_canvas_format(void) {
+  if (gscreen.canvas_fmt != 0) {
+    return gscreen.canvas_fmt;
+  }
+  return FB_FMT_ARGB8888;
+}
+
+/* 某格式每像素字节数（画布/硬件都用它算行宽）。 */
+static u32 screen_fmt_bytes(u32 fmt) {
+  switch (fmt) {
+    case FB_FMT_RGB555:
+    case FB_FMT_RGB565:
+    case FB_FMT_BGR565:
+      return 2;
+    case FB_FMT_RGB888:
+      return 3;
+    case FB_FMT_ARGB8888:
+      return 4;
+    default:
+      return 4;
+  }
+}
+
+/* ---- 单像素转换 ---- */
+
+/* 源 ARGB8888 → 目标 16bpp 各变体 */
+static inline u16 argb_to_rgb565(u32 c) {
+  /* R[23:16]→[15:11]  G[15:8]→[10:5]  B[7:0]→[4:0] */
+  u16 r = (u16)((c >> 19) & 0x1F);
+  u16 g = (u16)((c >> 10) & 0x3F);
+  u16 b = (u16)((c >> 3) & 0x1F);
+  return (u16)((r << 11) | (g << 5) | b);
+}
+static inline u16 argb_to_rgb555(u32 c) {
+  u16 r = (u16)((c >> 19) & 0x1F);
+  u16 g = (u16)((c >> 11) & 0x1F);
+  u16 b = (u16)((c >> 3) & 0x1F);
+  return (u16)((r << 10) | (g << 5) | b);
+}
+static inline u16 argb_to_bgr565(u32 c) {
+  /* R/B 交换：B 放高位、R 放低位 */
+  u16 r = (u16)((c >> 19) & 0x1F);
+  u16 g = (u16)((c >> 10) & 0x3F);
+  u16 b = (u16)((c >> 3) & 0x1F);
+  return (u16)((b << 11) | (g << 5) | r);
+}
+
+/* 源 16bpp 各变体 → 目标 ARGB8888（低位按位复制扩到 8 位，保证白仍是白） */
+static inline u32 rgb565_to_argb(u16 c) {
+  u32 r = (u32)((c >> 11) & 0x1F);
+  u32 g = (u32)((c >> 5) & 0x3F);
+  u32 b = (u32)(c & 0x1F);
+  r = (r << 3) | (r >> 2);
+  g = (g << 2) | (g >> 4);
+  b = (b << 3) | (b >> 2);
+  return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+static inline u32 rgb555_to_argb(u16 c) {
+  u32 r = (u32)((c >> 10) & 0x1F);
+  u32 g = (u32)((c >> 5) & 0x1F);
+  u32 b = (u32)(c & 0x1F);
+  r = (r << 3) | (r >> 2);
+  g = (g << 3) | (g >> 2);
+  b = (b << 3) | (b >> 2);
+  return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+static inline u32 bgr565_to_argb(u16 c) {
+  u32 b = (u32)((c >> 11) & 0x1F);
+  u32 g = (u32)((c >> 5) & 0x3F);
+  u32 r = (u32)(c & 0x1F);
+  r = (r << 3) | (r >> 2);
+  g = (g << 2) | (g >> 4);
+  b = (b << 3) | (b >> 2);
+  return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
+/* 16bpp ↔ 16bpp（只换色位布局，不改变每像素字节数） */
+static inline u16 rgb565_to_rgb555(u16 c) {
+  u16 r = (u16)((c >> 11) & 0x1F);
+  u16 g = (u16)((c >> 6) & 0x1F);
+  u16 b = (u16)((c >> 1) & 0x1F);
+  return (u16)((r << 10) | (g << 5) | b);
+}
+static inline u16 rgb555_to_rgb565(u16 c) {
+  u16 r = (u16)((c >> 10) & 0x1F);
+  u16 g = (u16)((c >> 5) & 0x1F);
+  u16 b = (u16)(c & 0x1F);
+  return (u16)((r << 11) | (g << 6) | b);
+}
+
+/* 【通用"源 32bpp → 目标 16bpp"驱动】to16 为单像素转换函数。
+ * 4 路展开 + u32 打包写（一次落两个 16bpp 像素）。 */
+typedef u16 (*pix_to16_fn)(u32);
+static void screen_canvas32_to16(u16* dst, const u32* src, u32 n,
+                                 pix_to16_fn to16) {
+  u32 i = 0;
+  if (dst == NULL || src == NULL) return;
+  while (i + 4 <= n) {
+    ((u32*)dst)[i / 2] =
+        (u32)to16(src[i]) | ((u32)to16(src[i + 1]) << 16);
+    ((u32*)dst)[i / 2 + 1] =
+        (u32)to16(src[i + 2]) | ((u32)to16(src[i + 3]) << 16);
+    i += 4;
+  }
+  for (; i < n; i++) {
+    dst[i] = to16(src[i]);
+  }
+}
+
+/* 【通用"源 16bpp → 目标 32bpp"驱动】to32 为单像素转换函数。 */
+typedef u32 (*pix_to32_fn)(u16);
+static void screen_canvas16_to32(u32* dst, const u16* src, u32 n,
+                                 pix_to32_fn to32) {
+  u32 i = 0;
+  if (dst == NULL || src == NULL) return;
+  for (i = 0; i < n; i++) {
+    dst[i] = to32(src[i]);
+  }
+}
+
+/* 【通用"源 16bpp → 目标 16bpp"驱动】to16x 为单像素转换函数。 */
+typedef u16 (*pix_16x_fn)(u16);
+static void screen_canvas16_to16(u16* dst, const u16* src, u32 n,
+                                 pix_16x_fn to16x) {
+  u32 i = 0;
+  if (dst == NULL || src == NULL) return;
+  while (i + 4 <= n) {
+    ((u32*)dst)[i / 2] =
+        (u32)to16x(src[i]) | ((u32)to16x(src[i + 1]) << 16);
+    ((u32*)dst)[i / 2 + 1] =
+        (u32)to16x(src[i + 2]) | ((u32)to16x(src[i + 3]) << 16);
+    i += 4;
+  }
+  for (; i < n; i++) {
+    dst[i] = to16x(src[i]);
+  }
+}
+
+/* 【画布 → 硬件 fb 的统一提交（双向自动转换）】
+ * 用画布格式(canvas_fmt，默认 ARGB8888)与硬件格式(fb.format)决定转换：
+ *   相同                        → memcpy / 同址不拷
+ *   32bpp → 16bpp(RGB565/555/BGR565) → 转换
+ *   16bpp(RGB565/555/BGR565) → 32bpp → 转换
+ *   16bpp ↔ 16bpp（布局不同）        → 转换
+ * 返回 1 = 已完成提交（调用方不要再走 xwin_blit/render）；
+ * 返回 0 = 无法处理（调用方走原 xwin 路径）。 */
+static int screen_commit_to_fb(u32 w, u32 h) {
+  u32 cfmt = screen_canvas_format();
+  u32 hwfmt = screen_fb_format();
+  void* src = (void*)gscreen.buffer;
+  void* dst = (void*)gscreen.fb.frambuffer;
+  u32 n = w * h;
+
+  if (src == NULL || dst == NULL || n == 0) return 0;
+  if (src == dst) return 1; /* 同址：应用直写 fb，无需提交 */
+
+  if (cfmt == hwfmt) {
+    memcpy(dst, src, (size_t)n * screen_fmt_bytes(cfmt));
+    return 1;
+  }
+
+  /* ---- 源 32bpp：ARGB8888 → 各 16bpp ---- */
+  if (cfmt == FB_FMT_ARGB8888) {
+    const u32* s = (const u32*)src;
+    switch (hwfmt) {
+      case FB_FMT_RGB565:
+        screen_canvas32_to16((u16*)dst, s, n, argb_to_rgb565); return 1;
+      case FB_FMT_BGR565:
+        screen_canvas32_to16((u16*)dst, s, n, argb_to_bgr565); return 1;
+      case FB_FMT_RGB555:
+        screen_canvas32_to16((u16*)dst, s, n, argb_to_rgb555); return 1;
+      default:
+        return 0; /* 24bpp/NV12 等：交给原 xwin 路径 */
+    }
+  }
+
+  /* ---- 源 16bpp → 目标 ---- */
+  if (cfmt == FB_FMT_RGB565 || cfmt == FB_FMT_RGB555 ||
+      cfmt == FB_FMT_BGR565) {
+    const u16* s = (const u16*)src;
+    if (hwfmt == FB_FMT_ARGB8888) {
+      pix_to32_fn f = (cfmt == FB_FMT_RGB565)   ? rgb565_to_argb
+                      : (cfmt == FB_FMT_RGB555) ? rgb555_to_argb
+                                                : bgr565_to_argb;
+      screen_canvas16_to32((u32*)dst, s, n, f);
+      return 1;
+    }
+    if (cfmt == FB_FMT_RGB565 && hwfmt == FB_FMT_RGB555) {
+      screen_canvas16_to16((u16*)dst, s, n, rgb565_to_rgb555); return 1;
+    }
+    if (cfmt == FB_FMT_RGB555 && hwfmt == FB_FMT_RGB565) {
+      screen_canvas16_to16((u16*)dst, s, n, rgb555_to_rgb565); return 1;
+    }
+    /* 其它 16↔16 组合暂不支持 */
+    return 0;
+  }
+
+  return 0; /* 未知组合：交给原 xwin 路径 */
+}
+
 /* 读 /dev/fb 信息到 gscreen.fb；成功返回 fd，失败返回 -1。
  * 宽高/地址用 ioctl 返回值，不依赖 INFO 写用户缓冲。 */
 static int screen_read_fb_info(void) {
@@ -709,12 +924,16 @@ static int screen_read_fb_info(void) {
   u32 h = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_HEIGHT, 0);
   u32 bpp = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_BPP, 0);
   u32 fb = (u32)ioctl(fd, IOC_READ_FRAMBUFFER, 0);
+  /* 【显示格式】驱动申报的 VGA_FMT_*（bpp 相同的 555/565 只能靠它区分），
+   * 用户态据此决定"画布 → 硬件 fb"的转换方式（见 screen_flush）。 */
+  u32 fmt = (u32)ioctl(fd, IOC_READ_FRAMBUFFER_FORMAT, 0);
   /* 勿用 IOC_READ_FRAMBUFFER_INFO 整结构拷贝：内核 vga_device_t 更长，
    * 会写穿 gscreen.fb 后面的 screen_mode / xwin_handle。 */
   if (w > 0) gscreen.fb.width = w;
   if (h > 0) gscreen.fb.height = h;
   if (bpp > 0) gscreen.fb.bpp = bpp;
   if (fb != 0) gscreen.fb.frambuffer = (u32*)(uintptr_t)fb;
+  gscreen.fb.format = fmt; /* 0=未申报 ⇒ 由 bpp 推断，见 screen_fb_format() */
   if (gscreen.fb.framebuffer_count == 0) {
     gscreen.fb.framebuffer_count = 1;
   }
@@ -729,6 +948,12 @@ static int screen_read_fb_info(void) {
 
 void screen_init_with_mode(screen_mode_t mode) {
   gscreen.screen_mode = mode;
+  /* 【画布格式：默认 ARGB8888】与历史行为一致（buffer 按 w*h*4 分配、
+   * 像素 0xAARRGGBB）。若硬件 fb 是别的格式（如 Pi5 的 RGB565），
+   * screen_flush 会按需自动转换。 */
+  if (gscreen.canvas_fmt == 0) {
+    gscreen.canvas_fmt = FB_FMT_ARGB8888;
+  }
 
   if (mode == SCREEN_MODE_XWIN || mode == SCREEN_MODE_XWIN_BUFFER) {
     /* 始终读 fb：要分辨率，更要 VA（DIRECT 直绘 LCD） */
@@ -1042,6 +1267,31 @@ void screen_flush() {
       return;
     }
 #endif
+    /* 【画布 → 硬件 fb：按格式自动选转换器（本层负责，xwin 不掺和）】
+     * 画布默认 ARGB8888（u32）；硬件 fb 的格式由驱动申报（Pi5 固件只给
+     * RGB565/16bpp）。若两者不同，这里做唯一一次转换写入硬件 fb；若相同
+     * 或同址，则退回原有 xwin_blit/render 路径（保持老平台行为不变）。
+     * 硬件 fb 的 VA 已在 screen_init 时经 xwin_get_fb 映射进本进程。 */
+    {
+      u32 w = gscreen.fb.width ? gscreen.fb.width : (u32)gscreen.width;
+      u32 h = gscreen.fb.height ? gscreen.fb.height : (u32)gscreen.height;
+      u32 hwfmt = screen_fb_format();
+      u32 cfmt = screen_canvas_format();
+      /* 【只在需要转换时接管】格式一致（或同址）时不要抢，交给下面原路径，
+       * 避免破坏老平台（含 NV12、DIRECT 直绘等）的既有行为。 */
+      if (hwfmt != cfmt && gscreen.buffer != NULL &&
+          (void*)gscreen.buffer != (void*)gscreen.fb.frambuffer) {
+        t0 = screen_now_ms();
+        if (screen_commit_to_fb(w, h)) {
+          t1 = screen_now_ms();
+          g_acc_blit_ms += t1 - t0;
+          /* 不调 xwin_render：它会按 32bpp 重画光标/合成，覆坏刚写的
+           * 16bpp 数据。硬件扫同一块 fb，写进去即生效。 */
+          screen_stats_frame_done();
+          return;
+        }
+      }
+    }
     /* DIRECT: buffer=LCD FB, 跳过拷贝; BUFFER: cached buffer 一次性 blit */
     t0 = screen_now_ms();
     if (gscreen.buffer != NULL &&

@@ -62,6 +62,10 @@ typedef struct screen_info {
   framebuffer_info_t fb;
   screen_mode_t screen_mode;     // 当前模式
   u32 xwin_handle;               // xwin 模式下的窗口句柄
+  /* 【画布格式（应用侧）】应用按这个格式画 buffer。默认 ARGB8888（与历史
+   * 行为一致：缓冲按 w*h*4 分配、像素按 0xAARRGGBB 写）。
+   * flush 时若与硬件 fb 的格式不一致，libgui 自动选对应的转换器提交。 */
+  u32 canvas_fmt;
 } screen_info_t;
 
 
@@ -75,6 +79,21 @@ typedef struct screen_info {
 #define IOC_READ_FRAMBUFFER_BPP _IOW(IOC_MAGIC, 6, int)
 #define IOC_FLUSH_FRAMBUFFER _IOW(IOC_MAGIC, 7, int)
 #define IOC_READ_FRAMBUFFER_INFO _IOW(IOC_MAGIC, 8, int)
+/* 【显示格式】VGA_FMT_*（见 duck/modules/vga/vga.h，编号必须与内核一致）：
+ * 0=UNKNOWN 1=RGB555 2=RGB565 3=BGR565 4=ARGB8888 5=RGB888 6=NV12。
+ * 【注意】别把"1"当成 NV12 —— 1 是 RGB555；libgui 里老的 `format==1`→NV12
+ * 判断是历史遗留（见 screen_flush 的 DB_BUFFER 分支），新代码请按下面常量。 */
+#define IOC_READ_FRAMBUFFER_FORMAT _IOW(IOC_MAGIC, 9, int)
+#define IOC_READ_FRAMBUFFER_TRANSFORM _IOW(IOC_MAGIC, 10, int)
+
+/* 显示格式常量（与内核 vga.h 的 VGA_FMT_* 对齐） */
+#define FB_FMT_UNKNOWN 0
+#define FB_FMT_RGB555 1
+#define FB_FMT_RGB565 2
+#define FB_FMT_BGR565 3
+#define FB_FMT_ARGB8888 4
+#define FB_FMT_RGB888 5
+#define FB_FMT_NV12 6
 
 void screen_init();
 void screen_init_buffer(void);
