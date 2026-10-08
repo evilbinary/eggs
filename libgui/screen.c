@@ -964,13 +964,16 @@ void screen_init_with_mode(screen_mode_t mode) {
     if (gscreen.fb.width > 0 && gscreen.fb.height > 0) {
       gscreen.width = (int)gscreen.fb.width;
       gscreen.height = (int)gscreen.fb.height;
-      if (gscreen.fb.bpp > 0) {
-        gscreen.bpp = (int)gscreen.fb.bpp;
-      }
     }
     if (gscreen.width == 0) gscreen.width = 480;
     if (gscreen.height == 0) gscreen.height = 320;
-    if (gscreen.bpp == 0) gscreen.bpp = 32;
+    /* 【gscreen.bpp 描述的是"画布"（应用往哪画），不是硬件 fb！】
+     * 之前直接把驱动的 fb bpp 抄过来（Pi5 上=16），于是应用看到 bpp=16 就
+     * 按 16bpp 写 32bpp 的画布 ⇒ 每行只写一半、后半是上一帧旧数据 ⇒
+     * 现象就是"移动时画面残留/不更新"。
+     * 画布深度由 canvas_fmt 决定（默认 ARGB8888=32），硬件 fb 的 16bpp
+     * 由 screen_flush 的转换器负责适配。 */
+    gscreen.bpp = (int)(screen_fmt_bytes(screen_canvas_format()) * 8);
     /* 【画布字节数按"画布格式"算】默认 ARGB8888(=4 字节/像素，与历史一致)；
      * 若应用把 canvas_fmt 设成 RGB555/565，则是 2 字节/像素。
      * flush 时再按"画布格式 × 硬件格式"自动转换提交。 */
@@ -1277,14 +1280,23 @@ void screen_flush() {
      * 或同址，则退回原有 xwin_blit/render 路径（保持老平台行为不变）。
      * 硬件 fb 的 VA 已在 screen_init 时经 xwin_get_fb 映射进本进程。 */
     {
-      u32 w = gscreen.fb.width ? gscreen.fb.width : (u32)gscreen.width;
-      u32 h = gscreen.fb.height ? gscreen.fb.height : (u32)gscreen.height;
+      /* 【尺寸用"画布"的，不是 fb 的】转换的源是应用画布，宽高必须与画布
+       * 一致，否则在"fb 尺寸 ≠ 画布尺寸"时会错位（表现为条纹/斜切残留）。 */
+      u32 w = (u32)gscreen.width;
+      u32 h = (u32)gscreen.height;
       u32 hwfmt = screen_fb_format();
       u32 cfmt = screen_canvas_format();
       /* 【只在需要转换时接管】格式一致（或同址）时不要抢，交给下面原路径，
        * 避免破坏老平台（含 NV12、DIRECT 直绘等）的既有行为。 */
       if (hwfmt != cfmt && gscreen.buffer != NULL &&
           (void*)gscreen.buffer != (void*)gscreen.fb.frambuffer) {
+        static int dbg_commit = 0;
+        if (!dbg_commit) {
+          dbg_commit = 1;
+          printf("screen commit: canvas %dx%d (%u->%u) buf_len=%d fb=%p buf=%p\n",
+                 (int)w, (int)h, cfmt, hwfmt, (int)gscreen.buffer_length,
+                 (void*)gscreen.fb.frambuffer, (void*)gscreen.buffer);
+        }
         t0 = screen_now_ms();
         if (screen_commit_to_fb(w, h)) {
           t1 = screen_now_ms();
