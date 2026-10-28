@@ -37,6 +37,8 @@ if has_config("app"):
         # wayland 核心库（client/server/shm/cursor，协议代码预生成）
         # 依赖 libffi（libwayland 用 ffi_call 调用户实现的协议函数）
         'libffi', 'libevdev', 'libwayland',
+        # pixman：libweston 的 pixman 渲染器依赖
+        'libpixman', 'libxkbcommon', 'weston',
         # libinput 及其两个依赖库：libmtdev（协议 A→B 转换）、
         # libudev（libudev-zero 实现，设备枚举/属性）。
         'libmtdev', 'libudev', 'libinput',
