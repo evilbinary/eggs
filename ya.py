@@ -34,6 +34,9 @@ if has_config("app"):
         'libquickjs',
         'libyui',
         'libcjson',
+        # wayland 核心库（client/server/shm/cursor，协议代码预生成）
+        # 依赖 libffi（libwayland 用 ffi_call 调用户实现的协议函数）
+        'libffi', 'libevdev', 'libwayland',
         # armv5（无 LDREX）专用：补 libgcc 缺失的 __sync_xxx/__atomic_xxx
         'libatomic'
 
