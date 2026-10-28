@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -240,11 +241,45 @@ struct udev_list_entry *udev_device_get_sysattr_list_entry(struct udev_device *u
 
 const char *udev_device_get_property_value(struct udev_device *udev_device, const char *key)
 {
+    const char *value;
+
     if (!udev_device || !key) {
         return NULL;
     }
 
-    return udev_list_entry_get_value(udev_list_entry_get_by_name(&udev_device->properties, key));
+    value = udev_list_entry_get_value(udev_list_entry_get_by_name(&udev_device->properties, key));
+
+    if (value) {
+        return value;
+    }
+
+    /* 落到 udev 的 input_id 内建职责上：EV/ABS/REL/KEY/PROP 这几个键在真 udev
+     * 里是由 udevd 读 sysfs 的 capabilities/<type> 生成后写进设备属性的。
+     * 没有 udevd 时不生成这些属性，调用方（libinput 的设备分类）就永远看不到
+     * 能力位；这里按同一语义直接从内核 sysfs 取（内容与 EVIOCGBIT 一致），
+     * 取到后并入属性表，后续查询走缓存。只影响这五个键。 */
+    if (strcmp(key, "EV") == 0 || strcmp(key, "KEY") == 0 ||
+        strcmp(key, "REL") == 0 || strcmp(key, "ABS") == 0 ||
+        strcmp(key, "PROP") == 0) {
+        char sysattr[32];
+        size_t i;
+
+        snprintf(sysattr, sizeof(sysattr), "capabilities/");
+        /* sysfs 文件名是 "capabilities/ev"，属性名是 "EV"：转小写拼接 */
+        for (i = 0; key[i] != '\0' && i < 8; i++) {
+            sysattr[13 + i] = (char)(key[i] | 0x20);
+            sysattr[13 + i + 1] = '\0';
+        }
+
+        value = udev_device_get_sysattr_value(udev_device, sysattr);
+
+        if (value) {
+            udev_list_entry_add(&udev_device->properties, key, value, 0);
+            return value;
+        }
+    }
+
+    return NULL;
 }
 
 const char *udev_device_get_sysattr_value(struct udev_device *udev_device, const char *sysattr)
