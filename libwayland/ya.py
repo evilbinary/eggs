@@ -32,10 +32,7 @@ add_files(
     'cursor/os-compatibility.c',
 )
 
-add_includedirs(
-    '.',
-    './src',
-    './gen',
-    './cursor',
-    public=True,
-)
+# '.'（config.h 所在）保持私有：否则依赖方的 #include "config.h" 会命中
+# 这里的 config.h，把自己的构建配置顶掉。
+add_includedirs('./src', './gen', './cursor', public=True)
+add_includedirs('.')

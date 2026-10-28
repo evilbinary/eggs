@@ -21,8 +21,7 @@ add_files(
     'libevdev/libevdev-uinput.c',
 )
 
-add_includedirs(
-    '.',            # config.h
-    './include',    # linux/input.h 等 uapi 头
-    public=True,
-)
+# '.'（config.h 所在）保持私有：否则依赖方的 #include "config.h" 会命中
+# 这里的 config.h，把自己的构建配置顶掉。
+add_includedirs('./include', public=True)   # linux/input.h 等 uapi 头
+add_includedirs('.')                        # config.h

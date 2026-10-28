@@ -55,4 +55,8 @@
 
 #define ALLOW_DEPRECATED_MODESET 0
 
+/* shared/xalloc.h 的 OOM 提示里用了 glibc 的 program_invocation_short_name，
+ * musl 没有这个全局量。这里宏替换成进程名常量（只影响错误输出文本）。 */
+#define program_invocation_short_name "weston"
+
 #endif /* WESTON_CONFIG_H */

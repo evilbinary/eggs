@@ -58,8 +58,8 @@ add_files(
     'pixman/pixman-utils.c',
 )
 
-add_includedirs(
-    '.',          # config.h
-    './pixman',   # pixman.h / pixman-version.h
-    public=True,
-)
+# 注意：'.'（放 config.h 的目录）必须保持私有。若随依赖传播出去，
+# 依赖方的 #include <config.h> 会先命中 pixman 的 config.h，把 weston 之类
+# 自己的 config.h 顶掉（实测踩过：weston 编译时 LIBWESTON_MODULEDIR 未定义）。
+add_includedirs('./pixman', public=True)   # pixman.h / pixman-version.h
+add_includedirs('.')                        # config.h（仅本目标可见）
