@@ -1229,3 +1229,45 @@ static struct pixman_renderer_interface pixman_renderer_interface = {
 	.output_create = pixman_renderer_output_create,
 	.output_destroy = pixman_renderer_output_destroy,
 };
+
+/* ------------------------------------------------------------------
+ * YiYiYa 本地补丁：读 output 影子缓冲的像素，供合成链路自检。
+ * 上游没有公开 API；app/wayland 的 wl-weston 用它验证 client 画的像素
+ * 经 libweston + pixman 合成后确实落进了 output 缓冲。
+ * ------------------------------------------------------------------ */
+WL_EXPORT int
+weston_pixman_output_get_size(struct weston_output *output, int *w, int *h)
+{
+	struct pixman_output_state *os = get_output_state(output);
+
+	if (!os || !os->shadow_image)
+		return -1;
+
+	*w = pixman_image_get_width(os->shadow_image);
+	*h = pixman_image_get_height(os->shadow_image);
+	return 0;
+}
+
+WL_EXPORT int
+weston_pixman_output_read_pixel(struct weston_output *output, int x, int y,
+				uint32_t *argb)
+{
+	struct pixman_output_state *os = get_output_state(output);
+	pixman_image_t *img;
+	const uint8_t *row;
+	int stride, w, h;
+
+	if (!os || !os->shadow_image)
+		return -1;
+
+	img = os->shadow_image;
+	w = pixman_image_get_width(img);
+	h = pixman_image_get_height(img);
+	if (x < 0 || y < 0 || x >= w || y >= h)
+		return -1;
+
+	stride = pixman_image_get_stride(img);
+	row = (const uint8_t *)pixman_image_get_data(img) + (size_t)y * stride;
+	*argb = ((const uint32_t *)row)[x];
+	return 0;
+}

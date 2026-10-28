@@ -37,6 +37,7 @@ add_files(
     'compat/drm-stubs.c',
     'compat/frame-stubs.c',
     'compat/backend-access.c',
+    'compat/mini-shell.c',
     # ---- libweston 核心 ----
     'libweston/alpha-modifier.c',
     'libweston/animation.c',
