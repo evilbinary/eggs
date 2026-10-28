@@ -20,6 +20,7 @@ add_files(
     'src/types.c',
     'src/raw_api.c',
     'src/ffi.c',
+    'src/closures.c', # ffi_data_to_code_pointer 等（wayland 不调用 closure，但链接需要）
     'src/aarch64/ffi.c',
     'src/aarch64/sysv.S',
 )
