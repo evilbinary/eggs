@@ -35,6 +35,8 @@ add_deps("evdev")
 add_files(
     # ---- 缺失依赖的替身（libdrm 名字查询、cairo 窗口边框）----
     'compat/drm-stubs.c',
+    'compat/frame-stubs.c',
+    'compat/backend-access.c',
     # ---- libweston 核心 ----
     'libweston/alpha-modifier.c',
     'libweston/animation.c',
@@ -113,6 +115,9 @@ add_files(
     '../wayland-protocols/gen/text-input-unstable-v1-protocol.c',
     '../wayland-protocols/gen/viewporter-protocol.c',
     '../wayland-protocols/gen/xdg-output-unstable-v1-protocol.c',
+    # libweston-desktop 的 xdg-shell 服务端实现依赖这两个接口定义
+    '../wayland-protocols/gen/xdg-shell-protocol.c',
+    '../wayland-protocols/gen/xdg-shell-unstable-v6-protocol.c',
     '../wayland-protocols/gen/weston-content-protection-protocol.c',
     '../wayland-protocols/gen/weston-debug-protocol.c',
     '../wayland-protocols/gen/weston-direct-display-protocol.c',
