@@ -24,6 +24,10 @@
 
 #define HAVE_LOCALE_H 1
 
+/* musl 的 dirent.h 直接提供 versionsort()（还有 strverscmp），不要再让
+ * src/libinput-versionsort.h 生成静态同名实现（会与 libc 声明冲突）。 */
+#define HAVE_VERSIONSORT 1
+
 #define HAVE_LIBEVDEV_DISABLE_PROPERTY 1
 
 #define HAVE_LIBWACOM 0

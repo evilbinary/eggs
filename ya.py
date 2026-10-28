@@ -37,8 +37,9 @@ if has_config("app"):
         # wayland 核心库（client/server/shm/cursor，协议代码预生成）
         # 依赖 libffi（libwayland 用 ffi_call 调用户实现的协议函数）
         'libffi', 'libevdev', 'libwayland',
-        # 输入设备处理库（静态库，依赖 libevdev；udev/mtdev 用最小垫片）
-        'libinput',
+        # libinput 及其两个依赖库：libmtdev（协议 A→B 转换）、
+        # libudev（libudev-zero 实现，设备枚举/属性）。
+        'libmtdev', 'libudev', 'libinput',
         # armv5（无 LDREX）专用：补 libgcc 缺失的 __sync_xxx/__atomic_xxx
         'libatomic'
 
