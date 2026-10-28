@@ -22,6 +22,11 @@ set_kind("static")
 
 add_packages(get_config('default_libc'))
 
+# weston 源码里到处是 #include "config.h"，但整个仓库的 include path 上已经有
+# duck/kernel/config.h（内核配置），它会先命中，把 weston 的构建配置顶掉。
+# 因此自己的配置叫 weston-config.h，并用 -include 强制先吃进来。
+add_cflags('-include eggs/weston/weston-config.h')
+
 add_deps("wayland", "pixman", "xkbcommon")
 # 只为 <linux/input.h>（compositor.c / input.c 用 input_event 等结构）；
 # libevdev 自身不会被链接进来（没有符号被引用）。

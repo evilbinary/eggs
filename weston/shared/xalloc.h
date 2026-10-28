@@ -45,8 +45,9 @@ abort_oom_if_null(void *p)
 	if (p)
 		return p;
 
-	written = write(STDERR_FILENO, program_invocation_short_name,
-		        strlen(program_invocation_short_name));
+	/* 移植改动：上游这里是 glibc 专有的 program_invocation_short_name，
+	 * musl 没有这个全局量，直接用进程名常量（只影响 OOM 提示前缀）。 */
+	written = write(STDERR_FILENO, "weston", strlen("weston"));
 	written = write(STDERR_FILENO, oommsg, strlen(oommsg));
 
 	abort();

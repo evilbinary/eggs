@@ -34,29 +34,21 @@
 /* 后端/渲染器裁剪：只留 headless + pixman */
 #define BUILD_HEADLESS_COMPOSITOR 1
 
-/* libc / 平台能力探测（musl 全部具备） */
+/* libc / 平台能力探测（musl 全部具备）。
+ *
+ * 注意：weston 源码对能力宏用的是 #ifdef（不是 #if），所以"没有这个能力"
+ * 必须【不定义】，写成 #define X 0 反而会打开对应分支（踩过：HAVE_PANGO 0
+ * 仍然去 include <pango/pangocairo.h>）。 */
 #define HAVE_MEMFD_CREATE 1
 #define HAVE_STRCHRNUL 1
 #define HAVE_MKOSTEMP 1
 #define HAVE_POSIX_FALLOCATE 1
 #define HAVE___BUILTIN_EXPECT 1
-#define HAVE_COMPOSE_AND_KANA 0
-#define HAVE_PANGO 0
-#define HAVE_JPEG 0
-#define HAVE_WEBP 0
-#define HAVE_PAM 0
 
-/* 不启用 EGL/vulkan：EGL_NO_X11 之类宏仅 gl-renderer 需要，这里不定义 */
-#define EGL_NO_X11 0
-#define MESA_EGL_NO_X11_HEADERS 0
+/* 未启用：HAVE_PANGO / HAVE_JPEG / HAVE_WEBP / HAVE_PAM / HAVE_LCMS /
+ * ENABLE_EGL / ENABLE_VULKAN / HAVE_GBM 一律不定义。 */
 
 /* musl 的 dev_t 宏在 sysmacros.h 里 */
 #define MAJOR_IN_SYSMACROS 1
-
-#define ALLOW_DEPRECATED_MODESET 0
-
-/* shared/xalloc.h 的 OOM 提示里用了 glibc 的 program_invocation_short_name，
- * musl 没有这个全局量。这里宏替换成进程名常量（只影响错误输出文本）。 */
-#define program_invocation_short_name "weston"
 
 #endif /* WESTON_CONFIG_H */
