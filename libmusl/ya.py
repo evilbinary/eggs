@@ -47,6 +47,15 @@ musl_arch = {
     'x86': 'i386',
 }.get(get_arch_type(), 'arm')
 
+# 动态链接器文件名由 support.musl_ldso_name() 统一给出（arm32→ld-musl-arm.so.1、
+# arm64→ld-musl-aarch64.so.1、riscv→ld-musl-riscv64.so.1、x86→ld-musl-i386.so.1），
+# 与 xenv/env.py 里写进 PT_INTERP 的路径保持同一来源。
+try:
+    import support as _support
+    _ldso_name = _support.musl_ldso_name(get_arch_type())
+except Exception:
+    _ldso_name = 'ld-musl-' + musl_arch + '.so.1'
+
 add_includedirs(
     "include",
     "obj/include",
@@ -76,7 +85,49 @@ configure(
         'CFLAGS=' + cflags_str,
         '--disable-optimize',
         '--enable-debug=yes',
-        #'--enable-shared=yes',
-        '--disable-shared',
-        '--enable-static=yes'
+        # 同时出动态库：libc.so（就是镜像里的 /lib/<ldso 名字>，
+        # 内核 loader 的 PT_INTERP 会加载它，dlopen/dlsym 由其中的 ldso 提供真实现）。
+        # 静态 libc.a 照旧生成，其它程序继续静态链接。
+        '--enable-shared',
+        '--enable-static=yes',
+        # musl 默认把 ld-musl-<arch>.so.1 装到 $(syslibdir)=/lib（宿主机路径），
+        # 装进构建目录里，再由下面的部署逻辑拷到 app/resource/lib 供镜像使用。
+        '--syslibdir=' + _pyos.path.abspath(
+            _pyos.path.join('build', str(get_plat()), str(get_arch()),
+                            str(get_config('mode')), 'musl', 'lib'))
 )
+
+
+# 动态链接器落到镜像的 /lib 下：内核 loader 按 PT_INTERP 里的
+# "/lib/ld-musl-<arch>.so.1" 打开它，dlopen 加载的 .so 也由它解析。
+# （musl 的 libc.so 本身就是动态链接器：入口是 ldso 的 _dlstart。）
+_dyn_loader_dst_dir = _pyos.path.join('app', 'resource', 'lib')
+_musl_install_lib = _pyos.path.join('build', str(get_plat()), str(get_arch()),
+                                    str(get_config('mode')), 'musl', 'lib')
+
+# 优先用 musl 自己装出来的名字（SUBARCH 之类若有差异也自动跟上），
+# 再回退到按架构拼出来的名字 + 直接取 libc.so。
+_dyn_loader_srcs = []
+for _dir in (_musl_install_lib, _pyos.path.join(_musl_oot, 'lib')):
+    _d = _pyos.path.join(_dir, _ldso_name)
+    if _pyos.path.exists(_d):
+        _dyn_loader_srcs.append((_d, _ldso_name))
+        break
+_dyn_loader_srcs += [
+    (_pyos.path.join(_musl_install_lib, 'libc.so'), _ldso_name),
+    (_pyos.path.join(_musl_oot, 'lib', 'libc.so'), _ldso_name),
+]
+
+for _src, _name in _dyn_loader_srcs:
+    if not _pyos.path.exists(_src):
+        continue
+    _pyos.makedirs(_dyn_loader_dst_dir, exist_ok=True)
+    _dst = _pyos.path.join(_dyn_loader_dst_dir, _name)
+    if (not _pyos.path.exists(_dst) or
+            _pyos.path.getmtime(_src) > _pyos.path.getmtime(_dst)):
+        import shutil as _shutil
+        _shutil.copyfile(_src, _dst)
+        print('copy dynamic loader {} -> {}'.format(_src, _dst))
+    break
+else:
+    print('warn: {} not built yet, skip dynamic loader deploy'.format(_ldso_name))

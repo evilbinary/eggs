@@ -36,8 +36,6 @@ add_files(
     # ---- 缺失依赖的替身（libdrm 名字查询、cairo 窗口边框）----
     'compat/drm-stubs.c',
     'compat/frame-stubs.c',
-    'compat/backend-access.c',
-    'compat/mini-shell.c',
     'compat/libdisplay-info-stub.c',
     # ---- libweston 核心 ----
     'libweston/alpha-modifier.c',
@@ -87,8 +85,8 @@ add_files(
     'libweston/desktop/xdg-shell-v6.c',
     # ---- shell 公共工具 ----
     'libweston/shell-utils/shell-utils.c',
-    # ---- headless 后端 ----
-    'libweston/backend-headless/headless.c',
+    # 注意：headless 后端（libweston/backend-headless/headless.c）不在这里，
+    # 它按上游的做法编成独立模块 headless-backend.so，运行期由 dlopen 加载。
     # ---- libshared：libweston 实际用到的子集 ----
     'shared/config-parser.c',
     'shared/option-parser.c',
