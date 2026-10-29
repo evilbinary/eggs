@@ -1005,11 +1005,6 @@ wet_load_module(struct weston_compositor *compositor,
 	return 0;
 }
 
-#ifdef WESTON_STATIC_MODULES
-/* 静态链接移植：kiosk-shell 的入口，编译期已链入本可执行文件 */
-extern int wet_shell_init(struct weston_compositor *ec, int *argc, char *argv[]);
-#endif
-
 static int
 wet_load_shell(struct weston_compositor *compositor,
 	       const char *_name, int *argc, char *argv[])
@@ -1018,12 +1013,6 @@ wet_load_shell(struct weston_compositor *compositor,
 	int (*shell_init)(struct weston_compositor *ec,
 			  int *argc, char *argv[]);
 
-#ifdef WESTON_STATIC_MODULES
-	/* 只有 kiosk-shell 编进来，_name 仅用于日志提示 */
-	(void)_name;
-	name = NULL;
-	shell_init = wet_shell_init;
-#else
 	if (strstr(_name, "-shell.so"))
 		name = strdup(_name);
 	else
@@ -1031,7 +1020,6 @@ wet_load_shell(struct weston_compositor *compositor,
 	assert(name);
 
 	shell_init = weston_load_module(name, "wet_shell_init", MODULEDIR);
-#endif
 	free(name);
 
 	if (!shell_init)
@@ -5297,13 +5285,6 @@ wet_main(int argc, char *argv[], const struct weston_testsuite_data *test_data)
 
 	wl_list_init(&wet.layoutput_list);
 	wl_list_init(&wet.backend_list);
-
-#ifdef WESTON_STATIC_MODULES
-	/* 本系统的 shell 没有 export 命令，XDG_RUNTIME_DIR 通常为空；
-	 * socket 落在 /tmp（与 wl-smoke / wl-weston 的惯例一致）。 */
-	if (!getenv("XDG_RUNTIME_DIR"))
-		setenv("XDG_RUNTIME_DIR", "/tmp", 1);
-#endif
 
 	os_fd_set_cloexec(fileno(stdin));
 

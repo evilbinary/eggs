@@ -3920,7 +3920,6 @@ weston_output_repaint(struct weston_output *output)
 {
 	WESTON_TRACE_FUNC();
 	struct weston_compositor *ec = output->compositor;
-
 	struct weston_paint_node *pnode;
 	struct weston_animation *animation, *next;
 	struct wl_resource *cb, *cnext;
@@ -11147,12 +11146,6 @@ weston_compositor_get_user_data(struct weston_compositor *compositor)
 	return compositor->user_data;
 }
 
-#ifdef WESTON_STATIC_MODULES
-/* 静态链接移植：backend-headless/headless.c 的入口，编译期已链入本库 */
-extern int weston_backend_init(struct weston_compositor *compositor,
-			       struct weston_backend_config *config_base);
-#endif
-
 static const char * const backend_map[] = {
 	[WESTON_BACKEND_DRM] =		"drm-backend.so",
 	[WESTON_BACKEND_HEADLESS] =	"headless-backend.so",
@@ -11189,18 +11182,9 @@ weston_compositor_load_backend(struct weston_compositor *compositor,
 	if (backend >= ARRAY_LENGTH(backend_map))
 		return NULL;
 
-#ifdef WESTON_STATIC_MODULES
-	/* 只有 headless 编进来（见 weston-config.h 的裁剪说明） */
-	if (backend != WESTON_BACKEND_HEADLESS) {
-		weston_log("Backend %d not built in\n", (int)backend);
-		return NULL;
-	}
-	backend_init = weston_backend_init;
-#else
 	backend_init = weston_load_module(backend_map[backend],
 					  "weston_backend_init",
 					  LIBWESTON_MODULEDIR);
-#endif
 	if (!backend_init)
 		return NULL;
 
