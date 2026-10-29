@@ -15,6 +15,8 @@
 # 内核侧 sysfs 由 posix 层提供（见 sysfn_fs.c 的 sysfs 垫片）。
 target("udev")
 set_kind("static")
+# 供 libweston.so 静态链入：共享库要求位置无关代码
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 

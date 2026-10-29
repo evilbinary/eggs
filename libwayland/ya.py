@@ -13,6 +13,8 @@
 # echo compositor + 最小 wl_shm client 打通握手。
 target("wayland")
 set_kind("static")
+# 供 libweston.so 静态链入：共享库要求位置无关代码
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 # 最小 ffi（wayland 只用 ffi_call；glibc/musl 的 ffi 依赖太重）

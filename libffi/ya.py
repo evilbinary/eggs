@@ -12,6 +12,8 @@
 # 不编 closures.c / java_raw_api.c：wayland 只用 ffi_call + prep_cif。
 target("ffi")
 set_kind("static")
+# 供 libweston.so 静态链入：共享库要求位置无关代码
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 

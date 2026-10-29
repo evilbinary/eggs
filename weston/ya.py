@@ -4,13 +4,17 @@
 # * 作者: evilbinary on 01/01/20
 # * 邮箱: rootdebug@163.com
 # ********************************************************************
-# weston 16.0.1 的 libweston（静态库，阶段 1：headless + pixman 渲染器）。
+# weston 16.0.1 的 libweston（共享库 libweston.so：headless + pixman 渲染器）。
 #
 # 不走 meson：config.h / git-version.h / include/libweston/version.h 手工给，
 # 协议代码用 eggs/wayland-protocols/gen/ 里预生成的（见其 gen.sh）。
 #
 # 内容 = 上游 libweston/meson.build 的 srcs_libweston + libweston-desktop +
-# shell-utils + backend-headless/headless.c + libshared 的构建期必需子集。
+# shell-utils + libshared 的构建期必需子集。
+#
+# 为什么是共享库：本系统现在有真正的动态加载（musl ldso），weston 本体按上游
+# 架构运行——可执行文件 NEEDED libweston.so，shell/backend 模块是独立 .so，
+# 由 dlopen 加载并从 libweston.so 解析符号。
 #
 # 裁掉的东西（阶段 1 不需要，且各自拖大依赖）：
 #   renderer-gl（EGL/GLES）、renderer-vulkan、backend-{drm,wayland,x11,
@@ -18,7 +22,9 @@
 #
 # 依赖：wayland（client+server）、pixman、xkbcommon。
 target("weston")
-set_kind("static")
+set_kind("shared")
+# 共享库必须按位置无关编（模块和可执行文件都要通过 GOT/PLT 引用它）
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 
@@ -27,6 +33,7 @@ add_packages(get_config('default_libc'))
 # 因此自己的配置叫 weston-config.h，并用 -include 强制先吃进来。
 add_cflags('-include eggs/weston/weston-config.h')
 
+# 这三个是静态库（也都按 -fPIC 编，见各自的 ya.py），随 libweston.so 一起链进去。
 add_deps("wayland", "pixman", "xkbcommon")
 # 只为 <linux/input.h>（compositor.c / input.c 用 input_event 等结构）；
 # libevdev 自身不会被链接进来（没有符号被引用）。

@@ -11,6 +11,8 @@
 # 上游无任何外部依赖（只用 libc + linux/input.h），编译单元见 src/Makefile.am。
 target("mtdev")
 set_kind("static")
+# 供 libweston.so 静态链入：共享库要求位置无关代码
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 

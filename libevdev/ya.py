@@ -12,6 +12,8 @@
 # uinput 接口就不受影响（libinput 用的是 libevdev 的核心事件解析）。
 target("evdev")
 set_kind("static")
+# 供 libweston.so 静态链入：共享库要求位置无关代码
+add_cflags('-fPIC')
 
 add_packages(get_config('default_libc'))
 
