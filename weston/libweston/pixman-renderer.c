@@ -109,6 +109,8 @@ get_renderer(struct weston_compositor *ec)
 	return (struct pixman_renderer *)ec->renderer;
 }
 
+
+
 #define D2F(v) pixman_double_to_fixed((double)v)
 
 static void
@@ -608,6 +610,8 @@ pixman_renderer_repaint_output(struct weston_output *output,
 
 	assert(po);
 	assert(((struct pixman_renderbuffer *) renderbuffer)->output == output);
+
+
 
 	/* Accumulate damage in all renderbuffers */
 	wl_list_for_each(rb, &po->renderbuffer_list, link) {

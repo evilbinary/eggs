@@ -14,6 +14,9 @@ int weston_pixman_output_read_pixel(struct weston_output *output, int x, int y,
 /* 整帧搬运用：影子缓冲的原始像素、行距、尺寸（data 只读，归 pixman 所有） */
 int weston_pixman_output_get_shadow(struct weston_output *output, void **data,
 				    int *stride, int *w, int *h);
+/* 输出影子缓冲里单个像素（自检用） */
+int weston_pixman_output_read_pixel(struct weston_output *output, int x, int y,
+				    uint32_t *argb);
 
 /* /dev/fb0 的自研 ioctl：对应 duck/modules/vga/vga.h 的
  * VGA_IOC_READ_FRAMBUFFER_{WIDTH,HEIGHT,BPP}（_IOW('v', 4/5/6, int)）。
