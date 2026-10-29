@@ -41,6 +41,8 @@ struct {
 } backend_name_map[] = {
 	{ "drm", "drm-backend.so", WESTON_BACKEND_DRM },
 	{ "headless", "headless-backend.so", WESTON_BACKEND_HEADLESS },
+	/* YiYiYa 本地补丁：--backend=fbdev / fbdev-backend.so */
+	{ "fbdev", "fbdev-backend.so", WESTON_BACKEND_FBDEV },
 	{ "pipewire", "pipewire-backend.so", WESTON_BACKEND_PIPEWIRE },
 	{ "rdp", "rdp-backend.so", WESTON_BACKEND_RDP },
 	{ "vnc", "vnc-backend.so", WESTON_BACKEND_VNC },

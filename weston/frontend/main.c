@@ -63,6 +63,8 @@
 
 #include <libweston/backend-drm.h>
 #include <libweston/backend-headless.h>
+/* YiYiYa 本地补丁：直接渲染到 /dev/fb0 的后端 */
+#include "backend-fbdev.h"
 #include <libweston/backend-pipewire.h>
 #include <libweston/backend-rdp.h>
 #include <libweston/backend-vnc.h>
@@ -4306,6 +4308,73 @@ load_headless_backend(struct weston_compositor *c,
 	return 0;
 }
 
+/* YiYiYa 本地补丁：fbdev 后端（compat/backend-fbdev.c）。
+ * 尺寸默认跟上内核 sysconf 的默认模式 1024x768；实际以 framebuffer 几何为准，
+ * 后端 set_size 里会校正。 */
+static int
+fbdev_backend_output_configure(struct weston_output *output)
+{
+	struct wet_output_config defaults = {
+		.width = 1024,
+		.height = 768,
+		.scale = 1,
+		.transform = WL_OUTPUT_TRANSFORM_NORMAL,
+	};
+
+	wet_configure_windowed_output_from_config(output, &defaults,
+						  WESTON_WINDOWED_OUTPUT_FBDEV);
+	return 0;
+}
+
+static int
+load_fbdev_backend(struct weston_compositor *c,
+		   int *argc, char **argv, struct weston_config *wc,
+		   enum weston_renderer_type renderer)
+{
+	const struct weston_windowed_output_api *api;
+	struct weston_fbdev_backend_config config = {{ 0, }};
+	struct wet_backend *wb;
+	struct wet_output_config *parsed_options;
+	char *device = NULL;
+
+	parsed_options = wet_init_parsed_options(c);
+	if (!parsed_options)
+		return -1;
+
+	const struct weston_option options[] = {
+		{ WESTON_OPTION_INTEGER, "width", 0, &parsed_options->width },
+		{ WESTON_OPTION_INTEGER, "height", 0, &parsed_options->height },
+		{ WESTON_OPTION_INTEGER, "scale", 0, &parsed_options->scale },
+		{ WESTON_OPTION_STRING, "device", 0, &device },
+		{ WESTON_OPTION_INTEGER, "refresh-rate", 0, &config.refresh },
+	};
+	config.refresh = -1;
+
+	parse_options(options, ARRAY_LENGTH(options), argc, argv);
+
+	(void)wc;
+	config.device_path = device;
+	config.base.struct_version = WESTON_FBDEV_BACKEND_CONFIG_VERSION;
+	config.base.struct_size = sizeof(struct weston_fbdev_backend_config);
+
+	wb = wet_compositor_load_backend(c, WESTON_BACKEND_FBDEV, &config.base,
+					 simple_heads_changed,
+					 fbdev_backend_output_configure);
+	if (!wb)
+		return -1;
+
+	api = weston_windowed_output_get_api(c, WESTON_WINDOWED_OUTPUT_FBDEV);
+	if (!api) {
+		weston_log("Cannot use weston_windowed_output_api (fbdev).\n");
+		return -1;
+	}
+
+	if (api->create_head(wb->backend, "fbdev") < 0)
+		return -1;
+
+	return 0;
+}
+
 static int
 pipewire_backend_output_configure(struct weston_output *output)
 {
@@ -4953,6 +5022,10 @@ load_backend(struct weston_compositor *compositor, const char *name,
 	case WESTON_BACKEND_HEADLESS:
 		return load_headless_backend(compositor, argc, argv, config,
 					     renderer);
+	/* YiYiYa 本地补丁：--backend=fbdev（直接写 /dev/fb0） */
+	case WESTON_BACKEND_FBDEV:
+		return load_fbdev_backend(compositor, argc, argv, config,
+					  renderer);
 	case WESTON_BACKEND_PIPEWIRE:
 		return load_pipewire_backend(compositor, argc, argv, config,
 					     renderer);

@@ -42,11 +42,14 @@ struct weston_output;
 #define WESTON_WINDOWED_OUTPUT_API_NAME_X11 "weston_windowed_output_api_x11_v2"
 #define WESTON_WINDOWED_OUTPUT_API_NAME_WAYLAND "weston_windowed_output_api_wayland_v2"
 #define WESTON_WINDOWED_OUTPUT_API_NAME_HEADLESS "weston_windowed_output_api_headless_v2"
+/* YiYiYa 本地补丁：fbdev 后端（compat/backend-fbdev.c） */
+#define WESTON_WINDOWED_OUTPUT_API_NAME_FBDEV "weston_windowed_output_api_fbdev_v1"
 
 enum weston_windowed_output_type {
 	WESTON_WINDOWED_OUTPUT_X11 = 0,
 	WESTON_WINDOWED_OUTPUT_WAYLAND,
 	WESTON_WINDOWED_OUTPUT_HEADLESS,
+	WESTON_WINDOWED_OUTPUT_FBDEV,
 };
 
 struct weston_windowed_output_api {
@@ -98,6 +101,7 @@ weston_windowed_output_get_api(struct weston_compositor *compositor,
 		WESTON_WINDOWED_OUTPUT_API_NAME_X11,
 		WESTON_WINDOWED_OUTPUT_API_NAME_WAYLAND,
 		WESTON_WINDOWED_OUTPUT_API_NAME_HEADLESS,
+		WESTON_WINDOWED_OUTPUT_API_NAME_FBDEV,
 	};
 
 	if (type >= ARRAY_LENGTH(api_names))

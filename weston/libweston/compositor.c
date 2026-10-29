@@ -11149,6 +11149,8 @@ weston_compositor_get_user_data(struct weston_compositor *compositor)
 static const char * const backend_map[] = {
 	[WESTON_BACKEND_DRM] =		"drm-backend.so",
 	[WESTON_BACKEND_HEADLESS] =	"headless-backend.so",
+	/* YiYiYa 本地补丁：fbdev 后端（compat/backend-fbdev.c） */
+	[WESTON_BACKEND_FBDEV] =	"fbdev-backend.so",
 	[WESTON_BACKEND_PIPEWIRE] =	"pipewire-backend.so",
 	[WESTON_BACKEND_RDP] =		"rdp-backend.so",
 	[WESTON_BACKEND_VNC] =		"vnc-backend.so",
