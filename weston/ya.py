@@ -38,6 +38,7 @@ add_files(
     'compat/frame-stubs.c',
     'compat/backend-access.c',
     'compat/mini-shell.c',
+    'compat/libdisplay-info-stub.c',
     # ---- libweston 核心 ----
     'libweston/alpha-modifier.c',
     'libweston/animation.c',

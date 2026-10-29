@@ -51,4 +51,11 @@
 /* musl 的 dev_t 宏在 sysmacros.h 里 */
 #define MAJOR_IN_SYSMACROS 1
 
+/* 默认后端（meson 在开 BUILD_DRM_COMPOSITOR 时给 "drm-backend.so"）。
+ * 本移植静态链接 headless 后端，compositor.c 里的 load_backend 已被
+ * compat 补丁改成直接调 weston_backend_init，不走 dlopen。 */
+#define WESTON_NATIVE_BACKEND "headless-backend.so"
+/* 默认 shell 同理：静态直连 kiosk-shell（见 compat/load-shell.c） */
+#define WESTON_SHELL "kiosk-shell.so"
+
 #endif /* WESTON_CONFIG_H */
