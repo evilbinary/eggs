@@ -1248,6 +1248,30 @@ weston_pixman_output_get_size(struct weston_output *output, int *w, int *h)
 	return 0;
 }
 
+/* 影子缓冲的原始像素指针/行距/尺寸：上屏（fbdev 输出）需要整帧搬运，
+ * 逐像素调用 read_pixel 太慢。data 归 pixman 所有，调用方只读不释放。 */
+WL_EXPORT int
+weston_pixman_output_get_shadow(struct weston_output *output, void **data,
+				int *stride, int *w, int *h)
+{
+	struct pixman_output_state *os = get_output_state(output);
+	pixman_image_t *img;
+
+	if (!os || !os->shadow_image)
+		return -1;
+
+	img = os->shadow_image;
+	if (data)
+		*data = pixman_image_get_data(img);
+	if (stride)
+		*stride = pixman_image_get_stride(img);
+	if (w)
+		*w = pixman_image_get_width(img);
+	if (h)
+		*h = pixman_image_get_height(img);
+	return 0;
+}
+
 WL_EXPORT int
 weston_pixman_output_read_pixel(struct weston_output *output, int x, int y,
 				uint32_t *argb)

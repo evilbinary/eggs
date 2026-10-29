@@ -732,6 +732,19 @@ wl_event_loop_add_signal(struct wl_event_loop *loop,
 
 	source->func = func;
 
+	if (source->base.fd < 0) {
+		/* 本系统没有 signalfd：降级成"永不触发的信号源"。
+		 * 必须仍返回一个 source —— 调用方普遍把 NULL 当致命错误
+		 * （例如 weston 主程序会直接 goto out_signals 退出）。
+		 * source 不挂进 epoll，因此永远不会被 dispatch；但 fd = -1
+		 * 让 wl_event_source_remove() 跳过 epoll_ctl/close，
+		 * link 自链接使后续 remove/free 依然合法。 */
+		source->base.loop = loop;
+		source->base.data = data;
+		wl_list_init(&source->base.link);
+		return &source->base;
+	}
+
 	return add_source(loop, &source->base, WL_EVENT_READABLE, data);
 }
 
