@@ -6,14 +6,17 @@
 # ********************************************************************
 # freetype 2.14.3
 #
-# 目录结构与上游一致：include/ 是公开头（含 config/ftoption.h 等配置头，
-# 已手工改过，见下面的注释），src/ 只放了真正要编的模块子目录。
-#   - 编入：autofit base cache cff cid gxvalid otvalid pfr psaux pshinter
-#           psnames raster sfnt smooth truetype type1 type42 winfonts
-#   - 未编入（ftmodule.h 里已注释掉对应 FT_USE_MODULE，否则引用到不存在的
-#     xxx_driver_class 会变成未定义符号）：pcf / bdf / sdf / svg
-#   - ftoption.h：开了 ZLIB（sfnt 的 PNG 位图字体 + gzip 压缩字体需要）、
-#     LZW，关掉 SVG（svg 渲染器没编）。
+# 【源码树是上游原样，一个文件都不删】
+# 编译列表 = 上游 single-object 构建的那套文件：
+#   - 每个模块的"聚合文件"（autofit/autofit.c、base/ftbase.c、sfnt/sfnt.c…）
+#     它们用 #include "xxx.c" 把同目录实现串起来；成员 .c 不能再单独编，
+#     否则同一符号出现两次（multiple definition）。
+#   - base/ 下不属于 ftbase.c 聚合的"扩展"文件（ftinit/ftsystem/ftbitmap…）
+#   - gzip 模块只编 ftgzip.c：zlib 用 eggs/libzlib（见 ftoption.h 里的
+#     FT_CONFIG_OPTION_SYSTEM_ZLIB），所以 src/gzip 里那份 zlib 副本
+#     （inflate.c/adler32.c/crc32.c/zutil.c…）不用编。
+# 刻意没编：gxvalid/gxvfgen.c（上游的开发期生成器，有 main）。pcf/bdf/sdf/svg
+# 这几个模块的目录也没纳入，ftmodule.h 里对应 FT_USE_MODULE 已注释。
 target("freetype")
 set_kind("static")
 
@@ -21,7 +24,44 @@ add_packages(get_config('default_libc'))
 add_deps("png", "zlib")
 
 add_files(
-    'src/**/*.c'
+    'src/autofit/autofit.c',
+    'src/base/ftbase.c',
+    'src/base/ftbbox.c',
+    'src/base/ftbdf.c',
+    'src/base/ftbitmap.c',
+    'src/base/ftcid.c',
+    'src/base/ftdebug.c',
+    'src/base/ftfstype.c',
+    'src/base/ftgasp.c',
+    'src/base/ftglyph.c',
+    'src/base/ftgxval.c',
+    'src/base/ftinit.c',
+    'src/base/ftmm.c',
+    'src/base/ftotval.c',
+    'src/base/ftpatent.c',
+    'src/base/ftpfr.c',
+    'src/base/ftstroke.c',
+    'src/base/ftsynth.c',
+    'src/base/ftsystem.c',
+    'src/base/fttype1.c',
+    'src/base/ftwinfnt.c',
+    'src/cache/ftcache.c',
+    'src/cff/cff.c',
+    'src/cid/type1cid.c',
+    'src/gxvalid/gxvalid.c',
+    'src/gzip/ftgzip.c',
+    'src/otvalid/otvalid.c',
+    'src/pfr/pfr.c',
+    'src/psaux/psaux.c',
+    'src/pshinter/pshinter.c',
+    'src/psnames/psnames.c',
+    'src/raster/raster.c',
+    'src/sfnt/sfnt.c',
+    'src/smooth/smooth.c',
+    'src/truetype/truetype.c',
+    'src/type1/type1.c',
+    'src/type42/type42.c',
+    'src/winfonts/winfnt.c',
 )
 
 # 内部头（src/base/ftcalc.h 之类）和公开头的根
@@ -34,5 +74,5 @@ add_includedirs(
     '.',
     './include',
     './src',
-    public = true
+    public = True
 )
