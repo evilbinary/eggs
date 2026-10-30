@@ -42,6 +42,7 @@
 /* linux/fb.h 的最小复刻（用户态没有内核 uapi 头） */
 #define FBIOGET_VSCREENINFO 0x4600
 #define FBIOGET_FSCREENINFO 0x4602
+#define FBIOPAN_DISPLAY 0x4606
 
 struct fb_bitfield {
 	uint32_t offset;
@@ -84,6 +85,9 @@ struct fbdev_backend {
 	int fb_stride;
 
 	int refresh;
+
+	/* 打开时读到的模式，用于每帧 FBIOPAN_DISPLAY"踢"一下显示刷新 */
+	struct fb_var_screeninfo var;
 };
 
 struct fbdev_head {
@@ -133,6 +137,10 @@ static int
 fbdev_output_start_repaint_loop(struct weston_output *output)
 {
 	struct timespec ts;
+	static int srdbg = 0;
+
+	if (srdbg++ < 6)
+		weston_log("fbdev: start_repaint_loop #%d\n", srdbg);
 
 	weston_compositor_read_presentation_clock(output->compositor, &ts);
 	weston_output_finish_frame(output, &ts,
@@ -154,6 +162,17 @@ fbdev_output_repaint(struct weston_output *base)
 	weston_output_flush_damage_for_primary_plane(base, &damage);
 	ec->renderer->repaint_output(base, &damage, output->renderbuffer);
 	pixman_region32_fini(&damage);
+
+	/* 【每帧踢一下显示刷新】pixman 只改了显存内容，没有任何"提交"动作：
+	 * QEMU 的 bcm2835-fb 只在主机侧收到 mailbox 请求（SET_VIRT_OFFSET /
+	 * 改模式）时才把显存重新送进显示 surface，静默写像素屏幕不会更新。
+	 * 调一次 FBIOPAN_DISPLAY（内核里走 mailbox SET_VIRT_OFFSET）既符合
+	 * fbdev 翻页语义，也在真机上是无害的空翻。 */
+	if (output->backend->fd >= 0) {
+		output->backend->var.yoffset = 0;
+		ioctl(output->backend->fd, FBIOPAN_DISPLAY,
+		      &output->backend->var);
+	}
 
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
 	weston_output_arm_frame_timer(base, output->finish_frame_timer);
@@ -177,6 +196,12 @@ static int
 fbdev_finish_frame_handler(void *data)
 {
 	struct fbdev_output *output = data;
+	/* 【诊断·临时】看帧定时器到底有没有按时到点（只打前 6 次/每 60 次） */
+	static int ffdbg = 0;
+
+	if (ffdbg++ < 6 || ffdbg % 60 == 0)
+		weston_log("fbdev: finish_frame_handler #%d status=%d\n", ffdbg,
+			   (int)output->base.repaint_status);
 
 	weston_output_finish_frame_from_timer(&output->base);
 	return 1;
@@ -415,6 +440,7 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 	b->fb_width = (int)var.xres;
 	b->fb_height = (int)var.yres;
 	b->fb_stride = (int)fix.line_length;
+	b->var = var;
 
 	if (b->fb_width <= 0 || b->fb_height <= 0 || b->fb_stride <= 0 ||
 	    var.bits_per_pixel != 32) {
