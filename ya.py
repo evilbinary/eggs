@@ -22,7 +22,7 @@ if has_config("app"):
     c_libs=[
         'libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
         'liblvgl', 'liblvgl-8.0.0', 'libuuid',
-        'liblvqrcode', 'liblz4', 'libfreetype',
+        'liblvqrcode', 'liblz4', 'libfreetype-2.14.3',
         'libwebp', 'libsdl2', 'libsdl2-ttf',
         'libsdl2-image', 'liblua',
         'libcmocka', 'libffmpeg',
@@ -51,7 +51,7 @@ if has_config("app"):
         c_libs=[
             'libjpeg', 'libgui', 'libetk', 'libzlib', 'libpng',
             'liblvgl', 'liblvgl-8.0.0', 'libuuid',
-            'liblvqrcode', 'liblz4', 'libfreetype',
+            'liblvqrcode', 'liblz4', 'libfreetype-2.14.3',
             'libwebp', 'libsdl2', 'libsdl2-ttf',
             'libsdl2-image', 'liblua',
             'libcmocka', 'libffmpeg',
