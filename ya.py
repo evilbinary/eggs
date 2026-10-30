@@ -76,6 +76,6 @@ if has_config("app"):
 
 
 if has_config("wayland"):
-    wayland_libs=['libwayland','libxml2']
+    wayland_libs=['libwayland','libxml2','libcairo']
     for v in wayland_libs:
         includes("./"+v+"/ya.py")

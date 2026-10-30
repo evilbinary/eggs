@@ -27,9 +27,9 @@ add_files('src/*.c')
 
 add_cflags('-DHAVE_CONFIG_H')
 
-add_includedirs(
-    '.',          # config.h
-    './include',  # <libxml/tree.h> 等公开头
-    './src',      # libxml.h（内部，会 #include "config.h"）
-    public=True
-)
+# 【public 只给 './include'】'.' 里有 config.h、'./src' 里有内部的 libxml.h：
+# 它们如果也 public，下游库（cairo 等）源码里的 #include "config.h" 会先命中
+# 这份 libxml2 的 config.h，把对方的 HAVE_* 全顶成 0（实测 cairo 因此
+# 认不出 stdint.h 与 pthread 互斥锁）。
+add_includedirs('./include', public=True)
+add_includedirs('.', './src')
