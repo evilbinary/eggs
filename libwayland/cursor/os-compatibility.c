@@ -201,3 +201,57 @@ os_resize_anonymous_file(int fd, off_t size)
 
 	return 0;
 }
+
+/* YiYiYa 追加（提取自 weston 的 shared/os-compatibility.c）：
+ * weston 的 toytoolkit 需要这两个辅助函数，libwayland 只带
+ * os_create_anonymous_file / os_resize_anonymous_file。放在这里而不是再编一份
+ * weston 的 os-compatibility.c —— 后者会让 os_create_anonymous_file
+ * 重复定义（静态库链接期硬错误）。 */
+#include <sys/epoll.h>
+
+int
+os_fd_clear_cloexec(int fd)
+{
+	int flags;
+
+	flags = fcntl(fd, F_GETFD);
+	if (flags == -1)
+		return -1;
+
+	return fcntl(fd, F_SETFD, flags & ~(int)FD_CLOEXEC);
+}
+
+int
+os_fd_set_cloexec(int fd)
+{
+	int flags;
+
+	if (fd == -1)
+		return -1;
+
+	flags = fcntl(fd, F_GETFD);
+	if (flags == -1)
+		return -1;
+
+	return fcntl(fd, F_SETFD, flags | (int)FD_CLOEXEC);
+}
+
+int
+os_epoll_create_cloexec(void)
+{
+	int fd;
+
+#ifdef EPOLL_CLOEXEC
+	fd = epoll_create1(EPOLL_CLOEXEC);
+	if (fd >= 0)
+		return fd;
+	if (errno != EINVAL)
+		return -1;
+#endif
+
+	fd = epoll_create(1);
+	if (fd >= 0)
+		os_fd_set_cloexec(fd);
+
+	return fd;
+}

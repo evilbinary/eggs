@@ -30,6 +30,16 @@
 
 #include "config.h"
 
+/* YiYiYa 本地补丁：允许构建期固定默认 shell / 后端，用来产出开箱即用的组合
+ * 可执行文件（weston-kiosk / weston-desktop / weston-ivi / weston-headless）。
+ * 两者都只在命令行和 weston.ini 都没指定时生效，不定义时行为与上游一致。 */
+#ifndef WESTON_DEFAULT_SHELL
+#define WESTON_DEFAULT_SHELL "desktop"
+#endif
+#ifndef WESTON_DEFAULT_BACKEND
+#define WESTON_DEFAULT_BACKEND NULL
+#endif
+
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
@@ -5490,7 +5500,9 @@ wet_main(int argc, char *argv[], const struct weston_testsuite_data *test_data)
 			weston_config_section_get_string(section, "backend",
 							 &backends, NULL);
 			if (!backends)
-				backends = weston_choose_default_backend();
+				backends = WESTON_DEFAULT_BACKEND
+					   ? WESTON_DEFAULT_BACKEND
+					   : weston_choose_default_backend();
 		}
 	}
 
@@ -5596,7 +5608,7 @@ wet_main(int argc, char *argv[], const struct weston_testsuite_data *test_data)
 
 	if (!shell)
 		weston_config_section_get_string(section, "shell", &shell,
-						 "desktop");
+						 WESTON_DEFAULT_SHELL);
 
 	if (wet_load_shell(wet.compositor, shell, &argc, argv) < 0)
 		goto out;

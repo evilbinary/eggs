@@ -43,7 +43,10 @@ if has_config("app"):
         # libudev（libudev-zero 实现，设备枚举/属性）。
         'libmtdev', 'libudev', 'libinput',
         # armv5（无 LDREX）专用：补 libgcc 缺失的 __sync_xxx/__atomic_xxx
-        'libatomic'
+        'libatomic',
+        'libxml2',
+        'libcairo',
+
 
     ]
 
@@ -75,7 +78,10 @@ if has_config("app"):
         includes("./"+v+"/ya.py")
 
 
+# wayland 基础层只放 wayland 自身需要的库。cairo/pango 这类图形库不在这里：
+# 挂在 wayland 下面，别的 app 想用 cairo 就取不到（被 wayland 选项饿死）。
 if has_config("wayland"):
-    wayland_libs=['libwayland','libxml2','libcairo']
+    wayland_libs=['libwayland']
     for v in wayland_libs:
         includes("./"+v+"/ya.py")
+
