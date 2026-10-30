@@ -177,16 +177,39 @@ fbdev_output_repaint(struct weston_output *base)
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
 	weston_output_arm_frame_timer(base, output->finish_frame_timer);
 
-	/* 头几帧打个点：显存中心像素（0 就是没画上东西），排查上屏问题时很有用 */
+	/* 头几帧打点：采样中心/左上/面板区 + 隔点统计颜色种类，排查上屏问题很有用 */
 	fbdev_frames++;
 	if (fbdev_frames == 1 || fbdev_frames % 120 == 0) {
-		const uint8_t *row = output->backend->fb +
-			(size_t)(base->current_mode->height / 2) *
-				output->backend->fb_stride;
-		uint32_t px = ((const uint32_t *)row)[base->current_mode->width / 2];
+		int w = base->current_mode->width;
+		int h = base->current_mode->height;
+		size_t stride = output->backend->fb_stride;
+		const uint8_t *fb = output->backend->fb;
+		uint32_t c_center, c_tl, c_panel;
+		int x, y, other = 0, total = 0, redish = 0;
 
-		weston_log("fbdev: frame %d, center pixel 0x%08x\n", fbdev_frames,
-			   px);
+		c_center = ((const uint32_t *)(fb + (size_t)(h / 2) * stride))[w / 2];
+		c_tl = ((const uint32_t *)(fb + (size_t)100 * stride))[100];
+		c_panel = ((const uint32_t *)(fb + (size_t)16 * stride))[w / 2];
+
+		/* 隔 8 像素扫一遍全帧，统计非背景色（黑/0）与红色像素比例 */
+		for (y = 0; y < h; y += 8) {
+			const uint32_t *row = (const uint32_t *)(fb + (size_t)y * stride);
+
+			for (x = 0; x < w; x += 8) {
+				uint32_t p = row[x];
+
+				total++;
+				if (p == 0)
+					other++;
+				if ((p & 0x00f00000) && !(p & 0x0000f000))
+					redish++;
+			}
+		}
+
+		weston_log("fbdev: frame %d center=0x%08x tl(100,100)=0x%08x panel=0x%08x blank=%d%% red=%d%%\n",
+			   fbdev_frames, c_center, c_tl, c_panel,
+			   total ? other * 100 / total : 0,
+			   total ? redish * 100 / total : 0);
 	}
 
 	return 0;

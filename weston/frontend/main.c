@@ -449,6 +449,17 @@ cleanup_for_child_process() {
 	sigprocmask(SIG_UNBLOCK, &allsigs, NULL);
 }
 
+/* YiYiYa 诊断用：在 fork 出来的子进程里直接写 stderr。
+ * 不能用 weston_log —— fork 后日志上下文不保证可用，而我们要的就是
+ * "最原始的一路输出"来确认子进程活到了哪一步。 */
+static void
+weston_child_trace(const char *s)
+{
+	ssize_t n = write(STDERR_FILENO, s, strlen(s));
+
+	(void)n;
+}
+
 WL_EXPORT struct wet_process *
 wet_client_launch(struct weston_compositor *compositor,
 		  struct custom_env *child_env,
@@ -480,12 +491,23 @@ wet_client_launch(struct weston_compositor *compositor,
 	case 0:
 		cleanup_for_child_process();
 
-		/* Launch clients as the user. Do not launch clients with wrong euid. */
-		if (seteuid(getuid()) == -1) {
+		/* YiYiYa 诊断：确认 fork 出来的子进程走到了哪一步。串口上应依次看到
+		 * [wet-child] fork / euid / cloexec / execve 四行；缺哪一行就是卡在
+		 * 那一步之后（一行都没有 = 子进程的 stderr 也写不出去）。 */
+		weston_child_trace("[wet-child] fork\n");
+
+		/* Launch clients as the user. Do not launch clients with wrong euid.
+		 * YiYiYa: 单用户内核 getuid()==geteuid()==0，euid 本来就是对的，
+		 * 这里必须跳过。原实现无条件调 seteuid()，而 musl 的 seteuid 走
+		 * __setxid（内部要 __synccall / 信号广播），本内核下子进程在 exec
+		 * 之前就死掉：现象是 "launching 'xxx'" 之后约 10ms 客户端连接断开、
+		 * 且客户端自己一个字节都打印不出来。 */
+		if (getuid() != geteuid() && seteuid(getuid()) == -1) {
 			written = write(STDERR_FILENO, fail_seteuid,
 					strlen(fail_seteuid));
 			_exit(EXIT_FAILURE);
 		}
+		weston_child_trace("[wet-child] euid ok\n");
 
 		for (i = 0; i < num_no_cloexec_fds; i++) {
 			err = os_fd_clear_cloexec(no_cloexec_fds[i]);
@@ -495,7 +517,22 @@ wet_client_launch(struct weston_compositor *compositor,
 				_exit(EXIT_FAILURE);
 			}
 		}
+		weston_child_trace("[wet-child] cloexec ok\n");
 
+		/* YiYiYa 诊断：确认 envp 里确实带了 WAYLAND_SOCKET（客户端 getenv
+		 * 读不到就说明问题出在内核 execve 的环境块，而不是 weston 这边）。 */
+		{
+			char *const *e;
+
+			for (e = envp; e != NULL && *e != NULL; e++) {
+				if (strncmp(*e, "WAYLAND_SOCKET", 14) == 0) {
+					weston_child_trace("[wet-child] env ");
+					weston_child_trace(*e);
+					weston_child_trace("\n");
+				}
+			}
+		}
+		weston_child_trace("[wet-child] execve\n");
 		execve(argp[0], argp, envp);
 
 		if (fail_exec)
