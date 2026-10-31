@@ -132,6 +132,60 @@ typedef struct {
 
 int client_stats(client_t* client, foot_stats_t* out); /* 0 / -1 */
 
+/* ===================== capability（阶段 4） =====================
+ * 用户态驱动不再自己填物理地址去映射：先按名字申请一个能力句柄
+ * （内核查设备窗口表），再用句柄映射窗口内的页。句柄只在本进程有效，
+ * 伪造/过期的句柄会被内核按 gen 拒掉。
+ *
+ * 【与内核一致性】下面的命令号/权限位/控制块布局必须与
+ * duck/modules/foot/service.h 的同名定义逐字段一致（两侧刻意各存一份）。 */
+enum {
+  SYS_CAP_GET_MMIO = 5, /* ctl.name → ctl.handle */
+  SYS_CAP_MAP = 6,      /* handle + vaddr + offset + len */
+  SYS_CAP_UNMAP = 7,
+  SYS_CAP_INFO = 8,     /* → pa/size/rights */
+  SYS_CAP_DERIVE = 9,   /* handle + rights → handle */
+  SYS_CAP_REVOKE = 10,
+};
+
+enum {
+  CAP_RIGHT_READ = 1 << 0,
+  CAP_RIGHT_WRITE = 1 << 1,
+  CAP_RIGHT_MAP = 1 << 2,
+  CAP_RIGHT_GRANT = 1 << 3,
+  CAP_RIGHT_WAIT = 1 << 4,
+  CAP_RIGHT_SIGNAL = 1 << 5,
+};
+
+typedef struct foot_cap_ctl {
+  char* name;          /* GET_MMIO：窗口名 */
+  unsigned int handle; /* 句柄（入参或输出） */
+  unsigned int vaddr;  /* MAP：目标 VA */
+  unsigned int offset; /* MAP：窗口内偏移 */
+  unsigned int len;    /* MAP：长度 */
+  unsigned int rights; /* DERIVE/INFO */
+  unsigned int pa;     /* INFO 输出 */
+  unsigned int size;   /* INFO 输出 */
+} foot_cap_ctl_t;
+
+typedef unsigned int foot_cap_t;
+#define FOOT_CAP_NONE 0u
+
+/* 申请设备窗口（如 "gpio" / "dwc2" / "bcm-periph"）；失败返回 FOOT_CAP_NONE */
+foot_cap_t foot_cap_get_mmio(const char* name);
+/* 把窗口内 [offset, offset+len) 映射到 vaddr（页对齐）；0 成功，-1 非法 */
+int foot_cap_map(foot_cap_t cap, void* vaddr, unsigned long offset,
+                 unsigned long len);
+/* 解除最近一次映射（完整清理仍由进程退出的页表销毁兜底） */
+int foot_cap_unmap(foot_cap_t cap);
+/* 查窗口物理基址/长度/当前权限（指针可传 NULL） */
+int foot_cap_info(foot_cap_t cap, unsigned int* pa, unsigned int* size,
+                  unsigned int* rights);
+/* 派生：rights 必须是原权限子集，且原 cap 带 GRANT 位 */
+foot_cap_t foot_cap_derive(foot_cap_t cap, unsigned int rights);
+/* 撤销（连同派生出的子 cap），已建立的映射一并解除 */
+int foot_cap_revoke(foot_cap_t cap);
+
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)
 #define client_call(client, fn, args)                                     \
