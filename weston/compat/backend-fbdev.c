@@ -188,6 +188,7 @@ static int
 fbdev_output_repaint(struct weston_output *base)
 {
 	struct fbdev_output *output = to_fbdev_output(base);
+	struct fbdev_backend *b = output->backend;
 	struct weston_compositor *ec = base->compositor;
 	pixman_region32_t damage;
 
@@ -204,10 +205,9 @@ fbdev_output_repaint(struct weston_output *base)
 	 * 改模式）时才把显存重新送进显示 surface，静默写像素屏幕不会更新。
 	 * 调一次 FBIOPAN_DISPLAY（内核里走 mailbox SET_VIRT_OFFSET）既符合
 	 * fbdev 翻页语义，也在真机上是无害的空翻。 */
-	if (output->backend->fd >= 0) {
-		output->backend->var.yoffset = 0;
-		ioctl(output->backend->fd, FBIOPAN_DISPLAY,
-		      &output->backend->var);
+	if (b->fd >= 0) {
+		b->var.yoffset = 0;
+		ioctl(b->fd, FBIOPAN_DISPLAY, &b->var);
 	}
 
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
@@ -218,8 +218,8 @@ fbdev_output_repaint(struct weston_output *base)
 	if (fbdev_frames == 1 || fbdev_frames % 120 == 0) {
 		int w = base->current_mode->width;
 		int h = base->current_mode->height;
-		size_t stride = output->backend->fb_stride;
-		const uint8_t *fb = output->backend->fb;
+		size_t stride = b->fb_stride;
+		const uint8_t *fb = b->fb;
 		uint32_t c_center, c_tl, c_panel;
 		int x, y, other = 0, total = 0, redish = 0;
 
@@ -255,12 +255,6 @@ static int
 fbdev_finish_frame_handler(void *data)
 {
 	struct fbdev_output *output = data;
-	/* 【诊断·临时】看帧定时器到底有没有按时到点（只打前 6 次/每 60 次） */
-	static int ffdbg = 0;
-
-	if (ffdbg++ < 6 || ffdbg % 60 == 0)
-		weston_log("fbdev: finish_frame_handler #%d status=%d\n", ffdbg,
-			   (int)output->base.repaint_status);
 
 	weston_output_finish_frame_from_timer(&output->base);
 	return 1;
@@ -342,9 +336,13 @@ fbdev_output_enable(struct weston_output *base)
 	if (output->finish_frame_timer == NULL)
 		return -1;
 
-	/* 不建影子缓冲：pixman 直接画进 framebuffer 映射 */
+	/* 【对齐 backend-headless 的写法】用影子缓冲：pixman 先合成到自己的
+	 * shadow image，再由渲染器把脏区一次性拷进我们的 renderbuffer（= 显存
+	 * 映射）。之前 use_shadow=false 是"边合成边写正在显示的显存"，画面可能
+	 * 被看到半帧状态（拖窗口时整窗闪）。开影子后写显存只发生在合成完成之后，
+	 * 且拷贝只覆盖脏区，代价是一份额外内存 + 一次 memcpy。 */
 	memset(&options, 0, sizeof options);
-	options.use_shadow = false;
+	options.use_shadow = true;
 	options.format = pixel_format_get_info_by_pixman(PIXMAN_x8r8g8b8);
 	options.fb_size.width = base->current_mode->width;
 	options.fb_size.height = base->current_mode->height;
