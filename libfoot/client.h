@@ -148,13 +148,22 @@ enum {
   SYS_CAP_REVOKE = 10,
 };
 
+/* 通用权限（低 16 位）：与内核 duck/kernel/cap.h 的 RIGHT_* 同值 */
 enum {
-  CAP_RIGHT_READ = 1 << 0,
-  CAP_RIGHT_WRITE = 1 << 1,
-  CAP_RIGHT_MAP = 1 << 2,
-  CAP_RIGHT_GRANT = 1 << 3,
-  CAP_RIGHT_WAIT = 1 << 4,
-  CAP_RIGHT_SIGNAL = 1 << 5,
+  CAP_RIGHT_LOAD = 1 << 0,    /* 读对象状态/数据 */
+  CAP_RIGHT_STORE = 1 << 1,   /* 改对象状态/数据 */
+  CAP_RIGHT_INVOKE = 1 << 2,  /* 调用对象方法 */
+  CAP_RIGHT_GRANT = 1 << 3,   /* 复制给其它 CSpace */
+  CAP_RIGHT_MINT = 1 << 4,    /* 派生受限能力 */
+  CAP_RIGHT_REVOKE = 1 << 5,  /* 撤销派生能力 */
+  CAP_RIGHT_DESTROY = 1 << 6, /* 销毁对象 */
+  CAP_RIGHT_CREATE = 1 << 7,  /* 基于对象创建子对象 */
+};
+
+/* 类型位（高 16 位）：DEVWIN 的能力用它自己的语义 */
+enum {
+  CAP_DEVWIN_MAP = 1 << 16,     /* 允许映射窗口进地址空间 */
+  CAP_DEVWIN_MAILBOX = 1 << 17, /* 允许直接读写寄存器 */
 };
 
 typedef struct foot_cap_ctl {
