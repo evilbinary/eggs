@@ -1,13 +1,21 @@
 #ifndef CLIENT_H
 #define CLIENT_H
 
-#define MAX_ARGS_BUF 128
+#define MAX_ARGS_BUF 240        /* 单个请求的 payload 上限（字节） */
 #define MAX_INSTANCE 16
-#define MAX_API_SLOTS 8      /* 每个 client 最多 8 个并发请求槽 */
-#define FOOT_API_DEFAULT 4   /* 注册时默认申请 4 个槽 */
-#define FOOT_SLOT_LEAK_MS 5000 /* 调用方崩溃后服务端回收槽位的阈值（ms） */
+#define MAX_API_SLOTS 64        /* 每个 client 最多 64 个并发请求槽 */
+#define FOOT_API_DEFAULT 4      /* 注册时默认申请 4 个槽 */
+#define FOOT_SLOT_LEAK_MS 5000  /* 调用方崩溃后服务端回收槽位的阈值（ms） */
 #define FOOT_CALL_TIMEOUT_MS 1000 /* 单次调用墙钟上限 */
-#define FOOT_POLL_US 50      /* 退避粒度（后续换 futex 唤醒） */
+#define FOOT_IDLE_WAIT_MS 500   /* 服务端空闲时睡在 kick 上的最长沉睡时间（ms） */
+
+/* 共享页控制区（4 个字，紧跟在槽数组后面）：
+ *   [0] kick  调用方的提交计数：每提交一个请求 +1 并 futex 唤醒；
+ *             服务端空闲时睡在这个字上，醒来重扫槽位。
+ *   [1..3]    预留（统计/心跳）。 */
+#define FOOT_CTL_WORDS 4
+#define FOOT_CTL_BYTES (FOOT_CTL_WORDS * 4)
+#define FOOT_CTL_KICK 0
 
 enum {
   SYS_NEW_CLIENT = 1,
@@ -35,9 +43,11 @@ typedef struct api {
   int err;                 /* 响应错误码：0 = OK */
   unsigned int seq;        /* 请求序号，用于识别陈旧响应 */
   unsigned int claim_ms;   /* 调用方写入的提交时刻（ms），服务端据此回收僵尸槽 */
+  unsigned int len;        /* args 有效长度（0..MAX_ARGS_BUF） */
+  unsigned int flags;      /* 保留（同步/异步、唤醒策略等） */
   void* fn;                /* 方法号 */
-  void* ret;               /* 返回值 */
-  char args[MAX_ARGS_BUF]; /* 参数区（按实际长度拷贝） */
+  void* ret;               /* 返回值（只能是值，不能是跨进程指针） */
+  char args[MAX_ARGS_BUF]; /* 参数区（按 len 拷贝，未用部分为 0） */
 } api_t;
 
 typedef struct client {
@@ -63,7 +73,11 @@ typedef struct client_ctl {
   client_t* client;
 } client_ctl_t;
 
+/* 服务方法：args 指向共享页里的参数区（只读，长度上限 MAX_ARGS_BUF）。
+ * 返回值只能是"值"——两端是不同进程，指针不通用。 */
 typedef void* (*client_fn)(void* fn, void* args);
+/* 带长度版本：payload 长度由调用方按实际字节数写入（见 api_t.len）。 */
+typedef void* (*client_fn_ex)(void* fn, void* args, unsigned int len);
 
 client_t* client_regist_ex(char* name, int api_size);
 client_t* client_get(char* name);
@@ -71,8 +85,10 @@ client_t* client_id(int id);
 void clirent_un_regist(client_t* client);
 
 void client_run(client_t* client, client_fn fn);
+void client_run_ex(client_t* client, client_fn_ex fn);
 void client_run_one(client_t* client, client_fn fn);
 
+/* 返回值：服务端返回的值；-1 = 超时；-2 = 无空闲槽位；-3 = client 为空。 */
 void* client_call_ex(client_t* client, void* fn, const void* args,
                      unsigned long args_size, unsigned int timeout_ms);
 
