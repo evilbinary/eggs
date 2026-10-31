@@ -27,7 +27,7 @@ if has_config("app"):
         'libsdl2-image', 'liblua',
         'libcmocka', 'libffmpeg',
         'libsdl', 'libsdl-ttf', 'libsdl-image',
-        'libgaga',
+        'libfoot',
         # 'libiconv'
         'libncurses',
         'libsdl-gfx',
@@ -59,7 +59,7 @@ if has_config("app"):
             'libsdl2-image', 'liblua',
             'libcmocka', 'libffmpeg',
             'libsdl', 'libsdl-ttf', 'libsdl-image',
-            'libgaga',
+            'libfoot',
             # 'libiconv'
             # 'libncurses',
             'libsdl-gfx',

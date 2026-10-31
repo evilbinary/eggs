@@ -120,7 +120,7 @@ void client_run_one(client_t* client, client_fn fn) {
 }
 
 client_t* client_regist(char* name) {
-  int fd = open("/dev/gaga", O_RDWR);
+  int fd = open("/dev/foot", O_RDWR);
   printf("client open fd:%d\n", fd);
   if (fd < 0) {
     printf("client regist error\n");
@@ -144,7 +144,7 @@ client_t* client_regist(char* name) {
 }
 
 client_t* client_get(char* name) {
-  int fd = open("/dev/gaga", O_RDWR);
+  int fd = open("/dev/foot", O_RDWR);
   printf("client open fd:%d\n", fd);
   if (fd < 0) {
     printf("client get open %s error\n", name);
@@ -167,7 +167,7 @@ client_t* client_get(char* name) {
 }
 
 client_t* client_id(int id) {
-  int fd = open("/dev/gaga", O_RDWR);
+  int fd = open("/dev/foot", O_RDWR);
   printf("client open fd:%d\n", fd);
   if (fd < 0) {
     printf("client get open %d error\n", id);

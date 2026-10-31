@@ -24,7 +24,7 @@ include=[
     '../../duck/libs/include'
 ]+libpath
 
-env.Library('gaga', [
+env.Library('foot', [
     'client.c',
     ],
     LIBS=libs,
