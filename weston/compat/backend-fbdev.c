@@ -466,53 +466,37 @@ static const struct weston_windowed_output_api fbdev_output_api = {
 
 /* ---------------------------------------------------------------- input */
 
-/* 一帧内累积的相对位移一次性投递（SYN_REPORT 时调用）。 */
+/* 一帧内累积的相对位移一次性投递（SYN_REPORT 时调用）。
+ *
+ * 【必须走 notify_* 而不是 weston_pointer_send_*】
+ *   weston_pointer_send_motion() 只做"改指针位置 + 发给 focus client"，
+ *   它不会把事件派发给当前的指针 grab（那是 notify_motion() 干的：
+ *   pointer->grab->interface->motion(...)）。拖窗口时 grab 正是
+ *   desktop-shell 的 move grab —— 直接调 send_motion，grab 收不到 motion，
+ *   窗口就跟不走。
+ *   同理 weston_pointer_send_button() 只发 wl_pointer.button，不做
+ *   pointer->button_count++、不跑 button binding、也不派发给 grab
+ *   （见 libweston/input.c 的 notify_button()）；button_count 恒 0 会让
+ *   "按下期间保持隐式 grab / 用 grab_button 判定拖拽"这类逻辑全部失效，
+ *   表现就是点得下去但拖不动。 */
 static void
 fbdev_input_flush_motion(struct fbdev_backend *b, struct timespec *ts)
 {
-	struct weston_pointer *pointer = weston_seat_get_pointer(&b->seat);
 	struct weston_pointer_motion_event ev;
 	struct weston_coord rel;
 
-	if (pointer == NULL || (b->rel_x == 0 && b->rel_y == 0))
+	if (b->rel_x == 0 && b->rel_y == 0)
 		return;
 
 	rel.x = b->rel_x;
 	rel.y = b->rel_y;
-	/* 【诊断·可删】分步打点：定位崩溃发生在哪个调用内部。
-	 * 注意不用 %f —— musl 的浮点格式化会走进 locale 相关路径。 */
-	{
-		static int dbg_m = 0;
-
-		if (dbg_m++ < 10)
-			weston_log("fbdev: motion step1 rel=%d,%d\n",
-				   b->rel_x, b->rel_y);
-	}
 	/* 只带 REL 位：abs / rel_unaccel 传 NULL 是安全的（实现里只在
 	 * 对应 mask 位置位时才解引用）。 */
 	weston_pointer_motion_event_init(&ev, ts, &b->seat,
 					 WESTON_POINTER_MOTION_REL,
 					 NULL, &rel, NULL);
-	{
-		static int dbg_m2 = 0;
-
-		if (dbg_m2++ < 10)
-			weston_log("fbdev: motion step2 init ok\n");
-	}
-	weston_pointer_send_motion(pointer, &ev);
-	{
-		static int dbg_m3 = 0;
-
-		if (dbg_m3++ < 10)
-			weston_log("fbdev: motion step3 send ok\n");
-	}
-	weston_pointer_send_frame(pointer);
-	{
-		static int dbg_m4 = 0;
-
-		if (dbg_m4++ < 10)
-			weston_log("fbdev: motion step4 frame ok\n");
-	}
+	notify_motion(&ev);
+	notify_pointer_frame(&b->seat);
 
 	b->rel_x = 0;
 	b->rel_y = 0;
@@ -522,17 +506,13 @@ static void
 fbdev_input_handle_button(struct fbdev_backend *b, struct timespec *ts,
 			  uint16_t button, int32_t value)
 {
-	struct weston_pointer *pointer = weston_seat_get_pointer(&b->seat);
 	struct weston_pointer_button_event ev;
-
-	if (pointer == NULL)
-		return;
 
 	weston_pointer_button_event_init(&ev, ts, &b->seat, button,
 					 value ? WL_POINTER_BUTTON_STATE_PRESSED
 					       : WL_POINTER_BUTTON_STATE_RELEASED);
-	weston_pointer_send_button(pointer, &ev);
-	weston_pointer_send_frame(pointer);
+	notify_button(&ev);
+	notify_pointer_frame(&b->seat);
 }
 
 static int
