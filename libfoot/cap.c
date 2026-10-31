@@ -95,3 +95,19 @@ int foot_cap_revoke(foot_cap_t cap) {
   ctl.handle = cap;
   return foot_cap_call(SYS_CAP_REVOKE, &ctl) < 0 ? -1 : 0;
 }
+
+foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
+                               unsigned int rights, unsigned int* out_pa,
+                               unsigned int* out_size) {
+  foot_cap_ctl_t ctl;
+  memset(&ctl, 0, sizeof(ctl));
+  ctl.size = (unsigned int)size;
+  ctl.pa = (unsigned int)pa;
+  ctl.rights = rights;
+  if (foot_cap_call(SYS_CAP_ALLOC_FRAME, &ctl) < 0) {
+    return FOOT_CAP_NONE;
+  }
+  if (out_pa != NULL) *out_pa = ctl.pa;
+  if (out_size != NULL) *out_size = ctl.size;
+  return (foot_cap_t)ctl.handle;
+}

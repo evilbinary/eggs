@@ -146,6 +146,7 @@ enum {
   SYS_CAP_INFO = 8,     /* → pa/size/rights */
   SYS_CAP_DERIVE = 9,   /* handle + rights → handle */
   SYS_CAP_REVOKE = 10,
+  SYS_CAP_ALLOC_FRAME = 11, /* size/pa → handle（输出 pa/size/rights） */
 };
 
 /* 通用权限（低 16 位）：与内核 duck/kernel/cap.h 的 RIGHT_* 同值 */
@@ -160,10 +161,12 @@ enum {
   CAP_RIGHT_CREATE = 1 << 7,  /* 基于对象创建子对象 */
 };
 
-/* 类型位（高 16 位）：DEVWIN 的能力用它自己的语义 */
+/* 类型位（高 16 位）：按对象类型解释，不同类型可复用同一位 */
 enum {
   CAP_DEVWIN_MAP = 1 << 16,     /* 允许映射窗口进地址空间 */
   CAP_DEVWIN_MAILBOX = 1 << 17, /* 允许直接读写寄存器 */
+  CAP_FRAME_MAP = 1 << 16,      /* FRAME：允许把该物理页映射进地址空间 */
+  CAP_FRAME_UNMAP = 1 << 17,    /* FRAME：允许解除映射 */
 };
 
 typedef struct foot_cap_ctl {
@@ -194,6 +197,14 @@ int foot_cap_info(foot_cap_t cap, unsigned int* pa, unsigned int* size,
 foot_cap_t foot_cap_derive(foot_cap_t cap, unsigned int rights);
 /* 撤销（连同派生出的子 cap），已建立的映射一并解除 */
 int foot_cap_revoke(foot_cap_t cap);
+
+/* 申请物理页帧对象：size==0 表示一页（按页向上取整，上限 256KB）；
+ * pa==0 从页池新分配（对象负责归还），非 0 则包装该物理地址（不接管）；
+ * rights==0 取默认（读 + 可映射 + 可派生/撤销/转授）。失败返回 FOOT_CAP_NONE。
+ * 成功后 pa/size（指针可传 NULL）回填实际物理基址与长度。 */
+foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
+                               unsigned int rights, unsigned int* out_pa,
+                               unsigned int* out_size);
 
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)
