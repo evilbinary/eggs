@@ -118,17 +118,17 @@ static void foot_serve_slots(client_t* client, foot_handler_t* h, int* busy) {
   }
 }
 
-void* client_call_ex(client_t* client, void* fn, const void* args,
-                     unsigned long args_size, unsigned int timeout_ms) {
-  if (client == NULL) {
-    printf("foot call: client is null\n");
-    return (void*)-1;
+int client_submit_ex(client_t* client, void* fn, const void* args,
+                     unsigned long args_size, foot_ticket_t* ticket) {
+  if (client == NULL || ticket == NULL) {
+    printf("foot submit: client/ticket is null\n");
+    return -1;
   }
 
   api_t* api = foot_find_free_slot(client);
   if (api == NULL) {
-    printf("foot call: no free slot (api_size=%d)\n", client->api_size);
-    return (void*)-2;
+    printf("foot submit: no free slot (api_size=%d)\n", client->api_size);
+    return -2;
   }
 
   /* 参数区：清零后按实际长度拷贝（不再盲目拷 128/240 字节，避免读越界） */
@@ -151,8 +151,8 @@ void* client_call_ex(client_t* client, void* fn, const void* args,
   int expect = 0;
   if (!__atomic_compare_exchange_n(&api->cid, &expect, (int)seq, 0,
                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-    printf("foot call: slot busy\n");
-    return (void*)-2;
+    printf("foot submit: slot busy\n");
+    return -2;
   }
   __atomic_store_n(&api->state, API_REDAY, __ATOMIC_RELEASE);
 
@@ -161,9 +161,33 @@ void* client_call_ex(client_t* client, void* fn, const void* args,
   __atomic_add_fetch(foot_kick(client), 1, __ATOMIC_RELEASE);
   foot_futex_wake(foot_kick(client), 1);
 
+  ticket->slot = (int)(api - client->apis);
+  ticket->seq = seq;
+  return 0;
+}
+
+void* client_wait_ex(client_t* client, foot_ticket_t* ticket,
+                     unsigned int timeout_ms) {
+  if (client == NULL || ticket == NULL) {
+    printf("foot wait: client/ticket is null\n");
+    return (void*)-1;
+  }
+  if (ticket->slot < 0 || ticket->slot >= client->api_size) {
+    printf("foot wait: bad ticket slot %d\n", ticket->slot);
+    return (void*)-1;
+  }
+
+  api_t* api = &client->apis[ticket->slot];
   uint64_t deadline = foot_now_ms() + (uint64_t)timeout_ms;
 
   for (;;) {
+    /* 票据失效：槽位已被回收并被新请求复用（seq 变了），不能读别人的结果 */
+    if (__atomic_load_n(&api->seq, __ATOMIC_ACQUIRE) != ticket->seq ||
+        __atomic_load_n(&api->cid, __ATOMIC_ACQUIRE) == 0) {
+      printf("foot wait: stale ticket slot=%d\n", ticket->slot);
+      return (void*)-1;
+    }
+
     int st = __atomic_load_n(&api->state, __ATOMIC_ACQUIRE);
     if (st == API_RETURN) {
       void* result = __atomic_load_n(&api->ret, __ATOMIC_ACQUIRE);
@@ -180,7 +204,7 @@ void* client_call_ex(client_t* client, void* fn, const void* args,
       if (__atomic_compare_exchange_n(&api->state, &expect_st, API_INIT, 0,
                                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         __atomic_store_n(&api->cid, 0, __ATOMIC_RELEASE);
-        printf("foot call: timeout (cancelled), fn=%p\n", fn);
+        printf("foot wait: timeout (cancelled), slot=%d\n", ticket->slot);
         return (void*)-1;
       }
       /* 服务端已取走（处理中）或已发布结果：先放弃所有权（cid 变化会让服务端
@@ -190,7 +214,7 @@ void* client_call_ex(client_t* client, void* fn, const void* args,
       expect_st = API_RETURN;
       __atomic_compare_exchange_n(&api->state, &expect_st, API_INIT, 0,
                                   __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
-      printf("foot call: timeout (abandoned), fn=%p\n", fn);
+      printf("foot wait: timeout (abandoned), slot=%d\n", ticket->slot);
       return (void*)-1;
     }
 
@@ -202,6 +226,16 @@ void* client_call_ex(client_t* client, void* fn, const void* args,
       foot_futex_wait((uint32_t*)&api->state, (uint32_t)st, wait_ms);
     }
   }
+}
+
+void* client_call_ex(client_t* client, void* fn, const void* args,
+                     unsigned long args_size, unsigned int timeout_ms) {
+  foot_ticket_t ticket;
+  int r = client_submit_ex(client, fn, args, args_size, &ticket);
+  if (r < 0) {
+    return (void*)-2;
+  }
+  return client_wait_ex(client, &ticket, timeout_ms);
 }
 
 static void foot_run_loop(client_t* client, foot_handler_t* h) {

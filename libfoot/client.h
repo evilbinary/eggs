@@ -79,6 +79,13 @@ typedef void* (*client_fn)(void* fn, void* args);
 /* 带长度版本：payload 长度由调用方按实际字节数写入（见 api_t.len）。 */
 typedef void* (*client_fn_ex)(void* fn, void* args, unsigned int len);
 
+/* 未取结果的请求凭据：slot = 槽位号，seq = 提交时写入的序号。
+ * 槽位被回收/复用时 seq 会变，据此识别失效票据（不会读到别人的结果）。 */
+typedef struct {
+  int slot;
+  unsigned int seq;
+} foot_ticket_t;
+
 client_t* client_regist_ex(char* name, int api_size);
 client_t* client_get(char* name);
 client_t* client_id(int id);
@@ -88,9 +95,19 @@ void client_run(client_t* client, client_fn fn);
 void client_run_ex(client_t* client, client_fn_ex fn);
 void client_run_one(client_t* client, client_fn fn);
 
-/* 返回值：服务端返回的值；-1 = 超时；-2 = 无空闲槽位；-3 = client 为空。 */
+/* 返回值：服务端返回的值；-1 = 超时/票据失效；-2 = 无空闲槽位。 */
 void* client_call_ex(client_t* client, void* fn, const void* args,
                      unsigned long args_size, unsigned int timeout_ms);
+
+/* 【非阻塞提交】只把请求放进共享槽就返回，不等结果：
+ *   0 = 已提交（ticket 可交给 client_wait_ex）
+ *  -1 = 参数非法   -2 = 无空闲槽位
+ * 图形栈可以攒一帧的 N 条命令一次提交，再逐条/批量收结果。 */
+int client_submit_ex(client_t* client, void* fn, const void* args,
+                     unsigned long args_size, foot_ticket_t* ticket);
+/* 等某个已提交请求的结果：-1 = 超时或票据失效（槽位被回收/复用）。 */
+void* client_wait_ex(client_t* client, foot_ticket_t* ticket,
+                     unsigned int timeout_ms);
 
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)
