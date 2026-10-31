@@ -9,13 +9,23 @@
 #define FOOT_CALL_TIMEOUT_MS 1000 /* 单次调用墙钟上限 */
 #define FOOT_IDLE_WAIT_MS 500   /* 服务端空闲时睡在 kick 上的最长沉睡时间（ms） */
 
-/* 共享页控制区（4 个字，紧跟在槽数组后面）：
- *   [0] kick  调用方的提交计数：每提交一个请求 +1 并 futex 唤醒；
- *             服务端空闲时睡在这个字上，醒来重扫槽位。
- *   [1..3]    预留（统计/心跳）。 */
-#define FOOT_CTL_WORDS 4
+/* 共享页控制区（8 个字，紧跟在槽数组后面；内核与用户态同布局）：
+ *   [0] kick       调用方的提交计数：每提交一个请求 +1 并 futex 唤醒；
+ *                  服务端空闲时睡在这个字上，醒来重扫槽位。
+ *   [1] alive      服务端存活标记（注册时置 1，注销/崩溃清理时清 0）
+ *   [2] req_total  提交过的请求总数
+ *   [3] timeout    超时放弃次数
+ *   [4] err        提交失败/票据失效次数
+ *   [5] max_lat_ms 观测到的最大单次往返（ms）
+ *   [6..7] 预留 */
+#define FOOT_CTL_WORDS 8
 #define FOOT_CTL_BYTES (FOOT_CTL_WORDS * 4)
 #define FOOT_CTL_KICK 0
+#define FOOT_CTL_ALIVE 1
+#define FOOT_CTL_REQ 2
+#define FOOT_CTL_TIMEOUT 3
+#define FOOT_CTL_ERR 4
+#define FOOT_CTL_MAX_LAT 5
 
 enum {
   SYS_NEW_CLIENT = 1,
@@ -109,6 +119,18 @@ int client_submit_ex(client_t* client, void* fn, const void* args,
 /* 等某个已提交请求的结果：-1 = 超时或票据失效（槽位被回收/复用）。 */
 void* client_wait_ex(client_t* client, foot_ticket_t* ticket,
                      unsigned int timeout_ms);
+
+/* 【可观测性】共享页里的统计计数器（零系统调用，直接读页）：
+ * 请求总数、超时数、错误数、观测到的最大往返。 */
+typedef struct {
+  unsigned int req_total;
+  unsigned int timeout_total;
+  unsigned int err_total;
+  unsigned int max_latency_ms;
+  unsigned int alive; /* 服务端是否还活着 */
+} foot_stats_t;
+
+int client_stats(client_t* client, foot_stats_t* out); /* 0 / -1 */
 
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)

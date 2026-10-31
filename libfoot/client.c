@@ -26,11 +26,13 @@ static uint64_t foot_now_ms(void) {
   return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000);
 }
 
-/* 共享页控制区：kick 字紧跟在槽数组后面（内核按同样布局留了 4 个字） */
-static uint32_t* foot_kick(client_t* client) {
+/* 共享页控制区：kick/统计字紧跟在槽数组后面（内核按同样布局留了 8 个字） */
+static uint32_t* foot_ctl(client_t* client) {
   return (uint32_t*)((char*)client->apis +
                      (long)client->api_size * (long)sizeof(api_t));
 }
+
+#define foot_kick(c) (foot_ctl(c) + FOOT_CTL_KICK)
 
 /* 在 addr 上等 ms 毫秒（0 = 只检查不睡）。返回 0 = 被唤醒/值已变，
  * -110 = 超时。timespec 用 16 字节布局（i64 sec + i64 nsec）。 */
@@ -152,9 +154,13 @@ int client_submit_ex(client_t* client, void* fn, const void* args,
   if (!__atomic_compare_exchange_n(&api->cid, &expect, (int)seq, 0,
                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
     printf("foot submit: slot busy\n");
+    __atomic_add_fetch(foot_ctl(client) + FOOT_CTL_ERR, 1, __ATOMIC_RELAXED);
     return -2;
   }
   __atomic_store_n(&api->state, API_REDAY, __ATOMIC_RELEASE);
+
+  /* 统计：提交数 +1（relaxed，不参与同步） */
+  __atomic_add_fetch(foot_ctl(client) + FOOT_CTL_REQ, 1, __ATOMIC_RELAXED);
 
   /* 通知服务端：kick 计数 +1（睡在 kick 上的服务端会被唤醒；
    * 服务端"先读 kick 再扫槽"的顺序保证这次提交不会被漏掉） */
@@ -185,6 +191,7 @@ void* client_wait_ex(client_t* client, foot_ticket_t* ticket,
     if (__atomic_load_n(&api->seq, __ATOMIC_ACQUIRE) != ticket->seq ||
         __atomic_load_n(&api->cid, __ATOMIC_ACQUIRE) == 0) {
       printf("foot wait: stale ticket slot=%d\n", ticket->slot);
+      __atomic_add_fetch(foot_ctl(client) + FOOT_CTL_ERR, 1, __ATOMIC_RELAXED);
       return (void*)-1;
     }
 
@@ -194,11 +201,24 @@ void* client_wait_ex(client_t* client, foot_ticket_t* ticket,
       /* 取走结果并归还槽位 */
       __atomic_store_n(&api->state, API_INIT, __ATOMIC_RELEASE);
       __atomic_store_n(&api->cid, 0, __ATOMIC_RELEASE);
+      /* 统计：本次往返耗时（ms），只记最大值 */
+      {
+        unsigned int lat = (unsigned int)(foot_now_ms() - api->claim_ms);
+        unsigned int* max = foot_ctl(client) + FOOT_CTL_MAX_LAT;
+        unsigned int old = __atomic_load_n(max, __ATOMIC_RELAXED);
+        while (lat > old &&
+               !__atomic_compare_exchange_n(max, &old, lat, 0,
+                                            __ATOMIC_RELAXED,
+                                            __ATOMIC_RELAXED)) {
+        }
+      }
       return result;
     }
 
     uint64_t now = foot_now_ms();
     if (now >= deadline) {
+      __atomic_add_fetch(foot_ctl(client) + FOOT_CTL_TIMEOUT, 1,
+                         __ATOMIC_RELAXED);
       /* 超时：能撤销就撤销（服务端尚未取走），否则放弃结果等它回收 */
       int expect_st = API_REDAY;
       if (__atomic_compare_exchange_n(&api->state, &expect_st, API_INIT, 0,
@@ -385,6 +405,21 @@ client_t* client_id(int id) {
   }
   client->fd = fd;
   return client;
+}
+
+int client_stats(client_t* client, foot_stats_t* out) {
+  if (client == NULL || out == NULL || client->apis == NULL) {
+    return -1;
+  }
+  uint32_t* ctl = foot_ctl(client);
+  out->req_total = __atomic_load_n(ctl + FOOT_CTL_REQ, __ATOMIC_RELAXED);
+  out->timeout_total =
+      __atomic_load_n(ctl + FOOT_CTL_TIMEOUT, __ATOMIC_RELAXED);
+  out->err_total = __atomic_load_n(ctl + FOOT_CTL_ERR, __ATOMIC_RELAXED);
+  out->max_latency_ms =
+      __atomic_load_n(ctl + FOOT_CTL_MAX_LAT, __ATOMIC_RELAXED);
+  out->alive = __atomic_load_n(ctl + FOOT_CTL_ALIVE, __ATOMIC_ACQUIRE);
+  return 0;
 }
 
 void clirent_un_regist(client_t* client) {
