@@ -450,6 +450,13 @@ fbdev_head_create(struct weston_backend *backend, const char *name)
 	return 0;
 }
 
+static void
+fbdev_head_destroy(struct weston_head *base)
+{
+	weston_head_release(base);
+	free(base);
+}
+
 /* 两个成员都必须给：前端是 api->create_head(...) 直接调用的，
  * 漏一个就是 pc=0 的取指异常（日志停在 Registered plugin API 之后）。 */
 static const struct weston_windowed_output_api fbdev_output_api = {
@@ -634,6 +641,17 @@ static void
 fbdev_destroy(struct weston_backend *backend)
 {
 	struct fbdev_backend *b = to_fbdev_backend(backend);
+	struct weston_head *head, *next;
+
+	/* 后端负责销毁自己建的 head：libweston 在 weston_compositor_destroy()
+	 * 里 assert(wl_list_empty(&compositor->head_list))，漏掉这一步就是
+	 * 每次退出都断言失败（做法与 backend-headless 的 headless_destroy 一致）。 */
+	wl_list_remove(&b->base.link);
+	wl_list_for_each_safe(head, next, &b->compositor->head_list,
+			      compositor_link) {
+		if (head->backend == &b->base)
+			fbdev_head_destroy(head);
+	}
 
 	fbdev_input_fini(b);
 
