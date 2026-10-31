@@ -73,6 +73,33 @@ struct fb_fix_screeninfo {
 	uint16_t reserved[2];
 };
 
+/* ---- 输入：/dev/input/eventN → weston pointer ----
+ * 上游 fbdev 后端不存在，libinput 后端又依赖 udev/sysfs（本系统没有），
+ * 所以这里直接读内核 evdev 的 input_event。格式与 Linux 一致
+ * （aarch64 上 24 字节：i64 sec, i64 usec, u16 type, u16 code, i32 value），
+ * 数据源是 duck/modules/input/evdev.c 建的 /dev/input/event0。
+ * 只处理相对位移（EV_REL，鼠标）与按键（EV_KEY 的 BTN_*）；没有按键时
+ * compositor 不画光标，所以这一段不做的话桌面就是"没有鼠标"。
+ */
+#define EV_SYN		0x00
+#define EV_KEY		0x01
+#define EV_REL		0x02
+#define SYN_REPORT	0x00
+#define REL_X		0x00
+#define REL_Y		0x01
+#define REL_WHEEL	0x08
+#define BTN_LEFT	0x110
+#define BTN_RIGHT	0x111
+#define BTN_MIDDLE	0x112
+
+struct fbdev_input_event {
+	int64_t sec;
+	int64_t usec;
+	uint16_t type;
+	uint16_t code;
+	int32_t value;
+};
+
 struct fbdev_backend {
 	struct weston_backend base;
 	struct weston_compositor *compositor;
@@ -88,6 +115,15 @@ struct fbdev_backend {
 
 	/* 打开时读到的模式，用于每帧 FBIOPAN_DISPLAY"踢"一下显示刷新 */
 	struct fb_var_screeninfo var;
+
+	/* 输入：seat 内嵌在 backend 里（与上游 test 后端同一套 API），
+	 * 一个 evdev fd + wl_event_loop 的 fd source。 */
+	struct weston_seat seat;
+	bool input_ready;
+	int input_fd;
+	struct wl_event_source *input_source;
+	int rel_x;
+	int rel_y;
 };
 
 struct fbdev_head {
@@ -421,12 +457,185 @@ static const struct weston_windowed_output_api fbdev_output_api = {
 	.output_set_size = fbdev_output_set_size,
 };
 
+/* ---------------------------------------------------------------- input */
+
+/* 一帧内累积的相对位移一次性投递（SYN_REPORT 时调用）。 */
+static void
+fbdev_input_flush_motion(struct fbdev_backend *b, struct timespec *ts)
+{
+	struct weston_pointer *pointer = weston_seat_get_pointer(&b->seat);
+	struct weston_pointer_motion_event ev;
+	struct weston_coord rel;
+
+	if (pointer == NULL || (b->rel_x == 0 && b->rel_y == 0))
+		return;
+
+	rel.x = b->rel_x;
+	rel.y = b->rel_y;
+	/* 【诊断·可删】分步打点：定位崩溃发生在哪个调用内部。
+	 * 注意不用 %f —— musl 的浮点格式化会走进 locale 相关路径。 */
+	{
+		static int dbg_m = 0;
+
+		if (dbg_m++ < 10)
+			weston_log("fbdev: motion step1 rel=%d,%d\n",
+				   b->rel_x, b->rel_y);
+	}
+	/* 只带 REL 位：abs / rel_unaccel 传 NULL 是安全的（实现里只在
+	 * 对应 mask 位置位时才解引用）。 */
+	weston_pointer_motion_event_init(&ev, ts, &b->seat,
+					 WESTON_POINTER_MOTION_REL,
+					 NULL, &rel, NULL);
+	{
+		static int dbg_m2 = 0;
+
+		if (dbg_m2++ < 10)
+			weston_log("fbdev: motion step2 init ok\n");
+	}
+	weston_pointer_send_motion(pointer, &ev);
+	{
+		static int dbg_m3 = 0;
+
+		if (dbg_m3++ < 10)
+			weston_log("fbdev: motion step3 send ok\n");
+	}
+	weston_pointer_send_frame(pointer);
+	{
+		static int dbg_m4 = 0;
+
+		if (dbg_m4++ < 10)
+			weston_log("fbdev: motion step4 frame ok\n");
+	}
+
+	b->rel_x = 0;
+	b->rel_y = 0;
+}
+
+static void
+fbdev_input_handle_button(struct fbdev_backend *b, struct timespec *ts,
+			  uint16_t button, int32_t value)
+{
+	struct weston_pointer *pointer = weston_seat_get_pointer(&b->seat);
+	struct weston_pointer_button_event ev;
+
+	if (pointer == NULL)
+		return;
+
+	weston_pointer_button_event_init(&ev, ts, &b->seat, button,
+					 value ? WL_POINTER_BUTTON_STATE_PRESSED
+					       : WL_POINTER_BUTTON_STATE_RELEASED);
+	weston_pointer_send_button(pointer, &ev);
+	weston_pointer_send_frame(pointer);
+}
+
+static int
+fbdev_input_handler(int fd, uint32_t mask, void *data)
+{
+	struct fbdev_backend *b = data;
+	struct fbdev_input_event ev[64];
+	ssize_t len;
+	ssize_t i;
+	ssize_t count;
+
+	if (!(mask & WL_EVENT_READABLE))
+		return 0;
+
+	len = read(fd, ev, sizeof ev);
+	if (len <= 0)
+		return 0;
+
+	count = len / (ssize_t)sizeof ev[0];
+	for (i = 0; i < count; i++) {
+		struct timespec ts;
+
+		ts.tv_sec = (time_t)ev[i].sec;
+		ts.tv_nsec = (long)ev[i].usec * 1000;
+
+		switch (ev[i].type) {
+		case EV_REL:
+			if (ev[i].code == REL_X)
+				b->rel_x += ev[i].value;
+			else if (ev[i].code == REL_Y)
+				b->rel_y += ev[i].value;
+			break;
+		case EV_KEY:
+			if (ev[i].code == BTN_LEFT ||
+			    ev[i].code == BTN_RIGHT ||
+			    ev[i].code == BTN_MIDDLE)
+				fbdev_input_handle_button(b, &ts, ev[i].code,
+							  ev[i].value);
+			break;
+		case EV_SYN:
+			if (ev[i].code == SYN_REPORT)
+				fbdev_input_flush_motion(b, &ts);
+			break;
+		default:
+			break;
+		}
+	}
+
+	return 0;
+}
+
+static void
+fbdev_input_init(struct fbdev_backend *b)
+{
+	struct wl_event_loop *loop;
+
+	weston_seat_init(&b->seat, b->compositor, "seat0");
+	b->input_ready = true;
+	weston_seat_init_pointer(&b->seat);
+	/* 【对照实验】暂时不建键盘，用来区分崩溃是 pointer 还是 keyboard 引入 */
+	/* if (weston_seat_init_keyboard(&b->seat, NULL) < 0)
+		weston_log("fbdev: keyboard init failed (continue without)\n"); */
+
+	b->input_fd = open("/dev/input/event0",
+			   O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (b->input_fd < 0) {
+		weston_log("fbdev: open /dev/input/event0 failed: %s "
+			   "(desktop will have no pointer)\n", strerror(errno));
+		return;
+	}
+
+	loop = wl_display_get_event_loop(b->compositor->wl_display);
+	b->input_source = wl_event_loop_add_fd(loop, b->input_fd,
+					       WL_EVENT_READABLE,
+					       fbdev_input_handler, b);
+	if (b->input_source == NULL) {
+		weston_log("fbdev: cannot watch /dev/input/event0\n");
+		close(b->input_fd);
+		b->input_fd = -1;
+		return;
+	}
+
+	weston_log("fbdev: input /dev/input/event0 ready (relative pointer)\n");
+}
+
+static void
+fbdev_input_fini(struct fbdev_backend *b)
+{
+	if (b->input_source) {
+		wl_event_source_remove(b->input_source);
+		b->input_source = NULL;
+	}
+	if (b->input_fd >= 0) {
+		close(b->input_fd);
+		b->input_fd = -1;
+	}
+	if (b->input_ready) {
+		weston_seat_release(&b->seat);
+		b->input_ready = false;
+	}
+}
+
 /* --------------------------------------------------------------- backend */
 
 static void
 fbdev_destroy(struct weston_backend *backend)
 {
 	struct fbdev_backend *b = to_fbdev_backend(backend);
+
+	fbdev_input_fini(b);
 
 	if (b->fb)
 		munmap(b->fb, b->fb_len);
@@ -509,6 +718,7 @@ weston_backend_init(struct weston_compositor *compositor,
 		return -1;
 
 	b->fd = -1;
+	b->input_fd = -1;
 	b->compositor = compositor;
 	b->refresh = config->refresh > 0 ? config->refresh : DEFAULT_REFRESH;
 
@@ -529,6 +739,9 @@ weston_backend_init(struct weston_compositor *compositor,
 	b->base.supported_presentation_clocks = WESTON_PRESENTATION_CLOCKS_SOFTWARE;
 
 	wl_list_insert(&compositor->backend_list, &b->base.link);
+
+	/* 已确认：weston-desktop 的崩溃由输入初始化引入，不是构建产物问题。 */
+	fbdev_input_init(b);
 
 	if (weston_plugin_api_register(compositor,
 				       WESTON_WINDOWED_OUTPUT_API_NAME_FBDEV,
