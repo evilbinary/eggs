@@ -147,6 +147,11 @@ enum {
   SYS_CAP_DERIVE = 9,   /* handle + rights → handle */
   SYS_CAP_REVOKE = 10,
   SYS_CAP_ALLOC_FRAME = 11, /* size/pa → handle（输出 pa/size/rights） */
+  /* 端点（IPC）：创建 / 投递（可携带能力）/ 接收。
+   * 这三个命令的参数结构是 foot_ep_ctl_t，不是 foot_cap_ctl_t。 */
+  SYS_CAP_EP_CREATE = 12,
+  SYS_CAP_EP_SEND = 13,
+  SYS_CAP_EP_RECV = 14,
 };
 
 /* 通用权限（低 16 位）：与内核 duck/kernel/cap.h 的 RIGHT_* 同值 */
@@ -167,6 +172,9 @@ enum {
   CAP_DEVWIN_MAILBOX = 1 << 17, /* 允许直接读写寄存器 */
   CAP_FRAME_MAP = 1 << 16,      /* FRAME：允许把该物理页映射进地址空间 */
   CAP_FRAME_UNMAP = 1 << 17,    /* FRAME：允许解除映射 */
+  CAP_EP_SEND = 1 << 16,        /* ENDPOINT：允许投递消息 */
+  CAP_EP_RECV = 1 << 17,        /* ENDPOINT：允许接收消息 */
+  CAP_EP_NOTIFY = 1 << 18,      /* ENDPOINT：允许通知（预留） */
 };
 
 typedef struct foot_cap_ctl {
@@ -205,6 +213,31 @@ int foot_cap_revoke(foot_cap_t cap);
 foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
                                unsigned int rights, unsigned int* out_pa,
                                unsigned int* out_size);
+
+/* ---- IPC 端点：消息 + 随消息携带能力 ----
+ * fork 之后父子共享同一个 endpoint（CSpace 整表复制），因此它就是
+ * "父进程把自己的一个能力交给子进程"的通路：
+ *   父 foot_cap_ep_send(ep, buf, n, some_cap) → 子 foot_cap_ep_recv(ep, ...)
+ * 取到的是一个【新句柄】，可以直接拿去做 map/info。
+ * 队列深度 8 条、单条数据 64 字节；满/空返回 -1（非阻塞，需轮询）。 */
+typedef struct foot_ep_ctl {
+  unsigned int handle;    /* endpoint 句柄 */
+  unsigned int grant;     /* SEND：要转授的句柄；RECV：输出收到的句柄 */
+  unsigned int len;       /* SEND：数据长度；RECV：缓冲区容量 */
+  unsigned int out_len;   /* RECV：实际长度 */
+  unsigned int rights;    /* SEND：给接收方的权限（0 = 沿用原权限） */
+  unsigned int flags;     /* 保留 */
+  char* buf;              /* 数据缓冲区 */
+} foot_ep_ctl_t;
+
+/* 新建 endpoint；失败返回 FOOT_CAP_NONE */
+foot_cap_t foot_cap_ep_create(void);
+/* 投递：0 成功，-1 失败（队列满/无 EP_SEND/无转授权） */
+int foot_cap_ep_send(foot_cap_t ep, const void* data, unsigned long len,
+                     foot_cap_t grant);
+/* 接收：0 成功，-1 失败（队列空/无 EP_RECV）；out 指针可传 NULL */
+int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
+                     unsigned long* out_len, foot_cap_t* out_grant);
 
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)

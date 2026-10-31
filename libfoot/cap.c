@@ -23,7 +23,7 @@ static int foot_cap_fd_get(void) {
   return foot_cap_fd;
 }
 
-static int foot_cap_call(unsigned int cmd, foot_cap_ctl_t* ctl) {
+static int foot_cap_call(unsigned int cmd, void* ctl) {
   int fd = foot_cap_fd_get();
   if (fd < 0) {
     printf("foot cap: open /dev/foot failed (%d)\n", fd);
@@ -110,4 +110,39 @@ foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
   if (out_pa != NULL) *out_pa = ctl.pa;
   if (out_size != NULL) *out_size = ctl.size;
   return (foot_cap_t)ctl.handle;
+}
+
+foot_cap_t foot_cap_ep_create(void) {
+  foot_ep_ctl_t ctl;
+  memset(&ctl, 0, sizeof(ctl));
+  if (foot_cap_call(SYS_CAP_EP_CREATE, &ctl) < 0) {
+    return FOOT_CAP_NONE;
+  }
+  return (foot_cap_t)ctl.handle;
+}
+
+int foot_cap_ep_send(foot_cap_t ep, const void* data, unsigned long len,
+                     foot_cap_t grant) {
+  foot_ep_ctl_t ctl;
+  memset(&ctl, 0, sizeof(ctl));
+  ctl.handle = ep;
+  ctl.grant = grant;
+  ctl.len = (unsigned int)len;
+  ctl.buf = (char*)data;
+  return foot_cap_call(SYS_CAP_EP_SEND, &ctl) < 0 ? -1 : 0;
+}
+
+int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
+                     unsigned long* out_len, foot_cap_t* out_grant) {
+  foot_ep_ctl_t ctl;
+  memset(&ctl, 0, sizeof(ctl));
+  ctl.handle = ep;
+  ctl.len = (unsigned int)cap;
+  ctl.buf = (char*)data;
+  if (foot_cap_call(SYS_CAP_EP_RECV, &ctl) < 0) {
+    return -1;
+  }
+  if (out_len != NULL) *out_len = ctl.out_len;
+  if (out_grant != NULL) *out_grant = (foot_cap_t)ctl.grant;
+  return 0;
 }
