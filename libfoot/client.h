@@ -230,14 +230,22 @@ typedef struct foot_ep_ctl {
   char* buf;              /* 数据缓冲区 */
 } foot_ep_ctl_t;
 
+/* flags 位：非阻塞（见 foot_ep_ctl_t.flags） */
+#define FOOT_EP_NONBLOCK 1u
+
 /* 新建 endpoint；失败返回 FOOT_CAP_NONE */
 foot_cap_t foot_cap_ep_create(void);
-/* 投递：0 成功，-1 失败（队列满/无 EP_SEND/无转授权） */
+/* 投递（【阻塞】直到队列有空位）：0 成功，-1 失败（无 EP_SEND/无转授权） */
 int foot_cap_ep_send(foot_cap_t ep, const void* data, unsigned long len,
                      foot_cap_t grant);
-/* 接收：0 成功，-1 失败（队列空/无 EP_RECV）；out 指针可传 NULL */
+/* 接收（【阻塞】直到有消息）：0 成功，-1 失败（无 EP_RECV）；out 可传 NULL */
 int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
                      unsigned long* out_len, foot_cap_t* out_grant);
+/* 非阻塞版本：队列满/空立刻返回 -1，调用方自己轮询 */
+int foot_cap_ep_try_send(foot_cap_t ep, const void* data, unsigned long len,
+                         foot_cap_t grant);
+int foot_cap_ep_try_recv(foot_cap_t ep, void* data, unsigned long cap,
+                         unsigned long* out_len, foot_cap_t* out_grant);
 
 /* 兼容旧写法：args 必须传栈上数组（宏取 sizeof 得到真实长度） */
 #define client_regist(name) client_regist_ex((name), FOOT_API_DEFAULT)

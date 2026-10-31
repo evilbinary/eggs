@@ -121,23 +121,27 @@ foot_cap_t foot_cap_ep_create(void) {
   return (foot_cap_t)ctl.handle;
 }
 
-int foot_cap_ep_send(foot_cap_t ep, const void* data, unsigned long len,
-                     foot_cap_t grant) {
+static int foot_cap_ep_send_f(foot_cap_t ep, const void* data,
+                              unsigned long len, foot_cap_t grant,
+                              unsigned int flags) {
   foot_ep_ctl_t ctl;
   memset(&ctl, 0, sizeof(ctl));
   ctl.handle = ep;
   ctl.grant = grant;
   ctl.len = (unsigned int)len;
+  ctl.flags = flags;
   ctl.buf = (char*)data;
   return foot_cap_call(SYS_CAP_EP_SEND, &ctl) < 0 ? -1 : 0;
 }
 
-int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
-                     unsigned long* out_len, foot_cap_t* out_grant) {
+static int foot_cap_ep_recv_f(foot_cap_t ep, void* data, unsigned long cap,
+                              unsigned long* out_len, foot_cap_t* out_grant,
+                              unsigned int flags) {
   foot_ep_ctl_t ctl;
   memset(&ctl, 0, sizeof(ctl));
   ctl.handle = ep;
   ctl.len = (unsigned int)cap;
+  ctl.flags = flags;
   ctl.buf = (char*)data;
   if (foot_cap_call(SYS_CAP_EP_RECV, &ctl) < 0) {
     return -1;
@@ -145,4 +149,25 @@ int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
   if (out_len != NULL) *out_len = ctl.out_len;
   if (out_grant != NULL) *out_grant = (foot_cap_t)ctl.grant;
   return 0;
+}
+
+int foot_cap_ep_send(foot_cap_t ep, const void* data, unsigned long len,
+                     foot_cap_t grant) {
+  return foot_cap_ep_send_f(ep, data, len, grant, 0);
+}
+
+int foot_cap_ep_recv(foot_cap_t ep, void* data, unsigned long cap,
+                     unsigned long* out_len, foot_cap_t* out_grant) {
+  return foot_cap_ep_recv_f(ep, data, cap, out_len, out_grant, 0);
+}
+
+int foot_cap_ep_try_send(foot_cap_t ep, const void* data, unsigned long len,
+                         foot_cap_t grant) {
+  return foot_cap_ep_send_f(ep, data, len, grant, FOOT_EP_NONBLOCK);
+}
+
+int foot_cap_ep_try_recv(foot_cap_t ep, void* data, unsigned long cap,
+                         unsigned long* out_len, foot_cap_t* out_grant) {
+  return foot_cap_ep_recv_f(ep, data, cap, out_len, out_grant,
+                            FOOT_EP_NONBLOCK);
 }
