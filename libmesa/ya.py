@@ -98,7 +98,7 @@ add_includedirs(
     public = true
 )
 
-# ---- broadcom：CLE + 编译器支撑 ----
+# ---- broadcom：CLE + 编译器支撑（非版本文件，只编一次）----
 add_files(
     'src/broadcom/cle/v3d_decoder.c',
     'src/broadcom/common/v3d_device_info.c',
@@ -106,14 +106,19 @@ add_files(
     'src/broadcom/common/v3d_util.c',
     'src/broadcom/common/v3d_uif.c',
     'src/broadcom/common/v3d_format_table.c',
-    'src/broadcom/qpu/qpu_instr.c',
-    'src/broadcom/qpu/qpu_pack.c',
 )
 
-# ---- v3d 编译器（NIR → VIR → QPU），共 30 个文件 ----
-add_files(
-    'src/broadcom/compiler/*.c',
-)
+# ---- per-version 文件：按 42/71 各编一份（v3d_X 宏的 switch 引用两套
+#      前缀符号，与 meson 的 libv3d_compiler@ver 语义一致）----
+add_files('src/broadcom/compiler/*.c', {'defines': 'V3D_VERSION=42'})
+add_files('src/broadcom/compiler/*.c', {'defines': 'V3D_VERSION=71'})
+add_files('src/gallium/drivers/v3d/v3dx_*.c', {'defines': 'V3D_VERSION=42'})
+add_files('src/gallium/drivers/v3d/v3dx_*.c', {'defines': 'V3D_VERSION=71'})
+
+# qpu_pack 也按版本（打包表引用 V3D_VERSION）
+add_files('src/broadcom/qpu/qpu_pack.c', {'defines': 'V3D_VERSION=42'})
+add_files('src/broadcom/qpu/qpu_pack.c', {'defines': 'V3D_VERSION=71'})
+add_files('src/broadcom/qpu/qpu_instr.c')
 
 # ---- NIR ----
 add_files(
@@ -121,4 +126,17 @@ add_files(
     'src/compiler/nir/gen/nir_intrinsics.c',
     'src/compiler/nir/gen/nir_opcodes.c',
     'src/compiler/nir/gen/nir_constant_expressions.c',
+)
+
+# ---- v3d gallium 驱动 + winsys（对接 libdrm 替身 → gpud）----
+add_files(
+    'src/gallium/drivers/v3d/*.c',
+    'src/gallium/winsys/v3d/drm/v3d_drm_winsys.c',
+)
+
+add_includedirs(
+    'src/gallium/drivers',             # v3d/v3d_screen.h 形式
+    'src/gallium/drivers/v3d',
+    'src/gallium/winsys/v3d/drm',
+    'src/broadcom/perfcntrs',
 )
