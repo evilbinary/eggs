@@ -152,6 +152,9 @@ enum {
   SYS_CAP_EP_CREATE = 12,
   SYS_CAP_EP_SEND = 13,
   SYS_CAP_EP_RECV = 14,
+  /* 物理连续大块（OBJ_ARENA）：foot_cap_ctl_t 的 size=长度、offset=物理对齐。
+   * 输出 handle + pa + size。GPU 页表（4MB 连续）/ QPU 代码 / uniform 用。 */
+  SYS_CAP_ALLOC_ARENA = 15,
 };
 
 /* 通用权限（低 16 位）：与内核 duck/kernel/cap.h 的 RIGHT_* 同值 */
@@ -214,6 +217,14 @@ foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
                                unsigned int rights, unsigned int* out_pa,
                                unsigned int* out_size);
 
+/* 申请物理【连续】大块对象（OBJ_ARENA）：size 按页向上取整（上限 16MB）；
+ * alignment 是物理对齐（0=页对齐，须为 2 的幂）；rights==0 取默认。
+ * 走 phy_alloc_aligment，一次拿整块物理连续 + 恒等映射（GPU 页表 4MB 连续）。
+ * 失败返回 FOOT_CAP_NONE；成功回填 pa/size（指针可传 NULL）。 */
+foot_cap_t foot_cap_alloc_arena(unsigned long size, unsigned long alignment,
+                                unsigned int rights, unsigned int* out_pa,
+                                unsigned int* out_size);
+
 /* ---- IPC 端点：消息 + 随消息携带能力 ----
  * fork 之后父子共享同一个 endpoint（CSpace 整表复制），因此它就是
  * "父进程把自己的一个能力交给子进程"的通路：
@@ -252,5 +263,18 @@ int foot_cap_ep_try_recv(foot_cap_t ep, void* data, unsigned long cap,
 #define client_call(client, fn, args)                                     \
   client_call_ex((client), (void*)(fn), (args), sizeof(args),             \
                  FOOT_CALL_TIMEOUT_MS)
+
+/* ===================== dcache 维护（内核自定义号 522） =====================
+ * 用户态驱动（GPU g2dd 等）dispatch 前后要对 dcache 做 clean / invalidate。
+ * aarch64 上 EL0 只能 dc civac，纯 invalidate 要 EL1 ⇒ 统一走 cacheflush。 */
+#define FOOT_SYS_CACHEFLUSH 522
+
+#define FOOT_CACHE_CLEAN 0
+#define FOOT_CACHE_INVALIDATE 1
+#define FOOT_CACHE_CLEAN_INV 2
+
+/* 半开区间 [start, end)。clean 用 clean+invalidate（dc civac 语义）。 */
+void foot_cache_clean(void* start, void* end);
+void foot_cache_invalidate(void* start, void* end);
 
 #endif

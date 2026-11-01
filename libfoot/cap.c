@@ -112,6 +112,22 @@ foot_cap_t foot_cap_alloc_frame(unsigned long size, unsigned long pa,
   return (foot_cap_t)ctl.handle;
 }
 
+foot_cap_t foot_cap_alloc_arena(unsigned long size, unsigned long alignment,
+                                unsigned int rights, unsigned int* out_pa,
+                                unsigned int* out_size) {
+  foot_cap_ctl_t ctl;
+  memset(&ctl, 0, sizeof(ctl));
+  ctl.size = (unsigned int)size;
+  ctl.offset = (unsigned int)alignment; /* cap_ctl_t 的 offset 复用做物理对齐 */
+  ctl.rights = rights;
+  if (foot_cap_call(SYS_CAP_ALLOC_ARENA, &ctl) < 0) {
+    return FOOT_CAP_NONE;
+  }
+  if (out_pa != NULL) *out_pa = ctl.pa;
+  if (out_size != NULL) *out_size = ctl.size;
+  return (foot_cap_t)ctl.handle;
+}
+
 foot_cap_t foot_cap_ep_create(void) {
   foot_ep_ctl_t ctl;
   memset(&ctl, 0, sizeof(ctl));
@@ -170,4 +186,20 @@ int foot_cap_ep_try_recv(foot_cap_t ep, void* data, unsigned long cap,
                          unsigned long* out_len, foot_cap_t* out_grant) {
   return foot_cap_ep_recv_f(ep, data, cap, out_len, out_grant,
                             FOOT_EP_NONBLOCK);
+}
+
+/* ===================== dcache 维护 ===================== */
+
+static int foot_cacheflush(unsigned long start, unsigned long end, int flags) {
+  return (int)syscall(FOOT_SYS_CACHEFLUSH, start, end, flags);
+}
+
+void foot_cache_clean(void* start, void* end) {
+  foot_cacheflush((unsigned long)start, (unsigned long)end,
+                  FOOT_CACHE_CLEAN_INV);
+}
+
+void foot_cache_invalidate(void* start, void* end) {
+  foot_cacheflush((unsigned long)start, (unsigned long)end,
+                  FOOT_CACHE_INVALIDATE);
 }
