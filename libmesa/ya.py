@@ -49,6 +49,11 @@ def ensure_generated():
     _run(['python3', 'nir_opt_algebraic.py', '--out', 'nir_opt_algebraic.c'],
          NIR, NIR + '/nir_opt_algebraic.c')   # 优化规则表（py 生成，很大）
 
+    BCOMP = os.path.join(BASE, 'src/broadcom/compiler')
+    # v3d 的 algebraic lower 规则（生成；-p 指向 nir 目录，与 meson 一致）
+    _run(['python3', 'v3d_nir_lower_algebraic.py', '-p', '../compiler/nir'],
+         BCOMP, BCOMP + '/v3d_nir_lower_algebraic.c')
+
     FMT = os.path.join(BASE, 'src/util/format')
     _run(['python3', 'u_format_table.py', 'u_format.yaml', '--enums'], FMT,
          FMT + '/u_format_gen.h')
@@ -74,7 +79,8 @@ add_packages(get_config('default_libc'))
 add_deps('zlib')
 
 add_cflags(
-    ' -D_GNU_SOURCE '
+    ' -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L '
+    ' -std=gnu11 '
     ' -D__linux__ '        # 裸机 ELF 工具链不定义 __linux__，
                            # 而 Mesa 的 detect_os.h 完全靠它判定平台
     # 注意：不传 -DV3D_VERSION。v3d_macros.h / v3dx_pack.h 已默认 71；
@@ -109,8 +115,6 @@ add_defines(
     'USE_V3D_SIMULATOR=0',
     'UTIL_ARCH_LITTLE_ENDIAN=1',
     'UTIL_ARCH_BIG_ENDIAN=0',
-    'PACKAGE_VERSION="24.0-foot"',
-    'MESA_LLVM_VERSION_STRING="0"',
 )
 
 add_includedirs(
@@ -148,12 +152,25 @@ add_files(
 add_files(
     'src/broadcom/qpu/qpu_instr.c',
     'src/broadcom/qpu/qpu_pack.c',
+    'src/broadcom/qpu/qpu_disasm.c',   # v3d_qpu_decode / v3d_qpu_disasm
     'src/broadcom/compiler/*.c',
 )
 
 # ---- NIR ----
+# nir_stub.c 是「无调试输出」的桩实现，与 nir_print.c 的 nir_print_shader
+# 冲突（meson 里二选一）。用 python glob 过滤掉，其余全收。
+# 注意：ymake 执行 ya.py 时的 cwd 不是本目录，glob 必须用 BASE 绝对路径，
+# 否则匹配为空 —— NIR 的 100 多个文件会静默不进构建列表（踩过）。
+import glob as _glob
+
+_nir_files = [
+    os.path.relpath(f, BASE)
+    for f in _glob.glob(os.path.join(BASE, 'src/compiler/nir/*.c'))
+    if not f.endswith('nir_stub.c')
+]
+print('mesa: nir files = %d' % len(_nir_files))
+add_files(*_nir_files)
 add_files(
-    'src/compiler/nir/*.c',
     'src/compiler/nir/gen/nir_intrinsics.c',
     'src/compiler/nir/gen/nir_opcodes.c',
     'src/compiler/nir/gen/nir_constant_expressions.c',
@@ -247,6 +264,7 @@ add_files(
     'src/util/format/u_format_zs.c',
     'src/util/format/u_format_table.c',   # 生成物：util_format_description 等
     'src/util/format_srgb.c',             # 生成物：srgb 查表
+    'src/util/foot_qsort_r.c',            # musl 无 qsort_r，自实现
 )
 
 # ---- blake3（disk_cache 用）----

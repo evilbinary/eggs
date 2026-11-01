@@ -26,18 +26,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifdef v3dX
-#  include "v3dx_context.h"
-#  include "broadcom/cle/v3dx_pack.h"
-#else
-#  define v3dX(x) v3d42_##x
-#  include "v3dx_format_table.h"
-#  undef v3dX
-
-#  define v3dX(x) v3d71_##x
-#  include "v3dx_format_table.h"
-#  undef v3dX
-#endif
+/* [foot] 原逻辑：v3dX 已定义（per-version 编译）时只补上下文，否则
+ * #define 两次同时声明 42/71 两套前缀。本项目只支持 7.1，且 ya 构建
+ * 通过 v3d_context.h 统一注入了 v3dX=71，因此这里始终只声明 71 一套
+ * （同时保证 v3dx_format_table.h 被看到）。 */
+#include "v3dx_context.h"
+#include "broadcom/cle/v3dx_pack.h"
+#include "v3dx_format_table.h"
 
 struct v3d_format {
         /** Set if the pipe format is defined in the table. */

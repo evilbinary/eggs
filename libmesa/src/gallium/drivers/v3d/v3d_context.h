@@ -25,9 +25,14 @@
 #ifndef V3D_CONTEXT_H
 #define V3D_CONTEXT_H
 
-#ifdef V3D_VERSION
-#include "broadcom/common/v3d_macros.h"
+/* [foot] meson 用 per-file 的 -DV3D_VERSION 区分「v3dx_*.c 需要前缀宏」
+ * 与「v3d_formats.c 需同时声明两套前缀」。ya 构建做不到 per-file 宏，
+ * 本项目只支持 V3D 7.1，故统一注入 71：所有文件都拿到 v3dX/V3DX=71，
+ * 配套把 v3d_format_table.h 改成只声明 71 一套。 */
+#ifndef V3D_VERSION
+#define V3D_VERSION 71
 #endif
+#include "broadcom/common/v3d_macros.h"
 
 #include <stdio.h>
 

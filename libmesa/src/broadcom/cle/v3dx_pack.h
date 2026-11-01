@@ -30,6 +30,16 @@
 #  define V3D_VERSION 71
 #endif
 
+/* [foot] meson 会给 v3dx_*.c 单独传 V3D_VERSION，进而通过 v3d_context.h
+ * 里的 #ifdef V3D_VERSION 引入 v3d_macros.h（定义 v3dX/V3DX 前缀宏）。
+ * ya 构建无法 per-file 传宏，这里在 v3dx_pack.h 这个必经点补上，
+ * 使 v3dx_*.c 能用 v3dX()/V3DX()。
+ * 注意：v3d_formats.c 那类文件不经过这里（它们 include v3d_format_table.h
+ * 并依赖 v3dX 未定义来同时声明两套前缀），不受影响。 */
+#ifndef V3DX
+#  include "broadcom/common/v3d_macros.h"
+#endif
+
 #if (V3D_VERSION == 21)
 #  include "cle/v3d_packet_v21_pack.h"
 #elif (V3D_VERSION == 42)
