@@ -265,7 +265,7 @@ int foot_cap_ep_try_recv(foot_cap_t ep, void* data, unsigned long cap,
                  FOOT_CALL_TIMEOUT_MS)
 
 /* ===================== dcache 维护（内核自定义号 522） =====================
- * 用户态驱动（GPU g2dd 等）dispatch 前后要对 dcache 做 clean / invalidate。
+ * 用户态驱动（GPU v3dd 等）dispatch 前后要对 dcache 做 clean / invalidate。
  * aarch64 上 EL0 只能 dc civac，纯 invalidate 要 EL1 ⇒ 统一走 cacheflush。 */
 #define FOOT_SYS_CACHEFLUSH 522
 
