@@ -247,7 +247,6 @@ add_files(
     'src/util/format/u_format_zs.c',
     'src/util/format/u_format_table.c',   # 生成物：util_format_description 等
     'src/util/format_srgb.c',             # 生成物：srgb 查表
-    'prebuilt/u_qsort.o',                 # C++ 模板（ymake 不编 .cpp，预编译）
 )
 
 # ---- blake3（disk_cache 用）----
