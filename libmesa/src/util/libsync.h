@@ -33,6 +33,10 @@
 #include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
+/* [foot] 本头用了 clock_gettime/CLOCK_MONOTONIC/struct timespec，
+ * 却依赖调用方先 include <time.h>。musl 下不同调用方顺序不同会踩空，
+ * 显式包含。 */
+#include <time.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>

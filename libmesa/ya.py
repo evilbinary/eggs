@@ -42,10 +42,18 @@ def ensure_generated():
     COMP = os.path.join(BASE, 'src/compiler')
     _run(['python3', 'builtin_types_h.py', 'builtin_types.h'], COMP,
          COMP + '/builtin_types.h')
+    # builtin_types.c：定义 296 个 glsl_type_builtin_* 变量（glsl_types.c 只引用）
+    _run(['python3', 'builtin_types_c.py', 'builtin_types.c'], COMP,
+         COMP + '/builtin_types.c')
+
+    _run(['python3', 'nir_opt_algebraic.py', '--out', 'nir_opt_algebraic.c'],
+         NIR, NIR + '/nir_opt_algebraic.c')   # 优化规则表（py 生成，很大）
 
     FMT = os.path.join(BASE, 'src/util/format')
     _run(['python3', 'u_format_table.py', 'u_format.yaml', '--enums'], FMT,
          FMT + '/u_format_gen.h')
+    _run(['python3', 'u_format_table.py', 'u_format.yaml'], FMT,
+         FMT + '/u_format_table.c')           # format 描述表
 
     CLE = os.path.join(BASE, 'src/broadcom/cle')
     _run(['python3', 'gen_zipped_xml_file.py', 'v3d_packet.xml'], CLE,
@@ -65,14 +73,42 @@ add_packages(get_config('default_libc'))
 
 add_deps('zlib')
 
+add_cflags(
+    ' -D_GNU_SOURCE '
+    ' -D__linux__ '        # 裸机 ELF 工具链不定义 __linux__，
+                           # 而 Mesa 的 detect_os.h 完全靠它判定平台
+    # 注意：不传 -DV3D_VERSION。v3d_macros.h / v3dx_pack.h 已默认 71；
+    # 而 v3d_formats.c 等文件靠「V3D_VERSION 未定义」来同时声明两套
+    # 前缀符号（v3d_format_table.h 的 #ifdef v3dX 分支），命令行传了会破坏它。
+    ' -DDETECT_ARCH_AARCH64=1 '
+    # meson 会探测这些 libc 能力并写进 config；musl 全部具备，直接给
+    ' -DHAVE_SYSCONF -DHAVE_GETRANDOM -DHAVE_GETENTROPY '
+    ' -DHAVE_MALLOC_USABLE_SIZE -DHAVE_CLOCK_GETTIME -DHAVE_TIMESPEC_GET '
+    ' -DHAVE_STRTOD_L -DHAVE_MEMFD_CREATE '
+    # 下面这批原本用 add_defines 传，但 ymake 的 defines 对 Mesa 的编译
+    # 单元不生效（实测：c11/threads.h 因缺 HAVE_PTHREAD 走了 fallback 分支，
+    # 进而 CLOCK_MONOTONIC/NULL 未声明）。统一并进 cflags。
+    ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 '
+    ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
+    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 '
+    ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
+    # 关掉 format 的 NEON 特化（Mesa 官方开关），否则要额外编
+    # u_format_unpack_neon.c 及其整表
+    ' -DNO_FORMAT_ASM '
+    # musl 自带 GNU 版 qsort_r，u_qsort.h 里是 static inline，
+    # 因此不需要编 C++ 的 u_qsort.cpp
+    ' -DHAVE_GNU_QSORT_R '
+    ' -DPACKAGE_VERSION=24.0_foot -DMESA_LLVM_VERSION_STRING=0 '
+)
+
 add_defines(
     'HAVE_PTHREAD=1',
     'HAVE_STRUCT_TIMESPEC=1',
     'HAVE_V3D=1',
     'GALLIUM_V3D=1',
     'USE_V3D_SIMULATOR=0',
-    'HAVE_ENDIAN_H=1',
-    'HAVE_SYS_MMAN_H=1',
+    'UTIL_ARCH_LITTLE_ENDIAN=1',
+    'UTIL_ARCH_BIG_ENDIAN=0',
     'PACKAGE_VERSION="24.0-foot"',
     'MESA_LLVM_VERSION_STRING="0"',
 )
@@ -108,17 +144,12 @@ add_files(
     'src/broadcom/common/v3d_format_table.c',
 )
 
-# ---- per-version 文件：按 42/71 各编一份（v3d_X 宏的 switch 引用两套
-#      前缀符号，与 meson 的 libv3d_compiler@ver 语义一致）----
-add_files('src/broadcom/compiler/*.c', {'defines': 'V3D_VERSION=42'})
-add_files('src/broadcom/compiler/*.c', {'defines': 'V3D_VERSION=71'})
-add_files('src/gallium/drivers/v3d/v3dx_*.c', {'defines': 'V3D_VERSION=42'})
-add_files('src/gallium/drivers/v3d/v3dx_*.c', {'defines': 'V3D_VERSION=71'})
-
-# qpu_pack 也按版本（打包表引用 V3D_VERSION）
-add_files('src/broadcom/qpu/qpu_pack.c', {'defines': 'V3D_VERSION=42'})
-add_files('src/broadcom/qpu/qpu_pack.c', {'defines': 'V3D_VERSION=71'})
-add_files('src/broadcom/qpu/qpu_instr.c')
+# 编译器 + QPU 打包表（V3D_VERSION=71 由全局 cflags 给出）
+add_files(
+    'src/broadcom/qpu/qpu_instr.c',
+    'src/broadcom/qpu/qpu_pack.c',
+    'src/broadcom/compiler/*.c',
+)
 
 # ---- NIR ----
 add_files(
@@ -126,6 +157,118 @@ add_files(
     'src/compiler/nir/gen/nir_intrinsics.c',
     'src/compiler/nir/gen/nir_opcodes.c',
     'src/compiler/nir/gen/nir_constant_expressions.c',
+)
+
+# ---- Mesa util（编译器依赖：ralloc/hash/call_once/os_* 等）----
+# 清单来自 src/util/meson.build 的 files_mesa_util（68 个），
+# 刻意不用 glob —— 目录里含 x86/ppc/win32 等平台专用文件。
+add_files(
+    'src/util/anon_file.c',
+    'src/util/bitscan.c',
+    'src/util/blob.c',
+    'src/util/build_id.c',
+    'src/util/cnd_monotonic.c',
+    'src/util/compress.c',
+    'src/util/thread_sched.c',
+    'src/util/crc32.c',
+    'src/util/dag.c',
+    'src/util/disk_cache.c',
+    'src/util/disk_cache_os.c',
+    'src/util/double.c',
+    'src/util/fast_idiv_by_const.c',
+    'src/util/float8.c',
+    'src/util/fossilize_db.c',
+    'src/util/futex.c',
+    'src/util/half_float.c',
+    'src/util/hash_table.c',
+    'src/util/helpers.c',
+    'src/util/u_idalloc.c',
+    'src/util/log.c',
+    'src/util/lut.c',
+    'src/util/memstream.c',
+    'src/util/os_file.c',
+    'src/util/os_file_notify.c',
+    'src/util/os_memory_fd.c',
+    'src/util/os_socket.c',
+    'src/util/pb_slab.c',
+    'src/util/u_process.c',
+    'src/util/rwlock.c',
+    'src/util/ralloc.c',
+    'src/util/rand_xor.c',
+    'src/util/range_minimum_query.c',
+    'src/util/rb_tree.c',
+    'src/util/register_allocate.c',
+    'src/util/rgtc.c',
+    'src/util/set.c',
+    'src/util/simple_mtx.c',
+    'src/util/slab.c',
+    'src/util/softfloat.c',
+    'src/util/sparse_array.c',
+    'src/util/string_buffer.c',
+    'src/util/strndup.c',
+    'src/util/strtod.c',
+    'src/util/u_atomic.c',
+    'src/util/u_call_once.c',
+    'src/util/u_dl.c',
+    'src/util/u_dynarray.c',
+    'src/util/u_hash_table.c',
+    'src/util/u_queue.c',
+    'src/util/u_range_remap.c',
+    'src/util/u_shader_variant_cache.c',
+    'src/util/u_string.c',
+    'src/util/u_thread.c',
+    'src/util/u_vector.c',
+    'src/util/os_time.c',
+    'src/util/os_misc.c',
+    'src/util/u_math.c',
+    'src/util/u_mm.c',
+    'src/util/u_debug.c',
+    'src/util/u_debug_memory.c',
+    'src/util/u_cpu_detect.c',
+    'src/util/u_printf.c',
+    'src/util/u_worklist.c',
+    'src/util/vl_zscan_data.c',
+    'src/util/vma.c',
+    'src/util/mesa_cache_db.c',
+    'src/util/mesa_cache_db_multipart.c',
+)
+
+# util 的 format 子目录 + blake3
+add_files(
+    'src/util/format/u_format.c',
+    'src/util/format/u_format_bptc.c',
+    'src/util/format/u_format_etc.c',
+    'src/util/format/u_format_fxt1.c',
+    'src/util/format/u_format_latc.c',
+    'src/util/format/u_format_other.c',
+    'src/util/format/u_format_rgtc.c',
+    'src/util/format/u_format_s3tc.c',
+    'src/util/format/u_format_yuv.c',
+    'src/util/format/u_format_zs.c',
+    'src/util/format/u_format_table.c',   # 生成物：util_format_description 等
+    'src/util/format_srgb.c',             # 生成物：srgb 查表
+    'prebuilt/u_qsort.o',                 # C++ 模板（ymake 不编 .cpp，预编译）
+)
+
+# ---- blake3（disk_cache 用）----
+# dispatch 在 aarch64 上会选 NEON 实现（blake3_neon.c），x86 特化不需要。
+add_files(
+    'src/util/blake3/blake3.c',
+    'src/util/blake3/blake3_dispatch.c',
+    'src/util/blake3/blake3_portable.c',
+    'src/util/blake3/blake3_neon.c',
+    'src/util/mesa-blake3.c',
+)
+
+# ---- shader_enums（gl_*_name 系列）----
+add_files(
+    'src/compiler/shader_enums.c',
+)
+
+# ---- glsl_types（编译器类型系统；Mesa 24 是 C 实现）----
+add_files(
+    'src/compiler/glsl_types.c',
+    'src/compiler/builtin_types.c',   # 生成物：glsl_type_builtin_* 的定义
 )
 
 # ---- v3d gallium 驱动 + winsys（对接 libdrm 替身 → gpud）----
@@ -140,3 +283,14 @@ add_includedirs(
     'src/gallium/winsys/v3d/drm',
     'src/broadcom/perfcntrs',
 )
+
+
+# ==========================================================================
+# 说明：meson 里编译器与 v3dx_* 会按 V3D_VERSION=42/71 各编一份
+# （libv3d_compiler@ver），因为 v3d_util.h 的 v3d_X() 宏 switch 同时引用
+# v3d42_/v3d71_ 两套前缀符号。ya 的 add_files 不支持 per-file defines，
+# 同一文件用不同宏编两次只能分 target；而分 target 又带来静态库链接
+# 顺序问题（ymake 只在单 target 产出多个 .a 时才加 --start-group）。
+# 本项目只支持 V3D 7.1（BCM2712），因此把 v3d_util.h 的 v3d_X 宏
+# 收敛到 71 分支（见该文件的 [foot] 注释），单份编译即可。
+# ==========================================================================

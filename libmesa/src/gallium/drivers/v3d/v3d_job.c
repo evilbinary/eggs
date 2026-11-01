@@ -30,7 +30,10 @@
 #include <libsync.h>
 #include "v3d_context.h"
 /* The OQ/semaphore packets are the same across V3D versions. */
-#define V3D_VERSION 42
+/* [foot] 见 v3d_cl.c：ya 构建全局传 -DV3D_VERSION=71，不能再硬写 42 */
+#ifndef V3D_VERSION
+#define V3D_VERSION 71
+#endif
 #include "broadcom/cle/v3dx_pack.h"
 #include "broadcom/common/v3d_macros.h"
 #include "util/hash_table.h"

@@ -37,11 +37,14 @@
 
 /* Helper to call hw ver specific functions */
 #define v3d_X(devinfo, thing) ({                                \
-        __typeof(&v3d42_##thing) v3d_X_thing;                   \
+        /* [foot] 只保留 71 分支：本项目只支持 V3D 7.1（BCM2712）。
+         * 原本这里同时引用 v3d42_/v3d71_ 两套前缀符号，强制把编译器
+         * 和驱动按 42/71 各编一份（meson 的 libv3d_compiler@ver）。
+         * ya 构建无法对同一 target 内同一文件用不同宏编两次（add_files
+         * 不收 per-file defines），因此收敛到单版本。详见
+         * zdata/raspi5-gpu.md 附录 I.6。 */                     \
+        __typeof(&v3d71_##thing) v3d_X_thing;                   \
         switch (devinfo->ver) {                                 \
-        case 42:                                                \
-                v3d_X_thing = &v3d42_##thing;                   \
-                break;                                          \
         case 71:                                                \
                 v3d_X_thing = &v3d71_##thing;                   \
                 break;                                          \

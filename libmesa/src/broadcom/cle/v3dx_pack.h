@@ -26,7 +26,8 @@
 #define V3DX_PACK_H
 
 #ifndef V3D_VERSION
-#  error "The V3D_VERSION macro must be defined"
+/* [foot] 同 v3d_macros.h：默认 7.1（本项目只支持 BCM2712） */
+#  define V3D_VERSION 71
 #endif
 
 #if (V3D_VERSION == 21)

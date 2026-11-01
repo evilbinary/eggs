@@ -26,7 +26,11 @@
 #define V3DX_MACROS_H
 
 #ifndef V3D_VERSION
-#  error "The V3D_VERSION macro must be defined"
+/* [foot] ya 构建不分 per-version 编译：命令行统一不传 V3D_VERSION，
+ * 需要前缀文件的（v3dx_*.c / compiler/*.c）在这里取默认 7.1。
+ * 而 v3d_formats.c 这类「同时声明两套前缀」的文件，靠 V3D_VERSION
+ * 未定义 + 自己 define 的方式工作，不能被命令行覆盖。 */
+#  define V3D_VERSION 71
 #endif
 
 #if (V3D_VERSION == 21)

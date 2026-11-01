@@ -31,7 +31,10 @@
 #include "broadcom/common/v3d_tiling.h"
 #include "broadcom/common/v3d_tfu.h"
 
-#define V3D_VERSION 42
+/* [foot] 见 v3d_cl.c：ya 构建全局传 -DV3D_VERSION=71，不能再硬写 42 */
+#ifndef V3D_VERSION
+#define V3D_VERSION 71
+#endif
 #include "v3dx_format_table.h"
 
 /**

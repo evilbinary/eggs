@@ -27,8 +27,14 @@
 /* We don't expect that the packets we use in this file change across across
  * hw versions, so we just explicitly set the V3D_VERSION and include
  * v3dx_pack here
+ *
+ * [foot] 改成条件定义：ya 构建对全部文件统一传 -DV3D_VERSION=71，
+ * 这里再硬写 42 会与之冲突（V3DX() 展开到 V3D71_ 前缀而 pack 头是 42 的）。
+ * 本项目只支持 7.1，未定义时取 71。
  */
-#define V3D_VERSION 42
+#ifndef V3D_VERSION
+#define V3D_VERSION 71
+#endif
 #include "broadcom/common/v3d_macros.h"
 #include "broadcom/cle/v3dx_pack.h"
 
