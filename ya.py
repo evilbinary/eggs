@@ -28,6 +28,7 @@ if has_config("app"):
         'libcmocka', 'libffmpeg',
         'libsdl', 'libsdl-ttf', 'libsdl-image',
         'libfoot',
+        'libdrm',
         # 'libiconv'
         'libncurses',
         'libsdl-gfx',
@@ -46,6 +47,9 @@ if has_config("app"):
         'libatomic',
         'libxml2',
         'libcairo',
+        # Mesa 的 v3d 子集（ya 构建，不用 meson）：broadcom 编译器
+        # + NIR + 驱动，配套 eggs/libdrm 替身
+        'libmesa',
 
 
     ]
