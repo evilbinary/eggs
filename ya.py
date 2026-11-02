@@ -31,6 +31,8 @@ if has_config("app"):
         'libdrm',
         # OpenSSL 的 libcrypto（sshd 用；只出 crypto，不要 ssl）
         'libopenssl',
+        # libxcrypt 的 libcrypt（sshd 密码认证用 crypt(3)；musl 不自带）
+        'libxcrypt',
         # 'libiconv'
         'libncurses',
         'libsdl-gfx',
