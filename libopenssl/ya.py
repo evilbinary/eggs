@@ -40,14 +40,24 @@ _musl_inc = '-I' + _pyos.path.abspath(_pyos.path.join(_musl_root, 'include'))
 # 裸机关掉的项：
 #   no-dso      没有 dlopen
 #   no-async    没有 ucontext
-#   no-threads  裸机 gcc 不认 -pthread
 #   no-afalgeng AF_ALG 是 Linux 内核 crypto API，要 linux/version.h
 #   no-apps     不编 openssl 命令行（裸机链接必失败）
 #   no-docs / no-demos  跳过 man 手册（几千个文件，install 里最慢的一步）
+#
+# 【不能关 no-threads】曾经因为裸机 gcc 不认 `-pthread` 就加了 no-threads，
+# 结果 OpenSSL 的 CRYPTO_THREAD_run_once 被编成空函数 ⇒ OPENSSL_init_crypto
+# 的自动初始化永远不跑 ⇒ RAND_status()/RAND_bytes() 访问未初始化的全局
+# libctx 直接段错误。OpenSSH 的 main() 第一步就是 seed_rng()，于是
+# `sshd -h/-V/-E` 全部零输出、进程立即退出（查了很久的「sshd 没反应」）。
+# 正确做法：保留线程支持，把 `-pthread` 换成等价的 `-D_REENTRANT`
+# （我们的 musl 是单库，pthread 就在 libc 里，不需要额外链接）。
 _configure_wrapper = (
     '#!/bin/sh\n'
-    'exec "%s/Configure" linux-aarch64 no-shared no-tests no-docs no-demos '
-    'no-dso no-async no-threads no-comp no-afalgeng no-apps "$@"\n' % _ossl_src)
+    '"%s/Configure" linux-aarch64 no-shared no-tests no-docs no-demos '
+    'no-dso no-async no-comp no-afalgeng no-apps "$@" || exit $?\n'
+    '# 裸机 gcc 不认 glibc 的 driver 选项 -pthread，替换成等价宏\n'
+    'sed -i "" "s/-pthread/-D_REENTRANT/g" Makefile\n'
+    'exit 0\n' % _ossl_src)
 _cfg_path = _pyos.path.join(_ossl_oot, 'configure')
 try:
     _old = open(_cfg_path, 'r').read()
