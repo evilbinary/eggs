@@ -100,16 +100,36 @@ def _install_headers(_target):
     import shutil as _shutil
     _dst = _pyos.path.join(_ossl_prefix, 'include', 'openssl')
     _pyos.makedirs(_dst, exist_ok=True)
-    _n = 0
+
+    # 源头指纹（文件名 + 大小）：没变就直接返回。
+    # ymake 在「产物已存在」分支里也会调用 after_build（automake.py:54-60），
+    # 所以钩子每次 ya 都会跑；没有指纹的话每次都白拷 169 个文件。
+    _srcs = []
     for _d in (_pyos.path.join(_ossl_src, 'include/openssl'),
                _pyos.path.join(_ossl_oot, 'include/openssl')):
         if not _pyos.path.isdir(_d):
             continue
-        for _f in _pyos.listdir(_d):
+        for _f in sorted(_pyos.listdir(_d)):
             _s = _pyos.path.join(_d, _f)
             if _pyos.path.isfile(_s) and _f.endswith('.h'):
-                _shutil.copyfile(_s, _pyos.path.join(_dst, _f))
-                _n += 1
+                _srcs.append((_f, _s))
+    _sig = ','.join(['%s:%d' % (_f, _pyos.path.getsize(_s))
+                     for _f, _s in _srcs])
+    _stamp_h = _pyos.path.join(_dst, '.headers.stamp')
+    try:
+        _old_h = open(_stamp_h, 'r').read()
+    except Exception:
+        _old_h = None
+    if _old_h == _sig and _pyos.path.exists(_pyos.path.join(_dst, 'opensslv.h')):
+        return
+
+    _n = 0
+    for _f, _s in _srcs:
+        _shutil.copyfile(_s, _pyos.path.join(_dst, _f))
+        _n += 1
+    _hs = open(_stamp_h, 'w')
+    _hs.write(_sig)
+    _hs.close()
     print('openssl: installed {} headers -> {}'.format(_n, _dst))
 
 
