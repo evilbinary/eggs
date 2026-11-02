@@ -38,8 +38,8 @@ _pyos.makedirs(_ossl_oot, exist_ok=True)
 #   no-comp / no-tests 不需要
 _configure_wrapper = (
     '#!/bin/sh\n'
-    'exec "%s/Configure" linux-aarch64 no-shared no-tests no-dso no-async '
-    'no-threads no-comp no-afalgeng no-apps "$@"\n' % _ossl_src)
+    'exec "%s/Configure" linux-aarch64 no-shared no-tests no-docs no-demos '
+    'no-dso no-async no-threads no-comp no-afalgeng no-apps "$@"\n' % _ossl_src)
 _cfg_path = _pyos.path.join(_ossl_oot, 'configure')
 try:
     _old = open(_cfg_path, 'r').read()
@@ -50,6 +50,24 @@ if _old != _configure_wrapper:
     _w.write(_configure_wrapper)
     _w.close()
     _pyos.chmod(_cfg_path, 0o755)
+
+# 【配置指纹】ymake 只用「产物是否存在」判断要不要重跑 automake，
+# 不会因为裁剪项变化而重配。这里把 wrapper 内容存一份：变了才清掉
+# configdata.pm/Makefile 强制重配；没变就不动，产物在就直接跳过
+# （与 ffmpeg / musl 的行为一致，避免每次 ya 都重跑 Configure）。
+_stamp = _pyos.path.join(_ossl_oot, '.configure.fingerprint')
+try:
+    _old_stamp = open(_stamp, 'r').read()
+except Exception:
+    _old_stamp = None
+if _old_stamp != _configure_wrapper:
+    for _f in ('configdata.pm', 'Makefile'):
+        _p = _pyos.path.join(_ossl_oot, _f)
+        if _pyos.path.exists(_p):
+            _pyos.remove(_p)
+    _s = open(_stamp, 'w')
+    _s.write(_configure_wrapper)
+    _s.close()
 
 set_sourcedir(_ossl_oot)
 
@@ -69,7 +87,10 @@ _cc = _tool + '-gcc'
 _ar = _tool + '-ar'
 _ranlib = _tool + '-ranlib'
 
-automake("c")
+# 【产物名就是这里】ymake 用 prefix+name+.a = libcrypto.a 判断「是否已构建」，
+# 和 --prefix=<build>/crypto/lib 下 make install 的真实产物对齐。写 "c" 会让它
+# 去找 libc.a，永远找不到 → 每次都重跑 Configure（引以为戒）。
+automake("crypto")
 
 # musl 的头走【安装目录】：build/<plat>/<arch>/<mode>/musl/include。
 # 注意不是 musl-oot（那是 musl 自己的 out-of-tree 构建目录，
