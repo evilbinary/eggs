@@ -29,6 +29,8 @@ if has_config("app"):
         'libsdl', 'libsdl-ttf', 'libsdl-image',
         'libfoot',
         'libdrm',
+        # OpenSSL 的 libcrypto（sshd 用；只出 crypto，不要 ssl）
+        'libopenssl',
         # 'libiconv'
         'libncurses',
         'libsdl-gfx',
