@@ -57,6 +57,11 @@ _configure_wrapper = (
     'no-dso no-async no-comp no-afalgeng no-apps "$@" || exit $?\n'
     '# 裸机 gcc 不认 glibc 的 driver 选项 -pthread，替换成等价宏\n'
     'sed -i "" "s/-pthread/-D_REENTRANT/g" Makefile\n'
+    '# 【去掉 -fPIC】threads 模式下 OpenSSL 给所有 .o 加 -fPIC，静态链接进\n'
+    '# ET_EXEC 会产生 R_AARCH64_RELATIVE 重定位；我们的 ELF 加载器不做这部分\n'
+    '# 重定位，GOT 里是野指针 —— 表现为「刚进函数就段错误」（OPENSSL_init_crypto\n'
+    '# 无输出退出）。改成 -fno-PIC 让代码按非 PIC 生成。\n'
+    'sed -i "" "s/-fPIC/-fno-PIC/g" Makefile\n'
     'exit 0\n' % _ossl_src)
 _cfg_path = _pyos.path.join(_ossl_oot, 'configure')
 try:
