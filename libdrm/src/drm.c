@@ -9,6 +9,9 @@
 #include <errno.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include "xf86drm.h"
 #include "drm/v3d_drm.h"
@@ -56,6 +59,7 @@ extern const drm_driver_ops_t v3d_drm_ops;
 extern const drm_driver_ops_t mali_drm_ops;
 
 static const drm_driver_ops_t* g_driver = &v3d_drm_ops;
+static int g_gpu_fd = -1;
 
 void drm_driver_register(const drm_driver_ops_t* ops) {
   g_driver = ops;
@@ -211,7 +215,10 @@ int drmSyncobjWait(int fd, const uint32_t* handles, unsigned num_handles,
 }
 
 int drmIoctl(int fd, unsigned long request, void* arg) {
-  (void)fd;
+  /* 记下 Mesa 使用的 DRM fd；v3d_bo_map_unsynchronized() 会拿同一个 fd
+   * 调 mmap()，下面的 mmap 拦截用它识别 GPU BO 映射。 */
+  g_gpu_fd = fd;
+
   /* 先走通用 GEM/BO/屏幕；没命中再交给驱动 adapter（v3d.c/mali.c）。 */
   int rc = drm_gem_ioctl(request, arg);
   if (rc != DRM_GEM_NOT_HANDLED) {
@@ -448,4 +455,26 @@ int drm_gem_ioctl(unsigned long request, void* arg) {
     default:
       return DRM_GEM_NOT_HANDLED;
   }
+}
+
+
+/* ------------------------------------------------------------------
+ * mmap 拦截：Mesa 的 v3d_bo_map_unsynchronized() 在
+ * DRM_IOCTL_V3D_MMAP_BO 之后会对 bo->screen->fd 做 mmap。
+ * 这个 fd 是给 Mesa 的假 DRM fd（/dev/null 的 dup），不是可 mmap 的
+ * GPU 设备；gpud 是用户态服务，没有内核 mmap 实现。
+ *
+ * DRM_IOCTL_V3D_MMAP_BO 已经把 BO 的 CPU VA 放在 map.offset 里，
+ * 这里看到是同一个 GPU fd 就直接返回那个 CPU VA；其余 mmap 原样走
+ * 系统调用，保证 /dev/fb、malloc 等正常。
+ * ------------------------------------------------------------------ */
+void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off) {
+  if (fd >= 0 && fd == g_gpu_fd && !(flags & MAP_ANONYMOUS)) {
+    return (void*)(uintptr_t)off;
+  }
+#ifndef SYS_mmap
+#define SYS_mmap 222
+#endif
+  long ret = syscall(SYS_mmap, addr, len, prot, flags, fd, off);
+  return (void*)ret;
 }

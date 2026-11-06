@@ -68,6 +68,12 @@ def ensure_generated():
              CLE + '/v3d_packet_v%s_pack.h' % v)
 
 
+    UTIL = os.path.join(BASE, 'src/util')
+    _run(['python3', 'driconf_static.py', '00-mesa-defaults.conf',
+          '../gallium/drivers/v3d/00-v3d-defaults.conf',
+          'driconf_static.h'], UTIL, UTIL + '/driconf_static.h')
+
+
 ensure_generated()
 
 
@@ -95,6 +101,7 @@ add_cflags(
     # 单元不生效（实测：c11/threads.h 因缺 HAVE_PTHREAD 走了 fallback 分支，
     # 进而 CLOCK_MONOTONIC/NULL 未声明）。统一并进 cflags。
     ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 '
+    ' -DHAVE_FUNC_ATTRIBUTE_PACKED=1 '
     ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
     ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 '
     ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
@@ -141,11 +148,17 @@ add_includedirs(
 # ---- broadcom：CLE + 编译器支撑（非版本文件，只编一次）----
 add_files(
     'src/broadcom/cle/v3d_decoder.c',
+    'src/broadcom/clif/clif_dump.c',
+    'src/broadcom/clif/v3dx_dump.c',
     'src/broadcom/common/v3d_device_info.c',
     'src/broadcom/common/v3d_debug.c',
     'src/broadcom/common/v3d_util.c',
+    'src/broadcom/common/v3d_tiling.c',
+    'src/broadcom/common/v3d_submit_util.c',
     'src/broadcom/common/v3d_uif.c',
     'src/broadcom/common/v3d_format_table.c',
+    'src/broadcom/perfcntrs/v3d_perfcntrs.c',
+    'src/broadcom/perfcntrs/v3dx_counter.c',
 )
 
 # 编译器 + QPU 打包表（V3D_VERSION=71 由全局 cflags 给出）
@@ -248,6 +261,38 @@ add_files(
     'src/util/vma.c',
     'src/util/mesa_cache_db.c',
     'src/util/mesa_cache_db_multipart.c',
+    'src/gallium/auxiliary/util/u_debug_describe.c',
+    'src/gallium/auxiliary/util/u_upload_mgr.c',
+    'src/gallium/auxiliary/util/u_blitter.c',
+    'src/gallium/auxiliary/util/u_draw.c',
+    'src/gallium/auxiliary/util/u_framebuffer.c',
+    'src/gallium/auxiliary/util/u_helpers.c',
+    'src/gallium/auxiliary/util/u_prim.c',
+    'src/gallium/auxiliary/util/u_prim_restart.c',
+    'src/gallium/auxiliary/util/u_surface.c',
+    'src/gallium/auxiliary/util/u_screen.c',
+    'src/gallium/auxiliary/util/u_transfer.c',
+    'src/gallium/auxiliary/util/u_transfer_helper.c',
+    'src/gallium/auxiliary/util/u_simple_shaders.c',
+    'src/gallium/auxiliary/util/u_resource.c',
+    'src/gallium/auxiliary/util/u_bitmask.c',
+    'src/gallium/auxiliary/util/u_texture.c',
+    'src/gallium/auxiliary/tgsi/tgsi_dump.c',
+    'src/gallium/auxiliary/tgsi/tgsi_build.c',
+    'src/gallium/auxiliary/tgsi/tgsi_info.c',
+    'src/gallium/auxiliary/tgsi/tgsi_iterate.c',
+    'src/gallium/auxiliary/tgsi/tgsi_parse.c',
+    'src/gallium/auxiliary/tgsi/tgsi_sanity.c',
+    'src/gallium/auxiliary/cso_cache/cso_hash.c',
+    'src/gallium/auxiliary/cso_cache/cso_cache.c',
+    'src/gallium/auxiliary/tgsi/tgsi_scan.c',
+    'src/gallium/auxiliary/tgsi/tgsi_strings.c',
+    'src/gallium/auxiliary/tgsi/tgsi_text.c',
+    'src/gallium/auxiliary/tgsi/tgsi_ureg.c',
+    'src/gallium/auxiliary/tgsi/tgsi_util.c',
+    'src/gallium/auxiliary/nir/tgsi_to_nir.c',
+    'src/util/xmlconfig.c',
+    'src/c11/impl/time.c',
 )
 
 # util 的 format 子目录 + blake3
