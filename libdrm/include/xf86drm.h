@@ -54,6 +54,17 @@ int drmPrimeFDToHandle(int fd, int prime_fd, unsigned int* handle);
 int drmPrimeHandleToFD(int fd, unsigned int handle, unsigned int flags,
                        int* prime_fd);
 
+/* syncobj（foot 的 SUBMIT_CL 是同步提交，基本都是时序 stub） */
+int drmSyncobjCreate(int fd, uint32_t flags, uint32_t* handle);
+int drmSyncobjDestroy(int fd, uint32_t handle);
+int drmSyncobjHandleToFD(int fd, uint32_t handle, int* obj_fd);
+int drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t* handle);
+int drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd);
+int drmSyncobjExportSyncFile(int fd, uint32_t handle, int* sync_file_fd);
+int drmSyncobjWait(int fd, const uint32_t* handles, unsigned num_handles,
+                   int64_t timeout_nsec, unsigned flags,
+                   uint32_t* first_signaled);
+
 /* DRM ioctl 编号约定 */
 #define DRM_IOCTL_BASE 'd'
 #define DRM_IO(nr) _IO(DRM_IOCTL_BASE, nr)
