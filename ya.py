@@ -28,6 +28,7 @@ if has_config("app"):
         'libcmocka', 'libffmpeg',
         'libsdl', 'libsdl-ttf', 'libsdl-image',
         'libfoot',
+        'libgpu',
         'libdrm',
         # OpenSSL 的 libcrypto（sshd 用；只出 crypto，不要 ssl）
         'libopenssl',

@@ -10,8 +10,7 @@ add_files(
     'src/drm.c',
     'src/v3d.c',
     'src/mali.c',
-    'src/mesa_compat.c',
-    'src/present.c'
+    'src/mesa_compat.c'
 )
 
 add_includedirs(
