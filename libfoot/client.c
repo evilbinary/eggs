@@ -59,6 +59,28 @@ static api_t* foot_find_free_slot(client_t* client) {
   return NULL;
 }
 
+/* 上一个客户端进程异常退出时，槽位的 cid 要等 service 端的
+ * FOOT_SLOT_LEAK_MS（5s）回收。这里等一小会儿，避免紧接着启动的
+ * 测试进程一上来就 "no free slot"。 */
+static api_t* foot_find_free_slot_wait(client_t* client,
+                                       unsigned int timeout_ms) {
+  uint64_t deadline = foot_now_ms() + timeout_ms;
+  for (;;) {
+    api_t* api = foot_find_free_slot(client);
+    if (api != NULL) return api;
+    if (foot_now_ms() >= deadline) {
+      for (int i = 0; i < client->api_size; i++) {
+        printf("foot slot[%d] cid=%d state=%d seq=%u\n", i,
+               __atomic_load_n(&client->apis[i].cid, __ATOMIC_ACQUIRE),
+               __atomic_load_n(&client->apis[i].state, __ATOMIC_ACQUIRE),
+               __atomic_load_n(&client->apis[i].seq, __ATOMIC_ACQUIRE));
+      }
+      return NULL;
+    }
+    usleep(10000);
+  }
+}
+
 /* 服务端处理函数的两代签名统一到这里 */
 typedef struct {
   client_fn fn;     /* 旧签名（无长度） */
@@ -127,7 +149,7 @@ int client_submit_ex(client_t* client, void* fn, const void* args,
     return -1;
   }
 
-  api_t* api = foot_find_free_slot(client);
+  api_t* api = foot_find_free_slot_wait(client, FOOT_SLOT_LEAK_MS + 1000);
   if (api == NULL) {
     printf("foot submit: no free slot (api_size=%d)\n", client->api_size);
     return -2;
