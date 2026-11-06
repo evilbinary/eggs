@@ -12,6 +12,13 @@ import subprocess
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
+# Mesa 的 GLSL 前端是 C++。仓库自带 libc++（-fpic 构建），而裸机工具链的
+# libstdc++.a 不是 PIC，不能链进 v3d_dri.so，因此这里显式把 cxx/cxxabi
+# target 拉进来（默认只有 cpp-apps 配置才会 include 它们）。
+if not has_config('cpp-apps'):
+    includes('../libcxx/ya.py')
+    includes('../libcxxabi/ya.py')
+
 
 def _run(cmd, cwd, out):
     if os.path.exists(out) and os.path.getsize(out) > 0:
@@ -20,6 +27,22 @@ def _run(cmd, cwd, out):
     with open(out, 'w') as f:
         subprocess.run(cmd, cwd=cwd, stdout=f, check=True)
     print('mesa: generated %s' % os.path.relpath(out, BASE))
+
+
+def _runf(cmd, cwd, out):
+    """生成器自己写 -o 文件（bison/flex/xxd），stdout 不捕获。"""
+    if os.path.exists(out) and os.path.getsize(out) > 0:
+        return
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    subprocess.run(cmd, cwd=cwd, stdout=subprocess.DEVNULL, check=True)
+    print('mesa: generated %s' % os.path.relpath(out, BASE))
+
+
+def _glob_files(rel):
+    import glob as _g
+    return [os.path.relpath(f, BASE) for f in _g.glob(os.path.join(BASE, rel))]
+
+
 
 
 def ensure_generated():
@@ -73,6 +96,125 @@ def ensure_generated():
           '../gallium/drivers/v3d/00-v3d-defaults.conf',
           'driconf_static.h'], UTIL, UTIL + '/driconf_static.h')
 
+    # ---- Mesa 前端（EGL/GLES2）生成物 ----
+    # 统一放 gen/ 下，不污染上游源码；mesa_core target 把 gen/* 加进 include。
+    MESA = os.path.join(BASE, 'src/mesa')
+    GGEN_SRC = os.path.join(MESA, 'glapi/glapi/gen')
+    GEN = os.path.join(BASE, 'gen')
+    GG = os.path.join(GEN, 'mesa/glapi/glapi/gen')
+    GM = os.path.join(GEN, 'mesa/main')
+    GL = os.path.join(GEN, 'compiler/glsl')
+    GLC = os.path.join(GL, 'glcpp')
+    GP = os.path.join(GEN, 'mesa/program')
+    GSV = os.path.join(GEN, 'compiler/spirv')
+    for d in (GG, GM, GL, GLC, GP, GSV):
+        os.makedirs(d, exist_ok=True)
+
+    # mesa/main 生成物
+    _run(['python3', 'get_hash_generator.py', '-f',
+          '../glapi/glapi/gen/gl_and_es_API.xml'], os.path.join(MESA, 'main'),
+         GM + '/get_hash.h')
+    _run(['python3', 'format_info.py', 'formats.csv'],
+         os.path.join(MESA, 'main'), GM + '/format_info.h')
+    _runf(['python3', 'format_fallback.py', 'formats.csv',
+           GM + '/format_fallback.c'], os.path.join(MESA, 'main'),
+          GM + '/format_fallback.c')
+
+    # glapi：dispatch / marshal / enums / trace
+    _run(['python3', 'gl_enums.py', '-f', '../registry/gl.xml'],
+         GGEN_SRC, GG + '/enums.c')
+    _run(['python3', 'api_exec_init.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_exec_init.c')
+    _run(['python3', 'api_exec_decl_h.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_exec_decl.h')
+    _run(['python3', 'api_save_init_h.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_save_init.h')
+    _run(['python3', 'api_save_h.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_save.h')
+    _run(['python3', 'api_beginend_init_h.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_beginend_init.h')
+    _run(['python3', 'api_hw_select_init_h.py', '-f', 'gl_API.xml'],
+         GGEN_SRC, GG + '/api_hw_select_init.h')
+    _run(['python3', 'gl_table.py', '-f', 'gl_and_es_API.xml', '-m',
+          'dispatch'], GGEN_SRC, GG + '/dispatch.h')
+    _run(['python3', 'marshal_generated_h.py', 'gl_and_es_API.xml', '8'],
+         GGEN_SRC, GG + '/marshal_generated.h')
+    _run(['python3', 'unmarshal_table_c.py', 'gl_and_es_API.xml', '8'],
+         GGEN_SRC, GG + '/unmarshal_table.c')
+    _run(['python3', 'api_trace_c.py', '-f', 'gl_and_es_API.xml'],
+         GGEN_SRC, GG + '/api_trace.c')
+    for _x in range(8):
+        _run(['python3', 'marshal_generated_c.py', 'gl_and_es_API.xml',
+              str(_x), '8', '8'], GGEN_SRC,
+             GG + '/marshal_generated%d.c' % _x)
+    _run(['python3', '../../mapi_abi.py', '--printer', 'shared-glapi',
+          '--gl_symbols', '../../../../glx/libgl-symbols.txt',
+          'gl_and_es_API.xml'], GGEN_SRC, GG + '/shared_glapi_mapi_tmp.h')
+    _run(['python3', '../../new/gen_gldispatch_mapi.py', 'glesv2',
+          '../registry/gl.xml'], GGEN_SRC, GG + '/es2_glapi_mapi_tmp.h')
+
+    # GLSL parser/lexer + 表达式表 + 内嵌 GLSL 源码
+    GLS = os.path.join(BASE, 'src/compiler/glsl')
+    _runf(['bison', '-Wno-deprecated', '-o', GL + '/glsl_parser.cpp',
+           '-p', '_mesa_glsl_', '--defines=' + GL + '/glsl_parser.h',
+           'glsl_parser.yy'], GLS, GL + '/glsl_parser.cpp')
+    _runf(['flex', '-DYY_USE_CONST=', '-o', GL + '/glsl_lexer.cpp',
+           'glsl_lexer.ll'], GLS, GL + '/glsl_lexer.cpp')
+    for _mode in ('enum', 'strings', 'constant'):
+        _run(['python3', 'ir_expression_operation.py', _mode], GLS,
+             GL + ('/ir_expression_operation.h' if _mode == 'enum'
+                   else '/ir_expression_operation_%s.h' % _mode))
+    for _src, _name, _out in (
+            ('float64.glsl', 'float64_source', 'float64_glsl.h'),
+            ('CrossPlatformSettings_piece_all.glsl',
+             'cross_platform_settings_piece_all_header',
+             'cross_platform_settings_piece_all.h'),
+            ('bc1.glsl', 'bc1_source', 'bc1_glsl.h'),
+            ('bc4.glsl', 'bc4_source', 'bc4_glsl.h'),
+            ('etc2_rgba_stitch.glsl', 'etc2_rgba_stitch_source',
+             'etc2_rgba_stitch_glsl.h'),
+            ('astc_decoder.glsl', 'astc_source', 'astc_glsl.h')):
+        _runf(['python3', '../../util/xxd.py', _src, GL + '/' + _out,
+               '-n', _name], GLS, GL + '/' + _out)
+
+    GLC_SRC = os.path.join(GLS, 'glcpp')
+    _runf(['bison', '-Wno-deprecated', '-o', GLC + '/glcpp-parse.c',
+           '-p', 'glcpp_parser_', '--defines=' + GLC + '/glcpp-parse.h',
+           'glcpp-parse.y'], GLC_SRC, GLC + '/glcpp-parse.c')
+    _runf(['flex', '-DYY_USE_CONST=', '-o', GLC + '/glcpp-lex.c',
+           'glcpp-lex.l'], GLC_SRC, GLC + '/glcpp-lex.c')
+
+    PRG = os.path.join(MESA, 'program')
+    _runf(['flex', '-DYY_USE_CONST=', '-o', GP + '/lex.yy.c',
+           'program_lexer.l'], PRG, GP + '/lex.yy.c')
+    _runf(['bison', '-Wno-deprecated', '-o', GP + '/program_parse.tab.c',
+           '--defines=' + GP + '/program_parse.tab.h', 'program_parse.y'],
+          PRG, GP + '/program_parse.tab.c')
+
+    _runf(['python3', 'bin/git_sha1_gen.py', '--output',
+           GEN + '/git_sha1.h'], BASE, GEN + '/git_sha1.h')
+
+    SPV = os.path.join(BASE, 'src/compiler/spirv')
+    _runf(['python3', 'spirv_info_gen.py', '--json', 'spirv.core.grammar.json',
+           '--out-h', GSV + '/spirv_info.h', '--out-c', GSV + '/spirv_info.c'],
+          SPV, GSV + '/spirv_info.h')
+    _runf(['python3', 'vtn_gather_types_c.py', 'spirv.core.grammar.json',
+           GSV + '/vtn_gather_types.c'], SPV, GSV + '/vtn_gather_types.c')
+    _runf(['python3', 'vtn_generator_ids_h.py', 'spir-v.xml',
+           GSV + '/vtn_generator_ids.h'], SPV, GSV + '/vtn_generator_ids.h')
+
+    GAUX = os.path.join(GEN, 'gallium/auxiliary')
+    _runf(['python3', 'u_indices_gen.py', GAUX + '/u_indices_gen.c'],
+          os.path.join(BASE, 'src/gallium/auxiliary/indices'),
+          GAUX + '/u_indices_gen.c')
+    _runf(['python3', 'u_unfilled_gen.py', GAUX + '/u_unfilled_gen.c'],
+          os.path.join(BASE, 'src/gallium/auxiliary/indices'),
+          GAUX + '/u_unfilled_gen.c')
+    _run(['python3', 'draw/draw_nir_lower_opcodes.py', '-p',
+          '../../compiler/nir'],
+         os.path.join(BASE, 'src/gallium/auxiliary'),
+         GAUX + '/draw_nir_lower_opcodes.c')
+
 
 ensure_generated()
 
@@ -87,6 +229,7 @@ add_deps('zlib')
 add_cflags(
     ' -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L '
     ' -std=gnu11 '
+    ' -fPIC '
     ' -D__linux__ '        # 裸机 ELF 工具链不定义 __linux__，
                            # 而 Mesa 的 detect_os.h 完全靠它判定平台
     # 注意：不传 -DV3D_VERSION。v3d_macros.h / v3dx_pack.h 已默认 71；
@@ -103,7 +246,7 @@ add_cflags(
     ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 '
     ' -DHAVE_FUNC_ATTRIBUTE_PACKED=1 '
     ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
-    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 '
+    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 -DHAVE_LIBDRM -DMAJOR_IN_SYSMACROS=1 '
     ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
     # 关掉 format 的 NEON 特化（Mesa 官方开关），否则要额外编
     # u_format_unpack_neon.c 及其整表
@@ -111,7 +254,7 @@ add_cflags(
     # musl 自带 GNU 版 qsort_r，u_qsort.h 里是 static inline，
     # 因此不需要编 C++ 的 u_qsort.cpp
     ' -DHAVE_GNU_QSORT_R '
-    ' -DPACKAGE_VERSION=24.0_foot -DMESA_LLVM_VERSION_STRING=0 '
+    ' -DPACKAGE_VERSION="24.0_foot" -DMESA_LLVM_VERSION_STRING=0 '
 )
 
 add_defines(
@@ -125,7 +268,6 @@ add_defines(
 )
 
 add_includedirs(
-    '.',
     'src',                             # broadcom/common/... 形式
     'src/broadcom',                    # common/... 形式
     'src/broadcom/cle',
@@ -138,8 +280,6 @@ add_includedirs(
     'src/gallium/include',
     'src/gallium/auxiliary',
     'src/util',
-    'src/c11',
-    'src/c11/impl',
     'include',
     '../libdrm/include',               # libdrm 替身
     public = true
@@ -250,6 +390,7 @@ add_files(
     'src/util/u_vector.c',
     'src/util/os_time.c',
     'src/util/os_misc.c',
+    'src/util/streaming-load-memcpy.c',
     'src/util/u_math.c',
     'src/util/u_mm.c',
     'src/util/u_debug.c',
@@ -273,6 +414,26 @@ add_files(
     'src/gallium/auxiliary/util/u_screen.c',
     'src/gallium/auxiliary/util/u_transfer.c',
     'src/gallium/auxiliary/util/u_transfer_helper.c',
+    'src/gallium/auxiliary/util/u_vbuf.c',
+    'src/gallium/auxiliary/util/u_tile.c',
+    'src/gallium/auxiliary/util/u_gen_mipmap.c',
+    'src/gallium/auxiliary/util/u_driconf.c',
+    'src/gallium/auxiliary/util/u_sampler.c',
+    'src/gallium/auxiliary/util/u_draw_quad.c',
+    'src/gallium/auxiliary/tgsi/tgsi_transform.c',
+    'src/gallium/auxiliary/tgsi/tgsi_from_mesa.c',
+    'src/gallium/auxiliary/tgsi/tgsi_exec.c',
+    'src/gallium/auxiliary/nir/nir_draw_helpers.c',
+    'src/gallium/auxiliary/nir/nir_to_tgsi.c',
+    *[f for f in _glob_files('src/gallium/auxiliary/draw/*.c')
+      if 'llvm' not in os.path.basename(f)],
+    'gen/gallium/auxiliary/u_indices_gen.c',
+    'gen/gallium/auxiliary/draw_nir_lower_opcodes.c',
+    'gen/gallium/auxiliary/u_unfilled_gen.c',
+    'src/gallium/auxiliary/indices/u_primconvert.c',
+    'src/gallium/auxiliary/translate/translate.c',
+    'src/gallium/auxiliary/translate/translate_generic.c',
+    'src/gallium/auxiliary/translate/translate_cache.c',
     'src/gallium/auxiliary/util/u_simple_shaders.c',
     'src/gallium/auxiliary/util/u_resource.c',
     'src/gallium/auxiliary/util/u_bitmask.c',
@@ -285,6 +446,7 @@ add_files(
     'src/gallium/auxiliary/tgsi/tgsi_sanity.c',
     'src/gallium/auxiliary/cso_cache/cso_hash.c',
     'src/gallium/auxiliary/cso_cache/cso_cache.c',
+    'src/gallium/auxiliary/cso_cache/cso_context.c',
     'src/gallium/auxiliary/tgsi/tgsi_scan.c',
     'src/gallium/auxiliary/tgsi/tgsi_strings.c',
     'src/gallium/auxiliary/tgsi/tgsi_text.c',
@@ -356,3 +518,218 @@ add_includedirs(
 # 本项目只支持 V3D 7.1（BCM2712），因此把 v3d_util.h 的 v3d_X 宏
 # 收敛到 71 分支（见该文件的 [foot] 注释），单份编译即可。
 # ==========================================================================
+
+
+# ==========================================================================
+# Mesa 前端 core（GLES/EGL 用）：Mesa state tracker + GLSL + DRI + loader
+# 说明：这里只加"前端新文件"；util/NIR/broadcom 已在 target("mesa") 里。
+# 生成的 glapi/GLSL parser 文件在 ensure_generated() 里生成。
+# ==========================================================================
+target("mesa_core")
+set_kind("static")
+
+add_packages(get_config('default_libc'))
+add_deps('zlib')
+add_deps('mesa')
+# Mesa GLSL 前端是 C++；用仓库自带的 libc++（-fpic 构建），
+# 裸机工具链的 libstdc++.a 不是 PIC，不能链进 .so。
+add_deps('cxx', 'cxxabi')
+
+add_cflags(
+    ' -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L '
+    ' -std=gnu11 -fPIC '
+    ' -D__linux__ -DDETECT_ARCH_AARCH64=1 '
+    ' -DHAVE_SYSCONF -DHAVE_GETRANDOM -DHAVE_GETENTROPY '
+    ' -DHAVE_MALLOC_USABLE_SIZE -DHAVE_CLOCK_GETTIME -DHAVE_TIMESPEC_GET '
+    ' -DHAVE_STRTOD_L -DHAVE_MEMFD_CREATE '
+    ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 -DHAVE_FUNC_ATTRIBUTE_PACKED=1 '
+    ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
+    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 -DHAVE_LIBDRM -DMAJOR_IN_SYSMACROS=1 '
+    ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
+    ' -DNO_FORMAT_ASM -DHAVE_GNU_QSORT_R '
+    ' -DPACKAGE_VERSION="26.2.6" -DPACKAGE_BUGREPORT="https://gitlab.freedesktop.org/mesa/mesa/-/issues" '
+    ' -DMESA_LLVM_VERSION_STRING=0 '
+    ' -DHAVE_OPENGL=0 -DHAVE_OPENGL_ES_1=0 -DHAVE_OPENGL_ES_2=1 '
+)
+add_cxxflags(
+    ' -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L '
+    ' -std=gnu++17 -fPIC -fno-use-cxa-atexit '
+    ' -D_LIBCPP_HAS_MUSL_LIBC -D_LIBCPP_HAS_NO_LIBRARY_ALIGNED_ALLOCATION '
+    ' -D_LIBCPP_HAS_NO_THREADS -D_LIBCXXABI_HAS_NO_THREADS '
+    ' -D__linux__ -DDETECT_ARCH_AARCH64=1 '
+    ' -DHAVE_SYSCONF -DHAVE_GETRANDOM -DHAVE_GETENTROPY '
+    ' -DHAVE_MALLOC_USABLE_SIZE -DHAVE_CLOCK_GETTIME -DHAVE_TIMESPEC_GET '
+    ' -DHAVE_STRTOD_L -DHAVE_MEMFD_CREATE '
+    ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 -DHAVE_FUNC_ATTRIBUTE_PACKED=1 '
+    ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
+    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 -DHAVE_LIBDRM -DMAJOR_IN_SYSMACROS=1 '
+    ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
+    ' -DNO_FORMAT_ASM -DHAVE_GNU_QSORT_R '
+    ' -DPACKAGE_VERSION="26.2.6" -DPACKAGE_BUGREPORT="https://gitlab.freedesktop.org/mesa/mesa/-/issues" '
+    ' -DMESA_LLVM_VERSION_STRING=0 '
+    ' -DHAVE_OPENGL=0 -DHAVE_OPENGL_ES_1=0 -DHAVE_OPENGL_ES_2=1 '
+)
+
+add_includedirs(
+    'src', 'src/mesa', 'src/mesa/main', 'src/mesa/state_tracker',
+    'src/mesa/program', 'src/mesa/vbo', 'src/mesa/glapi',
+    'src/mesa/glapi/glapi', 'src/mesa/glapi/glapi/gen',
+    'src/mesa/glapi/shared-glapi', 'src/mesa/glapi/es2api',
+    'src/compiler', 'src/compiler/nir', 'src/compiler/nir/gen',
+    'src/compiler/spirv', 'gen/compiler/spirv',
+    'src/compiler/glsl', 'src/compiler/glsl/glcpp',
+    'src/gallium/frontends/dri', 'src/loader',
+    'src/gallium/include', 'src/gallium/auxiliary',
+    'src/util',
+    'include', '../libdrm/include',
+    'gen', 'gen/mesa', 'gen/mesa/main', 'gen/mesa/glapi/glapi/gen',
+    'gen/mesa/program', 'gen/compiler/glsl', 'gen/compiler/glsl/glcpp',
+)
+
+add_files(
+    *[f for f in _glob_files('src/mesa/main/*.c')
+      if os.path.basename(f) != 'sse_minmax.c'],
+    *_glob_files('src/mesa/main/*.cpp'),
+    *_glob_files('src/mesa/state_tracker/*.c'),
+    *_glob_files('src/mesa/state_tracker/*.cpp'),
+    *_glob_files('src/mesa/program/*.c'),
+    *_glob_files('src/mesa/vbo/*.c'),
+    *_glob_files('src/mesa/math/*.c'),
+    'src/mesa/glapi/shared-glapi/core.c',
+    *[f for f in _glob_files('src/gallium/frontends/dri/*.c')
+      if os.path.basename(f) not in
+      ('kopper.c', 'loader_dri3_helper.c', 'drisw.c')],
+    *[f for f in _glob_files('src/loader/*.c')
+      if os.path.basename(f) != 'loader_wayland_helper.c'],
+    # 生成物
+    'gen/mesa/main/format_fallback.c',
+    'gen/compiler/spirv/spirv_info.c',
+    'gen/compiler/spirv/vtn_gather_types.c',
+    'src/compiler/spirv/gl_spirv.c',
+    'src/compiler/spirv/spirv_to_nir.c',
+    *[f for f in _glob_files('src/compiler/spirv/vtn_*.c')
+      if os.path.basename(f) != 'vtn_bindgen2.c'],
+    'gen/mesa/glapi/glapi/gen/enums.c',
+    'gen/mesa/glapi/glapi/gen/api_exec_init.c',
+    'gen/mesa/glapi/glapi/gen/api_trace.c',
+    'gen/mesa/glapi/glapi/gen/unmarshal_table.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated0.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated1.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated2.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated3.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated4.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated5.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated6.c',
+    'gen/mesa/glapi/glapi/gen/marshal_generated7.c',
+    'gen/compiler/glsl/glsl_parser.cpp',
+    'gen/compiler/glsl/glsl_lexer.cpp',
+    'gen/compiler/glsl/glcpp/glcpp-lex.c',
+    'gen/compiler/glsl/glcpp/glcpp-parse.c',
+    'gen/mesa/program/lex.yy.c',
+    'gen/mesa/program/program_parse.tab.c',
+)
+
+# GLSL 前端：排除 standalone 工具入口（main.cpp/standalone*.cpp）
+_glsl_cpp = [f for f in _glob_files('src/compiler/glsl/*.cpp')
+             if os.path.basename(f) not in ('main.cpp', 'standalone.cpp',
+                                            'standalone_scaffolding.cpp')]
+add_files(
+    *_glsl_cpp,
+    *_glob_files('src/compiler/glsl/*.c'),
+    *_glob_files('src/compiler/glsl/glcpp/*.c'),
+)
+
+
+# ==========================================================================
+# Mesa 前端：v3d_dri.so（DRI 驱动）+ libEGL + libGLESv2
+#
+# 与上游 non-glvnd 结构一致：Mesa core / DRI frontend / glapi 都在
+# v3d_dri.so 里；libEGL、libGLESv2 直接 link 它（DT_NEEDED），从而共用
+# 同一份 _glapi_* dispatch 状态。运行时把 libv3d_dri.so 放 /lib 即可。
+# ==========================================================================
+_MESA_FRONT_DEFS = (
+    ' -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L '
+    ' -D__linux__ -D__unix__ -DDETECT_ARCH_AARCH64=1 '
+    ' -DHAVE_SYSCONF -DHAVE_GETRANDOM -DHAVE_GETENTROPY '
+    ' -DHAVE_MALLOC_USABLE_SIZE -DHAVE_CLOCK_GETTIME -DHAVE_TIMESPEC_GET '
+    ' -DHAVE_STRTOD_L -DHAVE_MEMFD_CREATE '
+    ' -DHAVE_PTHREAD=1 -DHAVE_STRUCT_TIMESPEC=1 -DHAVE_FUNC_ATTRIBUTE_PACKED=1 '
+    ' -DHAVE_V3D=1 -DGALLIUM_V3D=1 -DUSE_V3D_SIMULATOR=0 '
+    ' -DHAVE_ENDIAN_H=1 -DHAVE_SYS_MMAN_H=1 -DHAVE_LIBDRM -DMAJOR_IN_SYSMACROS=1 '
+    ' -DUTIL_ARCH_LITTLE_ENDIAN=1 -DUTIL_ARCH_BIG_ENDIAN=0 '
+    ' -DNO_FORMAT_ASM -DHAVE_GNU_QSORT_R '
+    ' -DPACKAGE_VERSION="26.2.6" '
+    ' -DPACKAGE_BUGREPORT="https://gitlab.freedesktop.org/mesa/mesa/-/issues" '
+    ' -DMESA_LLVM_VERSION_STRING=0 '
+    ' -DHAVE_OPENGL=0 -DHAVE_OPENGL_ES_1=0 -DHAVE_OPENGL_ES_2=1 '
+)
+
+_MESA_FRONT_INCS = (
+    'src', 'src/mesa', 'src/mesa/main', 'src/mesa/state_tracker',
+    'src/mesa/program', 'src/mesa/vbo', 'src/mesa/glapi',
+    'src/mesa/glapi/glapi', 'src/mesa/glapi/glapi/gen',
+    'src/mesa/glapi/shared-glapi', 'src/mesa/glapi/es2api',
+    'src/compiler', 'src/compiler/nir', 'src/compiler/nir/gen',
+    'src/compiler/spirv', 'gen/compiler/spirv',
+    'src/compiler/glsl', 'src/compiler/glsl/glcpp',
+    'src/gallium/frontends/dri', 'src/loader',
+    'src/gallium/include', 'src/gallium/auxiliary',
+    'src/gallium/drivers', 'src/gallium/drivers/v3d',
+    'src/gallium/winsys', 'src/gallium/winsys/v3d/drm',
+    'src/util',
+    'include', '../libdrm/include',
+    'gen', 'gen/mesa', 'gen/mesa/main', 'gen/mesa/glapi/glapi/gen',
+    'gen/mesa/program', 'gen/compiler/glsl', 'gen/compiler/glsl/glcpp',
+)
+
+# ---- v3d_dri.so：DRI 驱动 ----
+target("v3d_dri")
+set_kind("shared")
+add_packages(get_config('default_libc'))
+add_deps('gcc')
+add_deps('mesa_core', 'mesa', 'drm', 'zlib', 'cxx', 'cxxabi')
+add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 ')
+add_cxxflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu++17 ')
+add_includedirs(*_MESA_FRONT_INCS)
+add_files('src/gallium/targets/dri/dri_target.c')
+# 关键：dri_util.o 是 DRI 前端的“根”。libmesa_core.a 里没人引用它
+# （应用是通过 libEGL 调 driCreateNewScreen3），静态库链接不会把它拉进来。
+# 直接把该源文件加入本 target，让对象出现在 ld 命令行上，从而把整个
+# DRI 前端 + state tracker + Mesa core 拉进 v3d_dri.so。
+add_files('src/gallium/frontends/dri/dri_util.c')
+add_files(
+    'src/gallium/auxiliary/pipe-loader/pipe_loader.c',
+    'src/gallium/auxiliary/pipe-loader/pipe_loader_drm.c',
+)
+add_includedirs('src/gallium/auxiliary/pipe-loader')
+add_ldflags('-lm')
+
+# ---- libEGL.so：EGL 前端（device + surfaceless 平台）----
+target("EGL")
+set_kind("shared")
+add_packages(get_config('default_libc'))
+add_deps('gcc')
+add_deps('v3d_dri')
+add_cflags(_MESA_FRONT_DEFS +
+           ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DUSE_LIBGLVND=0 '
+           ' -D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_SURFACELESS ')
+add_includedirs(*_MESA_FRONT_INCS)
+add_includedirs('src/egl', 'src/egl/main')
+_egl_srcs = [f for f in _glob_files('src/egl/main/*.c')
+             if os.path.basename(f) not in ('eglglvnd.c', 'egldispatchstubs.c')]
+add_files(
+    *_egl_srcs,
+    'src/egl/drivers/dri2/egl_dri2.c',
+    'src/egl/drivers/dri2/platform_device.c',
+    'src/egl/drivers/dri2/platform_surfaceless.c',
+)
+
+# ---- libGLESv2.so：GLES2 公共入口（glapi dispatch stubs）----
+target("GLESv2")
+set_kind("shared")
+add_packages(get_config('default_libc'))
+add_deps('gcc')
+add_deps('v3d_dri')
+add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 ')
+add_includedirs(*_MESA_FRONT_INCS)
+add_files('src/mesa/glapi/es2api/libgles2_public.c')
