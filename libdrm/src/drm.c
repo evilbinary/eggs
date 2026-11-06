@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -78,21 +79,122 @@ const drm_driver_ops_t* drm_driver_current(void) {
   return g_driver;
 }
 
-/* ---- 设备枚举：返回一个固定的渲染节点（gpud 起来后可用） ---- */
+/* ---- 设备枚举：返回一个固定的渲染节点。
+ * YiYiYa 没有内核 DRM 节点，ioctl 全由 libdrm 替身转发 gpud；
+ * 这里用 /dev/null 让 Mesa loader 的 open() 能成功。 ---- */
+#define FOOT_DRM_RENDER_NODE "/dev/null"
+
+static drmDevicePtr drm_make_device(void) {
+  drmDevicePtr d = (drmDevicePtr)calloc(1, sizeof(drmDevice));
+  if (d == NULL) {
+    return NULL;
+  }
+  d->nodes[DRM_NODE_RENDER] = strdup(FOOT_DRM_RENDER_NODE);
+  d->available_nodes = 1 << DRM_NODE_RENDER;
+  d->bustype = DRM_BUS_PLATFORM;
+  drmPlatformBusInfoPtr p =
+      (drmPlatformBusInfoPtr)calloc(1, sizeof(drmPlatformBusInfo));
+  if (p != NULL) {
+    strcpy(p->fullname, "/soc/gpu");
+    d->businfo.platform = p;
+  }
+  return d;
+}
+
+static void drm_destroy_device(drmDevicePtr d) {
+  if (d == NULL) {
+    return;
+  }
+  for (int i = 0; i < DRM_NODE_MAX; i++) {
+    free(d->nodes[i]);
+  }
+  free(d->businfo.platform);
+  free(d->deviceinfo.platform);
+  free(d);
+}
+
 int drmGetDevices2(unsigned int flags, drmDevicePtr devices[], int count) {
   (void)flags;
   if (count < 1 || devices == NULL) {
     return 1; /* 有 1 个设备 */
   }
-  memset(devices[0], 0, sizeof(drmDevice));
-  strcpy(devices[0]->nodes[DRM_NODE_RENDER], "/dev/dri/renderD128");
-  devices[0]->available_nodes = 1 << DRM_NODE_RENDER;
+  devices[0] = drm_make_device();
+  if (devices[0] == NULL) {
+    return -1;
+  }
   return 1;
 }
 
 void drmFreeDevices(drmDevicePtr devices[], int count) {
-  (void)devices;
-  (void)count;
+  if (devices == NULL) {
+    return;
+  }
+  for (int i = 0; i < count; i++) {
+    drm_destroy_device(devices[i]);
+    devices[i] = NULL;
+  }
+}
+
+int drmGetDevice2(int fd, uint32_t flags, drmDevicePtr* device) {
+  (void)fd;
+  (void)flags;
+  if (device == NULL) {
+    return -1;
+  }
+  *device = drm_make_device();
+  return *device != NULL ? 0 : -1;
+}
+
+void drmFreeDevice(drmDevicePtr* device) {
+  if (device == NULL) {
+    return;
+  }
+  drm_destroy_device(*device);
+  *device = NULL;
+}
+
+int drmDevicesEqual(drmDevicePtr a, drmDevicePtr b) {
+  const char* na;
+  const char* nb;
+  if (a == NULL || b == NULL) {
+    return 0;
+  }
+  na = a->nodes[DRM_NODE_RENDER];
+  nb = b->nodes[DRM_NODE_RENDER];
+  if (na == NULL || nb == NULL) {
+    return 0;
+  }
+  return strcmp(na, nb) == 0 ? 1 : 0;
+}
+
+int drmGetDeviceFromDevId(dev_t dev_id, uint32_t flags,
+                          drmDevicePtr* device) {
+  (void)dev_id;
+  return drmGetDevice2(-1, flags, device);
+}
+
+char* drmGetDeviceNameFromFd2(int fd) {
+  (void)fd;
+  return strdup(FOOT_DRM_RENDER_NODE);
+}
+
+char* drmGetPrimaryDeviceNameFromFd(int fd) {
+  (void)fd;
+  return strdup(FOOT_DRM_RENDER_NODE);
+}
+
+char* drmGetRenderDeviceNameFromFd(int fd) {
+  (void)fd;
+  return strdup(FOOT_DRM_RENDER_NODE);
+}
+
+int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data,
+                        unsigned long size) {
+  (void)fd;
+  (void)drmCommandIndex;
+  (void)data;
+  (void)size;
+  return -1;
 }
 
 /* ---- 版本：Mesa 的驱动匹配靠 name ---- */
@@ -109,6 +211,9 @@ drmVersionPtr drmGetVersion(int fd) {
   v->name = strdup(g_driver && g_driver->name ? g_driver->name : "gpu");
   v->date = strdup("20260101");
   v->desc = strdup("foot gpud (userspace v3d)");
+  v->name_len = v->name ? (int)strlen(v->name) + 1 : 0;
+  v->date_len = v->date ? (int)strlen(v->date) + 1 : 0;
+  v->desc_len = v->desc ? (int)strlen(v->desc) + 1 : 0;
   return v;
 }
 
@@ -212,6 +317,94 @@ int drmSyncobjWait(int fd, const uint32_t* handles, unsigned num_handles,
     *first_signaled = handles[0];
   }
   return 0;
+}
+
+int drmSyncobjReset(int fd, const uint32_t* handles, uint32_t handle_count) {
+  (void)fd;
+  (void)handles;
+  (void)handle_count;
+  return 0;
+}
+
+int drmSyncobjSignal(int fd, const uint32_t* handles, uint32_t handle_count) {
+  (void)fd;
+  (void)handles;
+  (void)handle_count;
+  return 0;
+}
+
+int drmSyncobjTimelineSignal(int fd, const uint32_t* handles, uint64_t* points,
+                             uint32_t handle_count) {
+  (void)fd;
+  (void)handles;
+  (void)points;
+  (void)handle_count;
+  return 0;
+}
+
+int drmSyncobjTimelineWait(int fd, const uint32_t* handles, uint64_t* points,
+                           unsigned num_handles, int64_t timeout_nsec,
+                           unsigned flags, uint32_t* first_signaled) {
+  (void)fd;
+  (void)points;
+  (void)timeout_nsec;
+  (void)flags;
+  if (handles == NULL || num_handles == 0) {
+    return -EINVAL;
+  }
+  if (first_signaled) {
+    *first_signaled = handles[0];
+  }
+  return 0;
+}
+
+int drmSyncobjQuery2(int fd, const uint32_t* handles, uint64_t* points,
+                     uint32_t handle_count, uint32_t flags) {
+  (void)fd;
+  (void)flags;
+  if (points != NULL) {
+    for (uint32_t i = 0; i < handle_count; i++) {
+      points[i] = 0;
+    }
+  }
+  (void)handles;
+  return 0;
+}
+
+int drmSyncobjTransfer(int fd, uint32_t dst_handle, uint64_t dst_point,
+                       uint32_t src_handle, uint64_t src_point,
+                       uint32_t flags) {
+  (void)fd;
+  (void)dst_handle;
+  (void)dst_point;
+  (void)src_handle;
+  (void)src_point;
+  (void)flags;
+  return 0;
+}
+
+int drmGetCap(int fd, uint64_t capability, uint64_t* value) {
+  (void)fd;
+  if (value == NULL) {
+    return -EINVAL;
+  }
+  switch (capability) {
+    case DRM_CAP_PRIME:
+      *value = DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT;
+      return 0;
+    case DRM_CAP_DUMB_BUFFER:
+      *value = 0;
+      return 0;
+    case DRM_CAP_ADDFB2_MODIFIERS:
+      *value = 0;
+      return 0;
+    case DRM_CAP_SYNCOBJ:
+    case DRM_CAP_SYNCOBJ_TIMELINE:
+      *value = 0;
+      return 0;
+    default:
+      return -EINVAL;
+  }
 }
 
 int drmIoctl(int fd, unsigned long request, void* arg) {
@@ -457,6 +650,28 @@ int drm_gem_ioctl(unsigned long request, void* arg) {
   }
 }
 
+
+/* ------------------------------------------------------------------
+ * 默认 BO 分配器：给任意 Mesa/EGL 应用使用，不再要求应用自己实现
+ * bridge_bo_alloc()。测试/应用如果提供强符号，会覆盖这个 weak 定义。
+ * ------------------------------------------------------------------ */
+__attribute__((weak)) int bridge_bo_alloc(unsigned int size, unsigned int* pa,
+                                          unsigned int* cpu_va) {
+  static unsigned long next_va = 0x52000000UL;
+  unsigned int p = 0, s = 0;
+  foot_cap_t cap = foot_cap_alloc_arena(size, 0, 0, &p, &s);
+  if (cap == FOOT_CAP_NONE || s < size) {
+    return -1;
+  }
+  unsigned long va = next_va;
+  next_va += (s + 0xFFFu) & ~0xFFFUL;
+  if (foot_cap_map(cap, (void*)va, 0, s) != 0) {
+    return -1;
+  }
+  *pa = p;
+  *cpu_va = (unsigned int)va;
+  return 0;
+}
 
 /* ------------------------------------------------------------------
  * mmap 拦截：Mesa 的 v3d_bo_map_unsynchronized() 在
