@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -270,13 +271,17 @@ int drmSyncobjDestroy(int fd, uint32_t handle) {
   return 0;
 }
 
+static int foot_fake_sync_fd(void) {
+  return open("/dev/null", O_RDONLY | O_CLOEXEC);
+}
+
 int drmSyncobjHandleToFD(int fd, uint32_t handle, int* obj_fd) {
   (void)fd;
   (void)handle;
   if (obj_fd) {
-    *obj_fd = -1;
+    *obj_fd = foot_fake_sync_fd();
   }
-  return -EINVAL;
+  return *obj_fd >= 0 ? 0 : -EINVAL;
 }
 
 int drmSyncobjFDToHandle(int fd, int obj_fd, uint32_t* handle) {
@@ -292,16 +297,17 @@ int drmSyncobjImportSyncFile(int fd, uint32_t handle, int sync_file_fd) {
   (void)fd;
   (void)handle;
   (void)sync_file_fd;
-  return -EINVAL;
+  /* gpud 的 SUBMIT 是同步的，fence 一定已 signal。 */
+  return 0;
 }
 
 int drmSyncobjExportSyncFile(int fd, uint32_t handle, int* sync_file_fd) {
   (void)fd;
   (void)handle;
   if (sync_file_fd) {
-    *sync_file_fd = -1;
+    *sync_file_fd = foot_fake_sync_fd();
   }
-  return -EINVAL;
+  return *sync_file_fd >= 0 ? 0 : -EINVAL;
 }
 
 int drmSyncobjWait(int fd, const uint32_t* handles, unsigned num_handles,
@@ -714,4 +720,23 @@ void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off) {
 #endif
   long ret = syscall(SYS_mmap, addr, len, prot, flags, fd, off);
   return (void*)ret;
+}
+
+/* Mesa 的 v3d_bo_unmap() 会对上面返回的 CPU VA 调 munmap；这些地址是
+ * foot_cap_map 建立的 GPU arena 映射，不在内核普通 VMA 里，直接 munmap
+ * 只会打印 "no area intersects"。真正的释放由 GEM_CLOSE 的
+ * foot_cap_unmap/revoke 完成，这里识别到 BO 区间就静默忽略。 */
+int munmap(void* addr, size_t len) {
+  unsigned long a = (unsigned long)addr;
+  for (unsigned int i = 0; i < DRM_MAX_BO_MAP; i++) {
+    unsigned long base = (unsigned long)g_drm_bo_map[i].cpu_va;
+    if (g_drm_bo_map[i].handle != 0 && base != 0 && a >= base &&
+        a < base + g_drm_bo_map[i].size) {
+      return 0;
+    }
+  }
+#ifndef SYS_munmap
+#define SYS_munmap 215
+#endif
+  return (int)syscall(SYS_munmap, addr, len);
 }
