@@ -17,7 +17,8 @@ int drm_gem_ioctl(unsigned long nr, void* arg);
 void* foot_gpu_bo_cpu_va(unsigned int handle);
 
 void drm_bo_map_record(unsigned int handle, unsigned int cpu_va,
-                       unsigned int size, unsigned int gva);
+                       unsigned int size, unsigned int gva,
+                       unsigned int cap);
 void drm_bo_map_remove(unsigned int handle);
 void drm_bo_flush_all(void);
 

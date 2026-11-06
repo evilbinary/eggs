@@ -102,7 +102,9 @@ static int v3d_ioctl_create_bo(struct drm_v3d_create_bo* c) {
   c->handle = (uint32_t)h;
   c->offset = gva;
   c->size = alloc_size;
-  drm_bo_map_record((unsigned int)h, cpu_va, alloc_size, gva);
+  extern unsigned int drm_bo_take_last_cap(void);
+  drm_bo_map_record((unsigned int)h, cpu_va, alloc_size, gva,
+                    drm_bo_take_last_cap());
   return 0;
 }
 

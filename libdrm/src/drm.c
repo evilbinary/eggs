@@ -516,6 +516,7 @@ static struct {
   unsigned int cpu_va;
   unsigned int size;
   unsigned int gva;
+  unsigned int cap;
 } g_drm_bo_map[DRM_MAX_BO_MAP];
 
 void* foot_gpu_bo_cpu_va(unsigned int handle) {
@@ -528,13 +529,15 @@ void* foot_gpu_bo_cpu_va(unsigned int handle) {
 }
 
 void drm_bo_map_record(unsigned int handle, unsigned int cpu_va,
-                       unsigned int size, unsigned int gva) {
+                       unsigned int size, unsigned int gva,
+                       unsigned int cap) {
   for (unsigned int i = 0; i < DRM_MAX_BO_MAP; i++) {
     if (g_drm_bo_map[i].handle == 0 || g_drm_bo_map[i].handle == handle) {
       g_drm_bo_map[i].handle = handle;
       g_drm_bo_map[i].cpu_va = cpu_va;
       g_drm_bo_map[i].size = size;
       g_drm_bo_map[i].gva = gva;
+      g_drm_bo_map[i].cap = cap;
       return;
     }
   }
@@ -543,10 +546,18 @@ void drm_bo_map_record(unsigned int handle, unsigned int cpu_va,
 void drm_bo_map_remove(unsigned int handle) {
   for (unsigned int i = 0; i < DRM_MAX_BO_MAP; i++) {
     if (g_drm_bo_map[i].handle == handle) {
+      /* 客户端 BO 的物理页由 foot arena capability 持有；
+       * mmap 拦截返回的 VA 不是普通 VMA，必须显式 unmap + revoke，
+       * 否则每个进程退出都会泄漏几 MB 物理内存。 */
+      if (g_drm_bo_map[i].cap != 0) {
+        foot_cap_unmap((foot_cap_t)g_drm_bo_map[i].cap);
+        foot_cap_revoke((foot_cap_t)g_drm_bo_map[i].cap);
+      }
       g_drm_bo_map[i].handle = 0;
       g_drm_bo_map[i].cpu_va = 0;
       g_drm_bo_map[i].size = 0;
       g_drm_bo_map[i].gva = 0;
+      g_drm_bo_map[i].cap = 0;
     }
   }
 }
@@ -655,6 +666,16 @@ int drm_gem_ioctl(unsigned long request, void* arg) {
  * 默认 BO 分配器：给任意 Mesa/EGL 应用使用，不再要求应用自己实现
  * bridge_bo_alloc()。测试/应用如果提供强符号，会覆盖这个 weak 定义。
  * ------------------------------------------------------------------ */
+static unsigned int g_last_bo_cap;
+
+/* v3d.c 在 alloc 成功后取走本次 arena capability，随 BO handle 记录，
+ * GEM_CLOSE 时 unmap + revoke，避免物理页泄漏。 */
+unsigned int drm_bo_take_last_cap(void) {
+  unsigned int cap = g_last_bo_cap;
+  g_last_bo_cap = 0;
+  return cap;
+}
+
 __attribute__((weak)) int bridge_bo_alloc(unsigned int size, unsigned int* pa,
                                           unsigned int* cpu_va) {
   static unsigned long next_va = 0x52000000UL;
@@ -668,6 +689,7 @@ __attribute__((weak)) int bridge_bo_alloc(unsigned int size, unsigned int* pa,
   if (foot_cap_map(cap, (void*)va, 0, s) != 0) {
     return -1;
   }
+  g_last_bo_cap = cap;
   *pa = p;
   *cpu_va = (unsigned int)va;
   return 0;
