@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -419,11 +420,7 @@ int drmGetCap(int fd, uint64_t capability, uint64_t* value) {
   }
 }
 
-int drmIoctl(int fd, unsigned long request, void* arg) {
-  /* 记下 Mesa 使用的 DRM fd；v3d_bo_map_unsynchronized() 会拿同一个 fd
-   * 调 mmap()，下面的 mmap 拦截用它识别 GPU BO 映射。 */
-  g_gpu_fd = fd;
-
+static int drm_dispatch_ioctl(unsigned long request, void* arg) {
   /* 先走通用 GEM/BO/屏幕；没命中再交给驱动 adapter（v3d.c/mali.c）。 */
   int rc = drm_gem_ioctl(request, arg);
   if (rc != DRM_GEM_NOT_HANDLED) {
@@ -434,6 +431,33 @@ int drmIoctl(int fd, unsigned long request, void* arg) {
   }
   printf("libdrm: no driver registered (ioctl 0x%lx)\n", request);
   return -EINVAL;
+}
+
+int drmIoctl(int fd, unsigned long request, void* arg) {
+  /* 记下 Mesa 使用的 DRM fd；v3d_bo_map_unsynchronized() 会拿同一个 fd
+   * 调 mmap()，下面的 mmap 拦截用它识别 GPU BO 映射。 */
+  g_gpu_fd = fd;
+  return drm_dispatch_ioctl(request, arg);
+}
+
+/* GBM/gbm_dri 有些路径直接调用 libc ioctl()，不经过 drmIoctl。
+ * 拦截 DRM 类型（_IOC_TYPE='d'）的请求，转给驱动 dispatch；
+ * 其余（/dev/fb 的 FBIO* 等）原样交给内核。
+ * 注意：不在这里更新 g_gpu_fd，避免把 /dev/fb 误记成 GPU fd。 */
+int ioctl(int fd, int request, ...) {
+  unsigned long req = (unsigned long)(unsigned int)request;
+  va_list ap;
+  va_start(ap, request);
+  void* arg = va_arg(ap, void*);
+  va_end(ap);
+
+  if (((req >> 8) & 0xff) == 'd') {
+    return drm_dispatch_ioctl(req, arg);
+  }
+#ifndef SYS_ioctl
+#define SYS_ioctl 29
+#endif
+  return (int)syscall(SYS_ioctl, fd, req, arg);
 }
 
 /* BO 的 GPU VA 查询（Mesa bufmgr 用 GET_BO_OFFSET 拿 GPU 地址） */
