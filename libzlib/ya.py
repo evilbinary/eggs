@@ -7,6 +7,8 @@
 target("zlib")
 set_kind("static")
 
+add_cflags('-fPIC')
+
 add_packages(get_config('default_libc'))
 
 add_files(
