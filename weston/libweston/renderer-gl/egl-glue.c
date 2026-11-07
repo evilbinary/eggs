@@ -728,6 +728,11 @@ gl_renderer_setup_egl_client_extensions(struct gl_renderer *gr)
 			return 0;
 		platform = "surfaceless";
 		break;
+	case EGL_PLATFORM_DEVICE_EXT:
+		/* YiYiYa: 直接使用 EGL device 平台（eglQueryDevicesEXT +
+		 * v3d DRI），和 test-gles-teapot 的路径一致。上游 gl-renderer
+		 * 没有这个分支，这里放行。 */
+		return 0;
 	default:
 		unreachable("bad EGL platform enum");
 		return -1;

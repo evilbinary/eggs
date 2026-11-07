@@ -3945,8 +3945,8 @@ weston_output_repaint(struct weston_output *output)
 	 *
 	 * Ensure we have scene graph contents here.
 	 */
-	assert(!wl_list_empty(&output->paint_node_z_order_list) &&
-	       "empty scene graph at repaint");
+	/* YiYiYa: 不 assert 空场景。首帧可能在客户端提交 buffer 之前就开始
+	 * 重绘；fbdev 没有硬件平面，空列表下面的遍历自然是空操作。 */
 
 	wl_list_for_each(pnode, &output->paint_node_z_order_list,
 			 z_order_link) {

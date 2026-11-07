@@ -6978,6 +6978,12 @@ display_create(int *argc, char *argv[])
 
 	d->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (d->xkb_context == NULL) {
+		/* 镜像没有 /usr/share/X11/xkb，默认 include 路径全缺失时
+		 * xkbcommon 返回 NULL。没有默认数据也能创建 context。 */
+		d->xkb_context =
+			xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES);
+	}
+	if (d->xkb_context == NULL) {
 		fprintf(stderr, "Failed to create XKB context\n");
 		free(d);
 		return NULL;

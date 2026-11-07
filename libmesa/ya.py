@@ -709,6 +709,13 @@ add_files(
 )
 add_includedirs('src/gallium/auxiliary/pipe-loader')
 add_ldflags('-lm')
+# 【dlopen 场景的符号绑定】weston 的 gl-renderer 是 .so，v3d_dri 也是
+# dlopen 进来的；libc 的 mmap/munmap 会在全局符号表里抢占 libdrm 替身的
+# 拦截函数，导致 Mesa 的 BO mmap 返回内核映射而不是 GPU arena，CL 写成
+# 0x55（GPU 读到未初始化 CL 卡死）。-Bsymbolic 让库内部调用绑定到
+# 自己链接进来的 libdrm 实现。茶壶程序是主程序直接链 libdrm，本来就能
+# 命中，不受影响。
+add_ldflags('-Bsymbolic')
 
 # ---- libEGL.so：EGL 前端（device + surfaceless 平台）----
 target("EGL")

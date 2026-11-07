@@ -762,13 +762,11 @@ timeline_render_point_handler(int fd, uint32_t mask, void *data)
 static EGLSyncKHR
 create_render_sync(struct gl_renderer *gr)
 {
-	static const EGLint attribs[] = { EGL_NONE };
-
-	if (!egl_display_has(gr, EXTENSION_ANDROID_NATIVE_FENCE_SYNC))
-		return EGL_NO_SYNC_KHR;
-
-	return gr->create_sync(gr->egl_display, EGL_SYNC_NATIVE_FENCE_ANDROID,
-			       attribs);
+	/* fbdev 输出没有 native fence 消费者。
+	 * eglCreateSyncKHR(EGL_SYNC_NATIVE_FENCE_ANDROID) 在这个 EGL/V3D 上
+	 * 会卡在首帧 repaint。需要 GPU timeline 时再按后端恢复。 */
+	(void)gr;
+	return EGL_NO_SYNC_KHR;
 }
 
 static void
@@ -3215,10 +3213,18 @@ gl_renderer_repaint_output(struct weston_output *output,
 	}
 
 	/* Update dirty textures. */
-	if (gr->wireframe_dirty)
-		update_wireframe_tex(gr, &go->area);
-	if (go->border_status != BORDER_STATUS_CLEAN)
-		update_borders_tex(gr, go);
+	if (gr->wireframe_dirty) {
+		/* YiYiYa: 普通合成不需要 wireframe 纹理；V3D 的
+		 * GL_R8 + mipmap 纹理上传会让 GPU 作业卡死。只在真的打开
+		 * wireframe 调试模式时才构建。 */
+		if (gr->debug_mode == DEBUG_MODE_WIREFRAME)
+			update_wireframe_tex(gr, &go->area);
+		else
+			gr->wireframe_dirty = false;
+	}
+	/* YiYiYa: 当前 gl-renderer 只服务 fbdev 后端，没有输出边框；
+	 * V3D 在 border 纹理更新路径上会卡死，直接标记 clean 跳过。 */
+	go->border_status = BORDER_STATUS_CLEAN;
 
 	/* Some of the debug modes need an entire repaint to make sure that we
 	 * clear any debug left over on this buffer. This precludes the use of
@@ -3269,6 +3275,7 @@ gl_renderer_repaint_output(struct weston_output *output,
 		repaint_views(output, &rb->damage);
 	}
 
+	rb->border_status = BORDER_STATUS_CLEAN;
 	draw_output_borders(output, rb->border_status);
 
 	gl_renderer_do_capture_tasks(gr, output, rb,
@@ -5390,6 +5397,11 @@ gl_renderer_display_create(struct weston_compositor *ec,
 	if (gl_renderer_setup(ec) < 0)
 		goto fail_terminate;
 
+	/* YiYiYa: 后端可以指定 glReadPixels 读回格式
+	 * （16bpp fbdev 用 RGB565，32bpp 保持上游默认）。 */
+	if (options->read_format)
+		ec->read_format = options->read_format;
+
 	if (gr->allocator)
 		gr->base.dmabuf_alloc = gl_renderer_dmabuf_alloc;
 
@@ -5578,22 +5590,17 @@ gl_renderer_setup(struct weston_compositor *ec)
 	assert(nattr < ARRAY_LENGTH(context_attribs));
 	context_attribs[nattr] = EGL_NONE;
 
-	/* try to create an OpenGLES 3 context first */
-	context_attribs[1] = 3;
+	/* YiYiYa: V3D 7.1 最小后端目前只验证到 GLES2。weston 用 GLES3.1
+	 * 时首帧的 BIN/RENDER CL 会让 GPU 卡死（submit_cl timeout，CT0 不前进），
+	 * 所以这里直接创建 GLES2 上下文。等后端补齐 GLES3 路径再恢复上游的
+	 * “先 3 后 2”逻辑。 */
+	context_attribs[1] = 2;
 	gr->egl_context = eglCreateContext(gr->egl_display, gr->egl_config,
 					   EGL_NO_CONTEXT, context_attribs);
 	if (gr->egl_context == NULL) {
-		/* and then fallback to OpenGLES 2 */
-		context_attribs[1] = 2;
-		gr->egl_context = eglCreateContext(gr->egl_display,
-						   gr->egl_config,
-						   EGL_NO_CONTEXT,
-						   context_attribs);
-		if (gr->egl_context == NULL) {
-			weston_log("failed to create context\n");
-			gl_renderer_print_egl_error_state();
-			return -1;
-		}
+		weston_log("failed to create GLES2 context\n");
+		gl_renderer_print_egl_error_state();
+		return -1;
 	}
 
 	if (egl_display_has(gr, EXTENSION_IMG_CONTEXT_PRIORITY)) {
@@ -5617,6 +5624,12 @@ gl_renderer_setup(struct weston_compositor *ec)
 	}
 
 	gr->gl_version = get_gl_version();
+	/* YiYiYa: V3D 7.1 最小后端对 GLES3 的部分 CL 会卡死（首帧
+	 * BIN/RENDER timeout）。EGL 即使请求 2.0 仍可能返回 3.1 context，
+	 * 这里把 renderer 的内部版本压到 2.0，强制走 GLES2 命令路径
+	 * （GLES2 是 3.1 的子集，同一 context 上安全）。 */
+	if (gr->gl_version > gl_version(2, 0))
+		gr->gl_version = gl_version(2, 0);
 	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS,
 		      &gr->max_texture_image_units);
 	glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,
@@ -5753,6 +5766,11 @@ gl_renderer_setup(struct weston_compositor *ec)
 	} else if (gl_extensions_has(gr, EXTENSION_EXT_TEXTURE_STORAGE)) {
 		gr->features |= FEATURE_TEXTURE_IMMUTABILITY;
 	}
+
+	/* YiYiYa: V3D 最小后端在 glTexStorage2D / GL_EXT_texture_storage
+	 * 路径上会卡死（resize 时 1x1 border/wireframe 纹理上传后 GPU 作业
+	 * 不返回）。这里强制回退到 glTexImage2D，已验证可用。 */
+	gr->features &= ~FEATURE_TEXTURE_IMMUTABILITY;
 
 	/* Texture RG feature. */
 	if (gr->gl_version >= gl_version(3, 0) ||

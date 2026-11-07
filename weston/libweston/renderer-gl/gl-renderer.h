@@ -70,6 +70,13 @@ struct gl_renderer_display_options {
 	const struct pixel_format_info **formats;
 	/** The \c formats array length */
 	unsigned formats_count;
+	/** Format used for glReadPixels read-back.
+	 *
+	 * YiYiYa 扩展：fbdev 后端可能只有 16bpp RGB565 的 framebuffer，
+	 * gl-renderer 默认按 ARGB8888 读回，stride/格式都对不上。传 NULL
+	 * 保持上游行为（ARGB8888/ABGR8888）。
+	 */
+	const struct pixel_format_info *read_format;
 };
 
 struct gl_renderer_output_options {

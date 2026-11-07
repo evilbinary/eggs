@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <dlfcn.h>
 
 #include <pixman.h>
 #include <wayland-server-core.h>
@@ -33,6 +34,7 @@
 #include "libweston-internal.h"
 #include "pixel-formats.h"
 #include "pixman-renderer.h"
+#include "renderer-gl/gl-renderer.h"
 #include "presentation-time-server-protocol.h"
 
 #include "backend-fbdev.h"
@@ -110,6 +112,16 @@ struct fbdev_backend {
 	int fb_width;
 	int fb_height;
 	int fb_stride;
+	/* framebuffer 实际像素格式（16bpp=RGB565 / 32bpp=XRGB8888）。
+	 * Pi5 固件即使请求 32bpp 也会给 16bpp（见 bcm2712.c 的 GET_PITCH），
+	 * GL renderer 的 read_format 和 renderbuffer 都用它。 */
+	const struct pixel_format_info *format;
+
+	/* GL 读回用的 32bpp 影子缓冲（width*height*4）。
+	 * V3D 的 glReadPixels 直接读成 RGB565 会得到全 0，先读 ARGB8888
+	 * 再在 CPU 里转成 RGB565 写进 /dev/fb0。 */
+	uint8_t *gl_shadow;
+	size_t gl_shadow_len;
 
 	int refresh;
 
@@ -138,9 +150,6 @@ struct fbdev_output {
 	weston_renderbuffer_t renderbuffer;
 	struct weston_mode mode;
 };
-
-/* 已合成帧数（只用于周期性打点） */
-static int fbdev_frames;
 
 static inline struct fbdev_backend *
 to_fbdev_backend(struct weston_backend *base)
@@ -173,10 +182,6 @@ static int
 fbdev_output_start_repaint_loop(struct weston_output *output)
 {
 	struct timespec ts;
-	static int srdbg = 0;
-
-	if (srdbg++ < 6)
-		weston_log("fbdev: start_repaint_loop #%d\n", srdbg);
 
 	weston_compositor_read_presentation_clock(output->compositor, &ts);
 	weston_output_finish_frame(output, &ts,
@@ -194,10 +199,36 @@ fbdev_output_repaint(struct weston_output *base)
 
 	assert(output->renderbuffer);
 
-	/* 这一帧要重画的区域：pixman 会直接把它合成进 /dev/fb0 的内存里 */
+	/* 这一帧要重画的区域：pixman/GL 会把它合成进 /dev/fb0 的内存里 */
 	pixman_region32_init(&damage);
 	weston_output_flush_damage_for_primary_plane(base, &damage);
 	ec->renderer->repaint_output(base, &damage, output->renderbuffer);
+
+	/* GL 读回到 32bpp 影子缓冲；V3D 的 RGB565 glReadPixels 会返回全 0，
+	 * 这里在 CPU 里转成 RGB565 写进 fb。pixman 路径直接写 fb，不需要。 */
+	if (ec->renderer->type == WESTON_RENDERER_GL && b->gl_shadow != NULL) {
+		const uint32_t *src = (const uint32_t *)b->gl_shadow;
+		int w = base->current_mode->width;
+		int h = base->current_mode->height;
+		int y;
+
+		for (y = 0; y < h; y++) {
+			uint16_t *dst = (uint16_t *)(b->fb +
+						     (size_t)y * b->fb_stride);
+			const uint32_t *row = src + (size_t)y * w;
+			int x;
+
+			for (x = 0; x < w; x++) {
+				uint32_t p = row[x];
+				unsigned r = (p >> 16) & 0xff;
+				unsigned g = (p >> 8) & 0xff;
+				unsigned bl = p & 0xff;
+
+				dst[x] = (uint16_t)(((r >> 3) << 11) |
+						    ((g >> 2) << 5) | (bl >> 3));
+			}
+		}
+	}
 	pixman_region32_fini(&damage);
 
 	/* 【每帧踢一下显示刷新】pixman 只改了显存内容，没有任何"提交"动作：
@@ -212,41 +243,6 @@ fbdev_output_repaint(struct weston_output *base)
 
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
 	weston_output_arm_frame_timer(base, output->finish_frame_timer);
-
-	/* 头几帧打点：采样中心/左上/面板区 + 隔点统计颜色种类，排查上屏问题很有用 */
-	fbdev_frames++;
-	if (fbdev_frames == 1 || fbdev_frames % 120 == 0) {
-		int w = base->current_mode->width;
-		int h = base->current_mode->height;
-		size_t stride = b->fb_stride;
-		const uint8_t *fb = b->fb;
-		uint32_t c_center, c_tl, c_panel;
-		int x, y, other = 0, total = 0, redish = 0;
-
-		c_center = ((const uint32_t *)(fb + (size_t)(h / 2) * stride))[w / 2];
-		c_tl = ((const uint32_t *)(fb + (size_t)100 * stride))[100];
-		c_panel = ((const uint32_t *)(fb + (size_t)16 * stride))[w / 2];
-
-		/* 隔 8 像素扫一遍全帧，统计非背景色（黑/0）与红色像素比例 */
-		for (y = 0; y < h; y += 8) {
-			const uint32_t *row = (const uint32_t *)(fb + (size_t)y * stride);
-
-			for (x = 0; x < w; x += 8) {
-				uint32_t p = row[x];
-
-				total++;
-				if (p == 0)
-					other++;
-				if ((p & 0x00f00000) && !(p & 0x0000f000))
-					redish++;
-			}
-		}
-
-		weston_log("fbdev: frame %d center=0x%08x tl(100,100)=0x%08x panel=0x%08x blank=%d%% red=%d%%\n",
-			   fbdev_frames, c_center, c_tl, c_panel,
-			   total ? other * 100 / total : 0,
-			   total ? redish * 100 / total : 0);
-	}
 
 	return 0;
 }
@@ -319,13 +315,14 @@ fbdev_output_enable(struct weston_output *base)
 	struct fbdev_backend *b = output->backend;
 	struct weston_compositor *ec = b->compositor;
 	struct wl_event_loop *loop;
-	struct pixman_renderer_output_options options;
 
 	if (base->enabled)
 		return 0;
 
-	if (ec->renderer->type != WESTON_RENDERER_PIXMAN) {
-		weston_log("fbdev: only the pixman renderer is supported\n");
+	if (ec->renderer->type != WESTON_RENDERER_PIXMAN &&
+	    ec->renderer->type != WESTON_RENDERER_GL) {
+		weston_log("fbdev: unsupported renderer type %d\n",
+			   ec->renderer->type);
 		return -1;
 	}
 
@@ -336,28 +333,77 @@ fbdev_output_enable(struct weston_output *base)
 	if (output->finish_frame_timer == NULL)
 		return -1;
 
+	if (ec->renderer->type == WESTON_RENDERER_GL) {
+		struct gl_renderer_fbo_options gl_options = { 0 };
+		/* FBO 用 XRGB8888（V3D 不支持 RGB565 renderbuffer）；
+		 * glReadPixels 读到 32bpp 影子缓冲，再转 RGB565 写 fb。 */
+		const struct pixel_format_info *format =
+			pixel_format_get_info_by_pixman(PIXMAN_x8r8g8b8);
+		size_t shadow_len;
+
+		gl_options.fb_size.width = base->current_mode->width;
+		gl_options.fb_size.height = base->current_mode->height;
+		gl_options.area.x = 0;
+		gl_options.area.y = 0;
+		gl_options.area.width = base->current_mode->width;
+		gl_options.area.height = base->current_mode->height;
+
+		if (ec->renderer->gl->output_fbo_create(base, &gl_options) < 0) {
+			weston_log("fbdev: gl output_fbo_create failed\n");
+			return -1;
+		}
+
+		shadow_len = (size_t)base->current_mode->width *
+			     base->current_mode->height * 4;
+		if (b->gl_shadow == NULL || b->gl_shadow_len < shadow_len) {
+			free(b->gl_shadow);
+			b->gl_shadow = malloc(shadow_len);
+			b->gl_shadow_len = shadow_len;
+		}
+		if (b->gl_shadow == NULL) {
+			weston_log("fbdev: gl shadow alloc failed\n");
+			ec->renderer->gl->output_destroy(base);
+			return -1;
+		}
+
+		output->renderbuffer = ec->renderer->create_renderbuffer(
+			base, format, b->gl_shadow,
+			base->current_mode->width * 4, NULL, NULL);
+		if (output->renderbuffer == NULL) {
+			weston_log("fbdev: gl create_renderbuffer failed\n");
+			ec->renderer->gl->output_destroy(base);
+			return -1;
+		}
+
+		return 0;
+	}
+
 	/* 【对齐 backend-headless 的写法】用影子缓冲：pixman 先合成到自己的
 	 * shadow image，再由渲染器把脏区一次性拷进我们的 renderbuffer（= 显存
 	 * 映射）。之前 use_shadow=false 是"边合成边写正在显示的显存"，画面可能
 	 * 被看到半帧状态（拖窗口时整窗闪）。开影子后写显存只发生在合成完成之后，
 	 * 且拷贝只覆盖脏区，代价是一份额外内存 + 一次 memcpy。 */
-	memset(&options, 0, sizeof options);
-	options.use_shadow = true;
-	options.format = pixel_format_get_info_by_pixman(PIXMAN_x8r8g8b8);
-	options.fb_size.width = base->current_mode->width;
-	options.fb_size.height = base->current_mode->height;
+	{
+		struct pixman_renderer_output_options options;
 
-	if (ec->renderer->pixman->output_create(base, &options) < 0) {
-		weston_log("fbdev: pixman output_create failed\n");
-		return -1;
-	}
+		memset(&options, 0, sizeof options);
+		options.use_shadow = true;
+		options.format = b->format;
+		options.fb_size.width = base->current_mode->width;
+		options.fb_size.height = base->current_mode->height;
 
-	output->renderbuffer = ec->renderer->create_renderbuffer(
-		base, options.format, b->fb, b->fb_stride, NULL, NULL);
-	if (output->renderbuffer == NULL) {
-		weston_log("fbdev: create_renderbuffer failed\n");
-		ec->renderer->pixman->output_destroy(base);
-		return -1;
+		if (ec->renderer->pixman->output_create(base, &options) < 0) {
+			weston_log("fbdev: pixman output_create failed\n");
+			return -1;
+		}
+
+		output->renderbuffer = ec->renderer->create_renderbuffer(
+			base, options.format, b->fb, b->fb_stride, NULL, NULL);
+		if (output->renderbuffer == NULL) {
+			weston_log("fbdev: create_renderbuffer failed\n");
+			ec->renderer->pixman->output_destroy(base);
+			return -1;
+		}
 	}
 
 	return 0;
@@ -376,7 +422,10 @@ fbdev_output_disable(struct weston_output *base)
 		ec->renderer->destroy_renderbuffer(output->renderbuffer);
 		output->renderbuffer = NULL;
 	}
-	ec->renderer->pixman->output_destroy(base);
+	if (ec->renderer->type == WESTON_RENDERER_GL)
+		ec->renderer->gl->output_destroy(base);
+	else
+		ec->renderer->pixman->output_destroy(base);
 
 	if (output->finish_frame_timer) {
 		wl_event_source_remove(output->finish_frame_timer);
@@ -570,9 +619,6 @@ fbdev_input_init(struct fbdev_backend *b)
 	weston_seat_init(&b->seat, b->compositor, "seat0");
 	b->input_ready = true;
 	weston_seat_init_pointer(&b->seat);
-	/* 【对照实验】暂时不建键盘，用来区分崩溃是 pointer 还是 keyboard 引入 */
-	/* if (weston_seat_init_keyboard(&b->seat, NULL) < 0)
-		weston_log("fbdev: keyboard init failed (continue without)\n"); */
 
 	b->input_fd = open("/dev/input/event0",
 			   O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -638,6 +684,7 @@ fbdev_destroy(struct weston_backend *backend)
 	if (b->fd >= 0)
 		close(b->fd);
 
+	free(b->gl_shadow);
 	free(b);
 }
 
@@ -671,10 +718,18 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 	b->var = var;
 
 	if (b->fb_width <= 0 || b->fb_height <= 0 || b->fb_stride <= 0 ||
-	    var.bits_per_pixel != 32) {
+	    (var.bits_per_pixel != 32 && var.bits_per_pixel != 16)) {
 		weston_log("fbdev: unsupported mode %dx%d %ubpp stride %d\n",
 			   b->fb_width, b->fb_height, var.bits_per_pixel,
 			   b->fb_stride);
+		return -1;
+	}
+
+	b->format = pixel_format_get_info_by_pixman(
+		var.bits_per_pixel == 16 ? PIXMAN_r5g6b5 : PIXMAN_x8r8g8b8);
+	if (b->format == NULL) {
+		weston_log("fbdev: no pixel format for %ubpp\n",
+			   var.bits_per_pixel);
 		return -1;
 	}
 
@@ -691,6 +746,17 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 		   b->fb_width, b->fb_height, var.bits_per_pixel, b->fb_stride,
 		   (unsigned)want);
 	return 0;
+}
+
+static void
+fbdev_cleanup(struct fbdev_backend *b)
+{
+	if (b->fb)
+		munmap(b->fb, b->fb_len);
+	if (b->fd >= 0)
+		close(b->fd);
+	free(b->gl_shadow);
+	free(b);
 }
 
 WL_EXPORT int
@@ -718,15 +784,69 @@ weston_backend_init(struct weston_compositor *compositor,
 	b->compositor = compositor;
 	b->refresh = config->refresh > 0 ? config->refresh : DEFAULT_REFRESH;
 
-	if (weston_compositor_init_renderer(compositor, WESTON_RENDERER_PIXMAN,
-					    NULL) < 0) {
-		weston_log("fbdev: pixman renderer init failed\n");
+	/* 先打开 fb：Pi5 固件实际给的是 16bpp（即使请求 32），GL renderer
+	 * 的 formats / read_format 必须按 fb 的真实 bpp 选。 */
+	if (fbdev_open(b, config->device_path) < 0) {
 		free(b);
 		return -1;
 	}
 
-	if (fbdev_open(b, config->device_path) < 0) {
-		free(b);
+	if (config->renderer == WESTON_RENDERER_GL) {
+		const struct pixel_format_info *formats[2] = {
+			b->format,
+			pixel_format_get_info_by_pixman(PIXMAN_x8r8g8b8),
+		};
+		/* 用 test-gles-teapot 验证过的 EGL device 平台。这里用
+		 * dlopen/dlsym 取 eglQueryDevicesEXT，避免把 EGL 依赖的
+		 * Mesa include 路径带进本模块（会和 weston config.h 打架）。 */
+		void *egl_lib = dlopen("/lib/libEGL.so", RTLD_NOW);
+		void *(*get_proc)(const char *) =
+			egl_lib ? (void *(*)(const char *))
+					  dlsym(egl_lib, "eglGetProcAddress")
+				: NULL;
+		PFNEGLQUERYDEVICESEXTPROC query_devices =
+			get_proc ? (PFNEGLQUERYDEVICESEXTPROC)
+					   get_proc("eglQueryDevicesEXT")
+				 : NULL;
+		EGLDeviceEXT egl_dev = EGL_NO_DEVICE_EXT;
+		EGLint ndev = 0;
+
+		if (query_devices == NULL) {
+			const char *err = dlerror();
+			weston_log("fbdev: cannot get eglQueryDevicesEXT: %s\n",
+				   err ? err : "unknown");
+		} else {
+			query_devices(1, &egl_dev, &ndev);
+		}
+
+		struct gl_renderer_display_options options = {
+			.egl_platform = ndev > 0 ? EGL_PLATFORM_DEVICE_EXT
+						 : EGL_PLATFORM_SURFACELESS_MESA,
+			.egl_native_display = ndev > 0 ? egl_dev : NULL,
+			.formats = formats,
+			.formats_count = formats[1] != NULL ? 2 : 1,
+			.read_format = NULL,
+		};
+
+		if (weston_compositor_init_renderer(compositor,
+						    WESTON_RENDERER_GL,
+						    &options.base) < 0) {
+			weston_log("fbdev: GL renderer init failed\n");
+			fbdev_cleanup(b);
+			return -1;
+		}
+	} else if (config->renderer == WESTON_RENDERER_PIXMAN ||
+		   config->renderer == WESTON_RENDERER_AUTO) {
+		if (weston_compositor_init_renderer(compositor,
+						    WESTON_RENDERER_PIXMAN,
+						    NULL) < 0) {
+			weston_log("fbdev: pixman renderer init failed\n");
+			fbdev_cleanup(b);
+			return -1;
+		}
+	} else {
+		weston_log("fbdev: unsupported renderer %d\n", config->renderer);
+		fbdev_cleanup(b);
 		return -1;
 	}
 

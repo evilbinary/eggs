@@ -4401,6 +4401,7 @@ load_fbdev_backend(struct weston_compositor *c,
 
 	(void)wc;
 	config.device_path = device;
+	config.renderer = renderer;
 	config.base.struct_version = WESTON_FBDEV_BACKEND_CONFIG_VERSION;
 	config.base.struct_size = sizeof(struct weston_fbdev_backend_config);
 
@@ -5405,6 +5406,12 @@ wet_main(int argc, char *argv[], const struct weston_testsuite_data *test_data)
 
 	wl_list_init(&wet.layoutput_list);
 	wl_list_init(&wet.backend_list);
+
+	/* YiYiYa: 根 FAT 上没有 /tmp，最小 shell 也不支持
+	 * `VAR=value cmd` / export。即使 config 给环境塞了 /tmp 也要覆盖：
+	 * Wayland socket 和 lock 文件统一放到镜像已有且可写的 /lib，
+	 * 由 weston fork 的客户端自动继承。 */
+	setenv("XDG_RUNTIME_DIR", "/lib", 1);
 
 	os_fd_set_cloexec(fileno(stdin));
 

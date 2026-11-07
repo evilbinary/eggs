@@ -16,11 +16,46 @@
 # 架构运行——可执行文件 NEEDED libweston.so，shell/backend 模块是独立 .so，
 # 由 dlopen 加载并从 libweston.so 解析符号。
 #
-# 裁掉的东西（阶段 1 不需要，且各自拖大依赖）：
-#   renderer-gl（EGL/GLES）、renderer-vulkan、backend-{drm,wayland,x11,
-#   pipewire,rdp,vnc}、color-lcms（lcms2）、clients/（cairo/pango）、tests。
+# 裁掉的东西（各自拖大依赖）：
+#   renderer-vulkan、backend-{drm,wayland,x11,pipewire,rdp,vnc}、
+#   color-lcms（lcms2）、clients/（cairo/pango）、tests。
+# renderer-gl 不编进 libweston：按上游做法是独立的 gl-renderer.so 模块
+# （target 见 app/wayland/ya.py），这里只负责按需生成它的 GLSL 头文件。
 #
 # 依赖：wayland（client+server）、pixman、xkbcommon。
+
+# ---- gl-renderer 的 GLSL 头 ----
+# meson 里 vertex-shader.h / fragment-shader.h 是 custom_target；这里在
+# ya 配置阶段按需生成：文件缺失、大小为 0，或 .glsl 比头文件新时才跑
+# 上游自带的 tools/xxd.py。生成形式是
+#   static const char vertex_shader[] = { ... };
+# 正好是 libweston/renderer-gl/gl-shaders.c include 的符号。
+import os
+import subprocess
+
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_GLDIR = os.path.join(_BASE, 'libweston/renderer-gl')
+
+
+def _ensure_shader_header(src_name, hdr_name, var_name):
+    src = os.path.join(_GLDIR, src_name)
+    hdr = os.path.join(_GLDIR, hdr_name)
+    if (os.path.exists(hdr) and os.path.getsize(hdr) > 0 and
+            os.path.getmtime(hdr) >= os.path.getmtime(src)):
+        return
+    subprocess.run(['python3', os.path.join(_BASE, 'tools/xxd.py'),
+                    src, hdr, '-n', var_name], check=True)
+    print('weston: generated %s' % os.path.relpath(hdr, _BASE))
+
+
+def ensure_gl_shader_headers():
+    _ensure_shader_header('vertex.glsl', 'vertex-shader.h', 'vertex_shader')
+    _ensure_shader_header('fragment.glsl', 'fragment-shader.h',
+                          'fragment_shader')
+
+
+ensure_gl_shader_headers()
+
 target("weston")
 set_kind("shared")
 # 共享库必须按位置无关编（模块和可执行文件都要通过 GOT/PLT 引用它）
@@ -141,3 +176,7 @@ add_includedirs(
     '../wayland-protocols/gen',  # 协议头
     public=True,
 )
+# ENABLE_EGL：pixel-formats.c 需要 EGL/GLES 头。只给 libweston 自己用，
+# 不 public 传播 —— 否则会进 weston 前端的 include 路径，和 libinput 的
+# linux/input.h 垫片抢顺序（实测前端 KEY_S/EV_KEY 变成未定义）。
+add_includedirs('../../eggs/libmesa/include')

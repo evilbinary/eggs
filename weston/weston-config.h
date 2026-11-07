@@ -16,6 +16,13 @@
 #define _GNU_SOURCE 1
 #define _FILE_OFFSET_BITS 64
 
+/* Mesa 的 EGL/eglplatform.h 用这个宏选 generic 原生类型
+ * （EGLNativeDisplayType = void*）。裸机 GCC 不预定义它，和 app/test 里
+ * 编译 EGL 程序时加的 -D__unix__ 保持一致。 */
+#ifndef __unix__
+#define __unix__ 1
+#endif
+
 #define PACKAGE "weston"
 #define PACKAGE_NAME "weston"
 #define PACKAGE_VERSION "16.0.1"
@@ -28,11 +35,22 @@
 #define BINDIR "/usr/bin"
 #define DATADIR "/usr/share"
 #define LIBEXECDIR "/usr/libexec"
+/* 标准 weston 模块布局（与上游一致）：
+ *   LIBWESTON_MODULEDIR = /usr/lib/libweston-16  （后端/渲染器）
+ *   MODULEDIR           = /usr/lib/weston        （shell 模块）
+ * 这些目录在镜像里预先建好（app/resource/usr/lib/...），不在运行时 mkdir，
+ * 避开 FAT 运行期新建目录写不进文件数据的问题。 */
 #define MODULEDIR "/usr/lib/weston"
 #define LIBWESTON_MODULEDIR "/usr/lib/libweston-16"
 
 /* 后端/渲染器裁剪：只留 headless + pixman */
 #define BUILD_HEADLESS_COMPOSITOR 1
+
+/* GL 渲染器（gl-renderer.so 模块）。
+ * ENABLE_EGL 打开后 pixel-formats.c 会带上 GL 内部格式/通道 swizzle 信息，
+ * gl-renderer 需要这些；本系统用 surfaceless EGL + FBO 输出（不走 GBM）。
+ * HAVE_GBM 仍然不定义：gl-renderer 的 GBM dmabuf 分配路径用不到。 */
+#define ENABLE_EGL 1
 
 /* libc / 平台能力探测（musl 全部具备）。
  *

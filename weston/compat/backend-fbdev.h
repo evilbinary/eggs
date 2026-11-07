@@ -11,10 +11,13 @@
 
 #include <libweston/libweston.h>
 
-#define WESTON_FBDEV_BACKEND_CONFIG_VERSION 1
+#define WESTON_FBDEV_BACKEND_CONFIG_VERSION 2
 
 struct weston_fbdev_backend_config {
 	struct weston_backend_config base;
+
+	/* 渲染器：AUTO/PIXMAN 用 pixman；GL 用 gl-renderer（surfaceless EGL） */
+	enum weston_renderer_type renderer;
 
 	/* 刷新率（mHz），0 用默认 60Hz */
 	int refresh;
