@@ -290,6 +290,7 @@ wl_resource_post_error_vargs(struct wl_resource *resource,
 	char buffer[128];
 
 	vsnprintf(buffer, sizeof buffer, msg, argp);
+	wl_log("protocol error: %s\n", buffer);
 
 	/*
 	 * When a client aborts, its resources are destroyed in id order,

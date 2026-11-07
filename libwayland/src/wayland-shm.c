@@ -129,9 +129,10 @@ shm_pool_finish_resize(struct wl_shm_pool *pool)
 	data = shm_pool_grow_mapping(pool);
 	if (data == MAP_FAILED) {
 		if (pool->resource != NULL)
-			wl_resource_post_error(pool->resource,
-					       WL_SHM_ERROR_INVALID_FD,
-					       "failed mremap");
+		wl_resource_post_error(pool->resource,
+				       WL_SHM_ERROR_INVALID_FD,
+				       "failed mremap %d->%d errno=%d",
+				       pool->size, pool->new_size, errno);
 		return;
 	}
 
