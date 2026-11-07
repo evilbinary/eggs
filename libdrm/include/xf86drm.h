@@ -104,6 +104,7 @@ char* drmGetPrimaryDeviceNameFromFd(int fd);
 char* drmGetRenderDeviceNameFromFd(int fd);
 int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data,
                         unsigned long size);
+int drmAuthMagic(int fd, uint32_t magic);
 
 /* 版本查询：Mesa 的驱动匹配靠 name（"v3d" / "panfrost"） */
 drmVersionPtr drmGetVersion(int fd);

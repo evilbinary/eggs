@@ -189,6 +189,12 @@ char* drmGetRenderDeviceNameFromFd(int fd) {
   return strdup(FOOT_DRM_RENDER_NODE);
 }
 
+int drmAuthMagic(int fd, uint32_t magic) {
+  (void)fd;
+  (void)magic;
+  return 0;
+}
+
 int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data,
                         unsigned long size) {
   (void)fd;

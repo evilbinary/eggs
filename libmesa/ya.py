@@ -584,7 +584,8 @@ add_includedirs(
     'src/gallium/frontends/dri', 'src/loader',
     'src/gallium/include', 'src/gallium/auxiliary',
     'src/util',
-    'include', '../libdrm/include',
+    'include', 'include/drm-uapi', '../libdrm/include', '../libgpu/include',
+    'src/gbm/main', 'src/gbm/backends/dri',
     'gen', 'gen/mesa', 'gen/mesa/main', 'gen/mesa/glapi/glapi/gen',
     'gen/mesa/program', 'gen/compiler/glsl', 'gen/compiler/glsl/glcpp',
 )
@@ -681,7 +682,8 @@ _MESA_FRONT_INCS = (
     'src/gallium/drivers', 'src/gallium/drivers/v3d',
     'src/gallium/winsys', 'src/gallium/winsys/v3d/drm',
     'src/util',
-    'include', '../libdrm/include',
+    'include', 'include/drm-uapi', '../libdrm/include', '../libgpu/include',
+    'src/gbm/main', 'src/gbm/backends/dri',
     'gen', 'gen/mesa', 'gen/mesa/main', 'gen/mesa/glapi/glapi/gen',
     'gen/mesa/program', 'gen/compiler/glsl', 'gen/compiler/glsl/glcpp',
 )
@@ -713,10 +715,10 @@ target("EGL")
 set_kind("shared")
 add_packages(get_config('default_libc'))
 add_deps('gcc')
-add_deps('v3d_dri')
+add_deps('v3d_dri', 'gpuclient', 'gbm')
 add_cflags(_MESA_FRONT_DEFS +
-           ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DUSE_LIBGLVND=0 '
-           ' -D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_SURFACELESS ')
+           ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DHAVE_DRM_PLATFORM -DUSE_LIBGLVND=0 '
+           ' -D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_SURFACELESS -include drm.h ')
 add_includedirs(*_MESA_FRONT_INCS)
 add_includedirs('src/egl', 'src/egl/main')
 _egl_srcs = [f for f in _glob_files('src/egl/main/*.c')
@@ -726,6 +728,7 @@ add_files(
     'src/egl/drivers/dri2/egl_dri2.c',
     'src/egl/drivers/dri2/platform_device.c',
     'src/egl/drivers/dri2/platform_surfaceless.c',
+    'src/egl/drivers/dri2/platform_drm.c',
 )
 
 # ---- libGLESv2.so：GLES2 公共入口（glapi dispatch stubs）----
@@ -737,3 +740,35 @@ add_deps('v3d_dri')
 add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 ')
 add_includedirs(*_MESA_FRONT_INCS)
 add_files('src/mesa/glapi/es2api/libgles2_public.c')
+
+# ==========================================================================
+# GBM：Mesa 上游 src/gbm（不改源码，只加构建 target）
+# 用途：EGL_PLATFORM_GBM / _EGL_PLATFORM_DRM + weston gl-renderer
+# ==========================================================================
+_GBM_INCS = _MESA_FRONT_INCS + (
+    'src/gbm/main', 'src/gbm/backends/dri',
+    'src/gallium/auxiliary/pipe-loader',
+)
+
+target("gbm")
+set_kind("shared")
+add_packages(get_config('default_libc'))
+add_deps('gcc')
+add_deps('v3d_dri', 'drm', 'gpuclient')
+add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DHAVE_DRM_PLATFORM -include drm.h ')
+add_includedirs(*_GBM_INCS)
+add_cflags('-DDEFAULT_BACKENDS_PATH="/lib/gbm"')
+add_files(
+    'src/gbm/main/backend.c',
+    'src/gbm/main/gbm.c',
+)
+
+target("dri_gbm")
+set_kind("shared")
+set_filename("dri_gbm")
+add_packages(get_config('default_libc'))
+add_deps('gcc')
+add_deps('v3d_dri', 'gbm', 'drm', 'gpuclient', 'zlib')
+add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DHAVE_DRM_PLATFORM -include drm.h ')
+add_includedirs(*_GBM_INCS)
+add_files('src/gbm/backends/dri/gbm_dri.c')
