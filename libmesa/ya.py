@@ -757,7 +757,7 @@ add_deps('gcc')
 add_deps('v3d_dri', 'drm', 'gpuclient')
 add_cflags(_MESA_FRONT_DEFS + ' -fPIC -std=gnu11 -DHAVE_LIBDRM -DHAVE_DRM_PLATFORM -include drm.h ')
 add_includedirs(*_GBM_INCS)
-add_cflags('-DDEFAULT_BACKENDS_PATH="/lib/gbm"')
+add_cflags('-DDEFAULT_BACKENDS_PATH="/lib"')
 add_files(
     'src/gbm/main/backend.c',
     'src/gbm/main/gbm.c',

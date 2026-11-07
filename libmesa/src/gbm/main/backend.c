@@ -112,6 +112,8 @@ load_backend_by_name(const char *name, int fd, bool warn_on_fail)
                                       DEFAULT_BACKENDS_PATH,
                                       warn_on_fail);
 
+   printf("gbm: backend '%s' lib=%p path=%s\n", name, lib,
+          DEFAULT_BACKENDS_PATH);
    if (!lib)
       return NULL;
 
@@ -126,6 +128,9 @@ load_backend_by_name(const char *name, int fd, bool warn_on_fail)
       goto fail;
 
    gbm_backend = get_backend(&gbm_core);
+   printf("gbm: backend '%s' sym=%p backend=%p ver=%u\n",
+          name, (void*)get_backend, (void*)gbm_backend,
+          gbm_backend ? gbm_backend->v0.backend_version : 0);
    backend_desc = create_backend_desc(name, gbm_backend, lib);
 
    if (!backend_desc)
@@ -133,6 +138,7 @@ load_backend_by_name(const char *name, int fd, bool warn_on_fail)
 
    dev = backend_create_device(backend_desc, fd);
 
+   printf("gbm: backend '%s' create_device=%p\n", name, (void*)dev);
    if (!dev)
       free_backend_desc(backend_desc);
 

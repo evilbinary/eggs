@@ -264,10 +264,14 @@ dri_screen_create_for_driver(struct gbm_dri_device *dri, char *driver_name, bool
    dri->swrast = swrast;
 
    dri->loader_extensions = gbm_dri_screen_extensions;
+   fprintf(stderr, "gbm_dri: create screen name=%s fd=%d swrast=%d\n",
+           dri->driver_name, dri->base.v0.fd, swrast);
    dri->screen = driCreateNewScreen3(0, swrast ? -1 : dri->base.v0.fd,
                                              dri->loader_extensions,
                                              type,
                                              &dri->driver_configs, driver_name_is_inferred, true, dri);
+   fprintf(stderr, "gbm_dri: screen=%p configs=%p\n", (void*)dri->screen,
+           (void*)dri->driver_configs);
    if (dri->screen == NULL)
       goto fail;
 
