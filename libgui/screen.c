@@ -30,6 +30,7 @@ screen_info_t gscreen;
 /* Wayland 上屏后端（screen_wayland.c）。非 Wayland 构建时是空实现。 */
 int screen_wayland_init(int w, int h);
 void screen_wayland_present(uint32_t *canvas, int w, int h);
+void screen_wayland_set_title(const char *title);
 void screen_wayland_shutdown(void);
 
 /* 用户态耗时：用 xwin_get_ticks（与内核 schedule tick 一致，1tick=1ms@1kHz） */
@@ -695,12 +696,33 @@ void screen_show_bmp_picture(i32 x, i32 y, void *bmp_addr, i32 mask_color,
   }
 }
 
+/* 【唯一的人为设定入口】只读 YIYIYA_GUI，不做自动探测。 */
+screen_mode_t screen_mode_from_env(screen_mode_t fallback) {
+  const char *v = getenv("YIYIYA_GUI");
+  if (v == NULL || v[0] == '\0') {
+    return fallback;
+  }
+  if (strcmp(v, "wayland") == 0) {
+    return SCREEN_MODE_WAYLAND;
+  }
+  if (strcmp(v, "fb") == 0) {
+    return SCREEN_MODE_FB;
+  }
+  if (strcmp(v, "xwin") == 0) {
+    return SCREEN_MODE_XWIN;
+  }
+  if (strcmp(v, "xwin_buffer") == 0 || strcmp(v, "xwin-buffer") == 0) {
+    return SCREEN_MODE_XWIN_BUFFER;
+  }
+  return fallback;
+}
+
 void screen_init() {
-  screen_init_with_mode(SCREEN_MODE_XWIN);
+  screen_init_with_mode(screen_mode_from_env(SCREEN_MODE_XWIN));
 }
 
 void screen_init_buffer(void) {
-  screen_init_with_mode(SCREEN_MODE_XWIN_BUFFER);
+  screen_init_with_mode(screen_mode_from_env(SCREEN_MODE_XWIN_BUFFER));
 }
 
 /* 【硬件 fb 的真实格式】优先用驱动申报的 format；未申报(0)时按 bpp 推断
@@ -1179,6 +1201,9 @@ screen_mode_t screen_get_mode(void) {
 void screen_set_title(const char* title) {
   if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
     xwin_set_title(gscreen.xwin_handle, title);
+  }
+  if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
+    screen_wayland_set_title(title);
   }
 }
 

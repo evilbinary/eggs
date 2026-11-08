@@ -145,6 +145,15 @@ void screen_set_mode(screen_mode_t mode);
 screen_mode_t screen_get_mode(void);
 void screen_init_with_mode(screen_mode_t mode);
 
+/* 【人为设定的 GUI 环境变量】只读取 YIYIYA_GUI，不做任何自动探测：
+ *   YIYIYA_GUI=fb            → SCREEN_MODE_FB
+ *   YIYIYA_GUI=xwin          → SCREEN_MODE_XWIN
+ *   YIYIYA_GUI=xwin_buffer   → SCREEN_MODE_XWIN_BUFFER
+ *   YIYIYA_GUI=wayland       → SCREEN_MODE_WAYLAND
+ * 未设置或值不认识时用 fallback。screen_init()/screen_init_buffer()
+ * 默认走这个选择。 */
+screen_mode_t screen_mode_from_env(screen_mode_t fallback);
+
 // 窗口 API
 void screen_set_title(const char* title);
 void screen_set_size(u32 width, u32 height);
