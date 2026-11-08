@@ -25,6 +25,17 @@ add_includedirs(
 
 add_cflags("-O2")
 
+# SCREEN_MODE_WAYLAND：libgui 内部直接用 wl_shm 上屏。
+# 只有开 --wayland 时才带 libwayland 依赖；其它平台不引入。
+if has_config("wayland"):
+    add_cflags("-DENABLE_WAYLAND")
+    add_deps("wayland")
+    add_includedirs('../wayland-protocols/gen', public=True)
+    add_files(
+        'screen_wayland.c',
+        '../wayland-protocols/gen/xdg-shell-protocol.c',
+    )
+
 target("image")
 set_kind("static")
 

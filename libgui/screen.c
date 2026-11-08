@@ -27,6 +27,11 @@
 
 screen_info_t gscreen;
 
+/* Wayland 上屏后端（screen_wayland.c）。非 Wayland 构建时是空实现。 */
+int screen_wayland_init(int w, int h);
+void screen_wayland_present(uint32_t *canvas, int w, int h);
+void screen_wayland_shutdown(void);
+
 /* 用户态耗时：用 xwin_get_ticks（与内核 schedule tick 一致，1tick=1ms@1kHz） */
 static u32 screen_now_ms(void) { return xwin_get_ticks(); }
 
@@ -955,6 +960,45 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.canvas_fmt = FB_FMT_ARGB8888;
   }
 
+  /* 【Wayland 模式】不碰 /dev/fb、不建 xwin 窗口：只分配一块 ARGB8888
+   * 画布，应用在自己的 Wayland 客户端里读 screen_info()->buffer 上屏。
+   * 尺寸优先用 screen_set_size() 预先设置的值，否则默认 640x480。 */
+  if (mode == SCREEN_MODE_WAYLAND) {
+    if (gscreen.width <= 0) {
+      gscreen.width = 640;
+    }
+    if (gscreen.height <= 0) {
+      gscreen.height = 480;
+    }
+    gscreen.canvas_fmt = FB_FMT_ARGB8888;
+    gscreen.bpp = 32;
+    gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+    /* 之前 screen_set_size() 可能已经分配过画布；别泄漏，也别误 free fb。 */
+    if (gscreen.buffer != NULL &&
+        gscreen.buffer != (u32 *)gscreen.fb.frambuffer) {
+      free(gscreen.buffer);
+    }
+    gscreen.buffer = malloc(gscreen.buffer_length);
+    if (gscreen.buffer != NULL) {
+      memset(gscreen.buffer, 0, gscreen.buffer_length);
+    }
+    gscreen.pbuffer = gscreen.buffer;
+    gscreen.cur.x = 0;
+    gscreen.cur.y = 0;
+    gscreen.ASC = SCREEN_ASCII;
+    gscreen.fd = -1;
+    gscreen.xwin_handle = 0;
+    gscreen.fb.framebuffer_count = 0;
+    printf("screen init wayland canvas %dx%d (%u bytes)\n", gscreen.width,
+           gscreen.height, gscreen.buffer_length);
+    /* 内部直接建 Wayland 窗口；失败也不影响画布（应用仍可画）。 */
+    if (screen_wayland_init(gscreen.width, gscreen.height) != 0) {
+      printf("screen wayland: no compositor, canvas only\n");
+    }
+    event_init();
+    return;
+  }
+
   if (mode == SCREEN_MODE_XWIN || mode == SCREEN_MODE_XWIN_BUFFER) {
     /* 始终读 fb：要分辨率，更要 VA（DIRECT 直绘 LCD） */
     int fbfd = screen_read_fb_info();
@@ -1113,8 +1157,12 @@ void screen_set_mode(screen_mode_t mode) {
     xwin_destroy(gscreen.xwin_handle);
     gscreen.xwin_handle = 0;
   }
+  if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
+    screen_wayland_shutdown();
+  }
   if (gscreen.buffer && (gscreen.screen_mode == SCREEN_MODE_XWIN ||
-       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER) &&
+       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER ||
+       gscreen.screen_mode == SCREEN_MODE_WAYLAND) &&
       gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
     free(gscreen.buffer);
     gscreen.buffer = NULL;
@@ -1219,6 +1267,12 @@ static void screen_canvas32_to_nv12(u8 *dst, const u32 *src, int w, int h) {
 
 void screen_flush() {
   u32 t0, t1;
+
+  /* Wayland 模式：把 libgui 画布交给内部 Wayland 后端（wl_shm）上屏。 */
+  if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
+    screen_wayland_present(gscreen.buffer, gscreen.width, gscreen.height);
+    return;
+  }
 
   /* XWIN 模式（DIRECT / BUFFER） */
   if (gscreen.screen_mode == SCREEN_MODE_XWIN ||

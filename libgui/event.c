@@ -179,6 +179,13 @@ int event_init() {
   event_info.input_fd = -1;
   event_info.joystick_fd = -1;
   event_info.mouse_fd = -1;
+  /* Wayland 模式：事件由应用自己的 Wayland 客户端处理，不打开
+   * /dev/joystick、/dev/keyboard（阻塞 read 会把主循环卡死）。 */
+  if (screen_get_mode() == SCREEN_MODE_WAYLAND) {
+    event_info.xwin_mode = 0;
+    return 1;
+  }
+
   /* XWIN 与 XWIN_BUFFER 都走 xwin 事件路径（xwin_get_event 非阻塞）；
    * 否则会落入 /dev/mouse 阻塞 read，导致主循环卡死、屏幕黑屏。 */
   event_info.xwin_mode = (screen_get_mode() == SCREEN_MODE_XWIN ||

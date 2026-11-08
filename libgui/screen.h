@@ -26,7 +26,11 @@ extern "C" {
 typedef enum {
   SCREEN_MODE_FB = 0,    // 直接 framebuffer 模式
   SCREEN_MODE_XWIN = 1,  // xwin DIRECT 模式 (buffer=LCD FB, 零拷贝)
-  SCREEN_MODE_XWIN_BUFFER = 2  // xwin buffer 模式 (cached buffer + blit)
+  SCREEN_MODE_XWIN_BUFFER = 2,  // xwin buffer 模式 (cached buffer + blit)
+  /* Wayland：libgui 只维护一块 ARGB8888 画布（screen_info()->buffer），
+   * 由应用自己的 Wayland 客户端每帧读取并提交到 wl_surface。
+   * screen_flush() 在本模式下是空操作。 */
+  SCREEN_MODE_WAYLAND = 3
 } screen_mode_t;
 
 struct screen_point_t {
