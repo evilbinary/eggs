@@ -43,12 +43,16 @@ void xwin_blit(xwin_handle_t win, i32 x, i32 y, const u32* data, u32 w, u32 h);
 
 // 事件
 int xwin_get_event(void* event);
+/* 只取属于 win 的事件；队列里其它窗口的事件会留在队列里。 */
+int xwin_get_event_for(xwin_handle_t win, void* event);
 void xwin_process_events(void);
 
 // 渲染
 void xwin_render(void);
 void xwin_update(xwin_handle_t win);
 u32* xwin_get_fb(xwin_handle_t win);
+/* 窗口客户区缓冲（不含装饰），可零拷贝直接画。 */
+u32* xwin_get_window_fb(xwin_handle_t win);
 u32 xwin_get_ticks(void);
 
 // ========== Syscall 编号 ==========
@@ -75,6 +79,11 @@ u32 xwin_get_ticks(void);
 #define SYS_XWIN_UPDATE        (SYS_XWIN_BASE + 23)
 #define SYS_XWIN_GET_FB        (SYS_XWIN_BASE + 24) /* 返回窗口/LCD VA */
 #define SYS_XWIN_GET_TICKS     (SYS_XWIN_BASE + 25) /* schedule ticks */
+#define SYS_XWIN_GET_DECOR     (SYS_XWIN_BASE + 26) /* title<<16 | border */
+#define SYS_XWIN_GET_WINDOW_FB (SYS_XWIN_BASE + 27) /* 窗口客户区缓冲 VA */
+
+/* 当前主题的窗口装饰尺寸（客户区偏移）。低 16 位边框，高 16 位标题栏。 */
+u32 xwin_get_decor(void);
 
 
 

@@ -30,7 +30,12 @@ typedef enum {
   /* Wayland：libgui 只维护一块 ARGB8888 画布（screen_info()->buffer），
    * 由应用自己的 Wayland 客户端每帧读取并提交到 wl_surface。
    * screen_flush() 在本模式下是空操作。 */
-  SCREEN_MODE_WAYLAND = 3
+  SCREEN_MODE_WAYLAND = 3,
+  /* xwin 多窗口：创建一个带内核装饰（标题栏/边框/拖拽）的普通窗口，
+   * 画布直接指向窗口客户区缓冲（零拷贝），screen_flush() 只提交。 */
+  SCREEN_MODE_XWIN_WINDOW = 4,
+  /* 同上，但 libgui 自己维护画布，flush 时 xwin_blit 到窗口缓冲。 */
+  SCREEN_MODE_XWIN_WINDOW_BUFFER = 5
 } screen_mode_t;
 
 struct screen_point_t {
@@ -66,6 +71,9 @@ typedef struct screen_info {
   framebuffer_info_t fb;
   screen_mode_t screen_mode;     // 当前模式
   u32 xwin_handle;               // xwin 模式下的窗口句柄
+  /* XWIN_WINDOW / XWIN_WINDOW_BUFFER：客户区在窗口内的偏移
+   * （边框、标题栏）。其它模式恒为 0。 */
+  i32 content_x, content_y;
   /* 【画布格式（应用侧）】应用按这个格式画 buffer。默认 ARGB8888（与历史
    * 行为一致：缓冲按 w*h*4 分配、像素按 0xAARRGGBB 写）。
    * flush 时若与硬件 fb 的格式不一致，libgui 自动选对应的转换器提交。 */
@@ -149,6 +157,8 @@ void screen_init_with_mode(screen_mode_t mode);
  *   YIYIYA_GUI=fb            → SCREEN_MODE_FB
  *   YIYIYA_GUI=xwin          → SCREEN_MODE_XWIN
  *   YIYIYA_GUI=xwin_buffer   → SCREEN_MODE_XWIN_BUFFER
+ *   YIYIYA_GUI=xwin_window   → SCREEN_MODE_XWIN_WINDOW
+ *   YIYIYA_GUI=xwin_window_buffer → SCREEN_MODE_XWIN_WINDOW_BUFFER
  *   YIYIYA_GUI=wayland       → SCREEN_MODE_WAYLAND
  * 未设置或值不认识时用 fallback。screen_init()/screen_init_buffer()
  * 默认走这个选择。 */

@@ -57,17 +57,32 @@ typedef struct xwin_event {
 #define XEVENT_KEY_DOWN 7
 #define XEVENT_KEY_UP 8
 
+/* 内核事件坐标是"窗口内"的；画布坐标要去掉装饰偏移（窗口模式），
+ * 再保持 libgui 原有的 Y 方向约定。 */
+static void xwin_mouse_pos(xwin_event_t* xevt, i32* x, i32* y) {
+  screen_info_t* s = screen_info();
+  i32 mx = xevt->data.mouse.x - s->content_x;
+  i32 my = xevt->data.mouse.y - s->content_y;
+
+  if (mx < 0) mx = 0;
+  if (my < 0) my = 0;
+  if (s->width > 0 && mx >= s->width) mx = s->width - 1;
+  if (s->height > 0 && my >= s->height) my = s->height - 1;
+  *x = mx;
+  *y = s->height - my;
+}
+
 static int xwin_translate_event(event_t* event) {
   xwin_event_t xevt;
-  if (xwin_get_event(&xevt) <= 0) {
+  /* 多窗口：只取属于本窗口的事件，避免吃掉其它窗口的事件。 */
+  if (xwin_get_event_for(screen_info()->xwin_handle, &xevt) <= 0) {
     return 0;
   }
 
   switch (xevt.type) {
     case XEVENT_MOUSE_MOVE:
       xwin_mouse_state.sate = xevt.data.mouse.button & BUTTON_MASK;
-      xwin_mouse_state.x = xevt.data.mouse.x;
-      xwin_mouse_state.y = screen_info()->height - xevt.data.mouse.y;
+      xwin_mouse_pos(&xevt, &xwin_mouse_state.x, &xwin_mouse_state.y);
       xwin_mouse_dirty = 1;
       if (event != NULL) {
         event->type = MOUSE_MOTION;
@@ -77,8 +92,7 @@ static int xwin_translate_event(event_t* event) {
     case XEVENT_MOUSE_DOWN:
       xwin_mouse_state.sate = xevt.data.mouse.button & BUTTON_MASK;
       last_button = xwin_mouse_state.sate;
-      xwin_mouse_state.x = xevt.data.mouse.x;
-      xwin_mouse_state.y = screen_info()->height - xevt.data.mouse.y;
+      xwin_mouse_pos(&xevt, &xwin_mouse_state.x, &xwin_mouse_state.y);
       xwin_mouse_dirty = 1;
       if (event != NULL) {
         event->type = MOUSE_BUTTON_DOWN;
@@ -90,8 +104,7 @@ static int xwin_translate_event(event_t* event) {
           (xevt.data.mouse.button & BUTTON_MASK)
               ? (xevt.data.mouse.button & BUTTON_MASK)
               : last_button;
-      xwin_mouse_state.x = xevt.data.mouse.x;
-      xwin_mouse_state.y = screen_info()->height - xevt.data.mouse.y;
+      xwin_mouse_pos(&xevt, &xwin_mouse_state.x, &xwin_mouse_state.y);
       xwin_mouse_dirty = 1;
       if (event != NULL) {
         event->type = MOUSE_BUTTON_UP;
@@ -186,10 +199,12 @@ int event_init() {
     return 1;
   }
 
-  /* XWIN 与 XWIN_BUFFER 都走 xwin 事件路径（xwin_get_event 非阻塞）；
+  /* XWIN / XWIN_BUFFER / XWIN_WINDOW 都走 xwin 事件路径（非阻塞）；
    * 否则会落入 /dev/mouse 阻塞 read，导致主循环卡死、屏幕黑屏。 */
   event_info.xwin_mode = (screen_get_mode() == SCREEN_MODE_XWIN ||
-                          screen_get_mode() == SCREEN_MODE_XWIN_BUFFER);
+                          screen_get_mode() == SCREEN_MODE_XWIN_BUFFER ||
+                          screen_get_mode() == SCREEN_MODE_XWIN_WINDOW ||
+                          screen_get_mode() == SCREEN_MODE_XWIN_WINDOW_BUFFER);
 
   if (event_info.xwin_mode) {
     printf("event init xwin mode\n");

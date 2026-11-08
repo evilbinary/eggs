@@ -120,6 +120,11 @@ int xwin_get_event(void* event) {
   return (int)xwin_syscall(SYS_XWIN_GET_EVENT, (long)event, 0, 0, 0, 0, 0);
 }
 
+int xwin_get_event_for(xwin_handle_t win, void* event) {
+  return (int)xwin_syscall(SYS_XWIN_GET_EVENT, (long)event, (long)win, 0, 0, 0,
+                           0);
+}
+
 void xwin_process_events(void) {
   xwin_syscall(SYS_XWIN_PROCESS_EVENTS, 0, 0, 0, 0, 0, 0);
 }
@@ -135,6 +140,19 @@ u32* xwin_get_fb(xwin_handle_t win) {
                                        0);
 }
 
+u32* xwin_get_window_fb(xwin_handle_t win) {
+  long ret = xwin_syscall(SYS_XWIN_GET_WINDOW_FB, (long)win, 0, 0, 0, 0, 0);
+  if (ret < 0) {
+    return NULL;
+  }
+  return (u32*)(uintptr_t)ret;
+}
+
 u32 xwin_get_ticks(void) {
   return (u32)xwin_syscall(SYS_XWIN_GET_TICKS, 0, 0, 0, 0, 0, 0);
+}
+
+u32 xwin_get_decor(void) {
+  long ret = xwin_syscall(SYS_XWIN_GET_DECOR, 0, 0, 0, 0, 0, 0);
+  return ret < 0 ? 0 : (u32)ret;
 }

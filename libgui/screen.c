@@ -28,6 +28,8 @@
 #include "screen_wayland.h"
 
 screen_info_t gscreen;
+/* XWIN_WINDOW（零拷贝）时 buffer 指向内核窗口缓冲，不能 free。 */
+static int g_win_buffer_direct;
 
 
 /* 用户态耗时：用 xwin_get_ticks（与内核 schedule tick 一致，1tick=1ms@1kHz） */
@@ -711,6 +713,13 @@ screen_mode_t screen_mode_from_env(screen_mode_t fallback) {
   if (strcmp(v, "xwin_buffer") == 0 || strcmp(v, "xwin-buffer") == 0) {
     return SCREEN_MODE_XWIN_BUFFER;
   }
+  if (strcmp(v, "xwin_window") == 0 || strcmp(v, "xwin-window") == 0) {
+    return SCREEN_MODE_XWIN_WINDOW;
+  }
+  if (strcmp(v, "xwin_window_buffer") == 0 ||
+      strcmp(v, "xwin-window-buffer") == 0) {
+    return SCREEN_MODE_XWIN_WINDOW_BUFFER;
+  }
   return fallback;
 }
 
@@ -971,6 +980,8 @@ static int screen_read_fb_info(void) {
 }
 
 void screen_init_with_mode(screen_mode_t mode) {
+  int prev_win_direct = g_win_buffer_direct;
+  g_win_buffer_direct = 0;
   gscreen.screen_mode = mode;
   /* 【画布格式：默认 ARGB8888】与历史行为一致（buffer 按 w*h*4 分配、
    * 像素 0xAARRGGBB）。若硬件 fb 是别的格式（如 Pi5 的 RGB565），
@@ -992,8 +1003,9 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.canvas_fmt = FB_FMT_ARGB8888;
     gscreen.bpp = 32;
     gscreen.buffer_length = gscreen.width * gscreen.height * 4;
-    /* 之前 screen_set_size() 可能已经分配过画布；别泄漏，也别误 free fb。 */
-    if (gscreen.buffer != NULL &&
+    /* 之前 screen_set_size() 可能已经分配过画布；别泄漏，也别误 free fb
+     * 或内核窗口缓冲（XWIN_WINDOW 的 buffer 不归 libgui 管）。 */
+    if (!prev_win_direct && gscreen.buffer != NULL &&
         gscreen.buffer != (u32 *)gscreen.fb.frambuffer) {
       free(gscreen.buffer);
     }
@@ -1007,12 +1019,92 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.ASC = SCREEN_ASCII;
     gscreen.fd = -1;
     gscreen.xwin_handle = 0;
+    gscreen.content_x = 0;
+    gscreen.content_y = 0;
     gscreen.fb.framebuffer_count = 0;
     printf("screen init wayland canvas %dx%d (%u bytes)\n", gscreen.width,
            gscreen.height, gscreen.buffer_length);
     /* 内部直接建 Wayland 窗口；失败也不影响画布（应用仍可画）。 */
     if (screen_wayland_init(gscreen.width, gscreen.height) != 0) {
       printf("screen wayland: no compositor, canvas only\n");
+    }
+    event_init();
+    return;
+  }
+
+  /* 【xwin 多窗口】窗口大小 = 客户区 + 内核装饰；应用只画客户区。
+   *   WINDOW        → 画布直接是窗口客户区缓冲（零拷贝）
+   *   WINDOW_BUFFER → libgui 自己维护画布，flush 时 blit 到窗口缓冲 */
+  if (mode == SCREEN_MODE_XWIN_WINDOW ||
+      mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) {
+    int fbfd = screen_read_fb_info();
+    int scr_w = 640, scr_h = 480;
+    int border, title, win_w, win_h, win_x, win_y;
+    u32 decor;
+
+    if (fbfd >= 0) {
+      close(fbfd);
+    }
+    if (gscreen.fb.width > 0) scr_w = (int)gscreen.fb.width;
+    if (gscreen.fb.height > 0) scr_h = (int)gscreen.fb.height;
+    if (gscreen.width <= 0) gscreen.width = 640;
+    if (gscreen.height <= 0) gscreen.height = 480;
+
+    decor = xwin_get_decor();
+    border = (int)(decor & 0xFFFF);
+    title = (int)((decor >> 16) & 0xFFFF);
+    /* 防止旧内核/失败调用返回垃圾值把窗口尺寸撑爆。 */
+    if (border <= 0 || border > 8) border = 1;
+    if (title <= 0 || title > 64) title = 28;
+
+    win_w = gscreen.width + border * 2;
+    win_h = gscreen.height + title + border;
+    win_x = (scr_w - win_w) / 2;
+    win_y = (scr_h - win_h) / 2;
+    if (win_x < 0) win_x = 0;
+    if (win_y < 0) win_y = 0;
+
+    if (!prev_win_direct && gscreen.buffer != NULL &&
+        gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
+      free(gscreen.buffer);
+    }
+    gscreen.buffer = NULL;
+    gscreen.canvas_fmt = FB_FMT_ARGB8888;
+    gscreen.bpp = 32;
+    gscreen.buffer_length = gscreen.width * gscreen.height * 4;
+    gscreen.cur.x = 0;
+    gscreen.cur.y = 0;
+    gscreen.ASC = SCREEN_ASCII;
+    gscreen.fd = -1;
+    gscreen.fb.framebuffer_count = 0;
+    gscreen.content_x = border;
+    gscreen.content_y = title;
+    gscreen.xwin_handle = xwin_create_flags(win_x, win_y, win_w, win_h, "", 0);
+    if (gscreen.xwin_handle == 0) {
+      printf("screen init xwin window %dx%d failed\n", win_w, win_h);
+    } else {
+      xwin_set_bg_color(gscreen.xwin_handle, 0xFF1E1E1E);
+      if (mode == SCREEN_MODE_XWIN_WINDOW) {
+        gscreen.buffer = xwin_get_window_fb(gscreen.xwin_handle);
+        if (gscreen.buffer != NULL) {
+          memset(gscreen.buffer, 0, gscreen.buffer_length);
+          g_win_buffer_direct = 1;
+        }
+      }
+      if (gscreen.buffer == NULL) {
+        /* 零拷贝映射失败或本来就是 buffer 模式：退回应用画布 + blit。 */
+        if (mode == SCREEN_MODE_XWIN_WINDOW) {
+          gscreen.screen_mode = mode = SCREEN_MODE_XWIN_WINDOW_BUFFER;
+        }
+        gscreen.buffer = malloc(gscreen.buffer_length);
+        if (gscreen.buffer != NULL) {
+          memset(gscreen.buffer, 0, gscreen.buffer_length);
+        }
+      }
+      gscreen.pbuffer = gscreen.buffer;
+      printf("screen init xwin %s %dx%d content %dx%d at %d,%d\n",
+             mode == SCREEN_MODE_XWIN_WINDOW ? "window" : "window-buffer",
+             win_w, win_h, gscreen.width, gscreen.height, win_x, win_y);
     }
     event_init();
     return;
@@ -1048,6 +1140,8 @@ void screen_init_with_mode(screen_mode_t mode) {
     gscreen.cur.y = 0;
     gscreen.ASC = SCREEN_ASCII;
     gscreen.fd = -1;
+    gscreen.content_x = 0;
+    gscreen.content_y = 0;
     /* XWIN 不用 /dev/fb flush，避免 fd=-1 时误走 FB ioctl */
     gscreen.fb.framebuffer_count = 0;
 
@@ -1137,6 +1231,8 @@ void screen_init_with_mode(screen_mode_t mode) {
   gscreen.bpp = gscreen.fb.bpp > 0 ? gscreen.fb.bpp : 32;
   gscreen.fd = fd;
   gscreen.xwin_handle = 0;
+  gscreen.content_x = 0;
+  gscreen.content_y = 0;
   gscreen.cur.x = 0;
   gscreen.cur.y = 0;
   gscreen.ASC = SCREEN_ASCII;
@@ -1171,7 +1267,9 @@ void screen_set_mode(screen_mode_t mode) {
 
   // 销毁旧模式的资源
   if ((gscreen.screen_mode == SCREEN_MODE_XWIN ||
-       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER) &&
+       gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) &&
       gscreen.xwin_handle) {
     xwin_destroy(gscreen.xwin_handle);
     gscreen.xwin_handle = 0;
@@ -1179,8 +1277,10 @@ void screen_set_mode(screen_mode_t mode) {
   if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
     screen_wayland_shutdown();
   }
+  /* 注意：XWIN_WINDOW 的 buffer 指向内核窗口缓冲，不能 free。 */
   if (gscreen.buffer && (gscreen.screen_mode == SCREEN_MODE_XWIN ||
        gscreen.screen_mode == SCREEN_MODE_XWIN_BUFFER ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER ||
        gscreen.screen_mode == SCREEN_MODE_WAYLAND) &&
       gscreen.buffer != (u32*)gscreen.fb.frambuffer) {
     free(gscreen.buffer);
@@ -1196,7 +1296,10 @@ screen_mode_t screen_get_mode(void) {
 }
 
 void screen_set_title(const char* title) {
-  if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
+  if ((gscreen.screen_mode == SCREEN_MODE_XWIN ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) &&
+      gscreen.xwin_handle) {
     xwin_set_title(gscreen.xwin_handle, title);
   }
   if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
@@ -1205,6 +1308,18 @@ void screen_set_title(const char* title) {
 }
 
 void screen_set_size(u32 width, u32 height) {
+  if ((gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
+       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) &&
+      gscreen.xwin_handle) {
+    /* 窗口模式：按新的客户区尺寸重建窗口/画布。 */
+    screen_mode_t mode = gscreen.screen_mode;
+    xwin_destroy(gscreen.xwin_handle);
+    gscreen.xwin_handle = 0;
+    gscreen.width = width;
+    gscreen.height = height;
+    screen_init_with_mode(mode);
+    return;
+  }
   if (gscreen.screen_mode == SCREEN_MODE_XWIN && gscreen.xwin_handle) {
     // 已经初始化，重新创建窗口
     xwin_destroy(gscreen.xwin_handle);
@@ -1293,6 +1408,34 @@ void screen_flush() {
   /* Wayland 模式：把 libgui 画布交给内部 Wayland 后端（wl_shm）上屏。 */
   if (gscreen.screen_mode == SCREEN_MODE_WAYLAND) {
     screen_wayland_present(gscreen.buffer, gscreen.width, gscreen.height);
+    return;
+  }
+
+  /* 【xwin 多窗口】装饰与合成交给内核 WM。 */
+  if (gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
+      gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) {
+    if (gscreen.xwin_handle == 0 || gscreen.buffer == NULL) {
+      return;
+    }
+    if (gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) {
+      /* 应用画布 → 窗口客户区缓冲（内容放在 (0,0)）。 */
+      t0 = screen_now_ms();
+      xwin_blit(gscreen.xwin_handle, 0, 0, (const u32*)gscreen.buffer,
+                gscreen.width, gscreen.height);
+      t1 = screen_now_ms();
+      g_acc_blit_ms += t1 - t0;
+    }
+
+    t0 = screen_now_ms();
+    xwin_update(gscreen.xwin_handle);
+    t1 = screen_now_ms();
+    g_acc_update_ms += t1 - t0;
+
+    t0 = t1;
+    xwin_render();
+    t1 = screen_now_ms();
+    g_acc_render_ms += t1 - t0;
+    screen_stats_frame_done();
     return;
   }
 
