@@ -256,12 +256,19 @@ int screen_wayland_init(int w, int h) {
   wl.win_w = w;
   wl.win_h = h;
   wl.stride = (uint32_t)w * 4;
+  /* weston 没带 --socket 时从 wayland-1 开始编号；不能只试 wayland-0。 */
   wl.display = wl_display_connect(NULL);
   if (!wl.display) {
-    /* 本系统 weston 的 socket 固定在 /lib/wayland-0；如果 shell/老内核给
-     * 的还是 XDG_RUNTIME_DIR=/tmp，这里切到 /lib 再试一次。 */
     setenv("XDG_RUNTIME_DIR", "/lib", 1);
     wl.display = wl_display_connect(NULL);
+  }
+  if (!wl.display) {
+    char name[32];
+    int n;
+    for (n = 0; n < 10 && !wl.display; n++) {
+      snprintf(name, sizeof(name), "wayland-%d", n);
+      wl.display = wl_display_connect(name);
+    }
   }
   if (!wl.display) {
     printf("screen wayland: wl_display_connect failed (XDG_RUNTIME_DIR=%s)\n",
@@ -405,6 +412,7 @@ void screen_wayland_shutdown(void) {
 int screen_wayland_init(int w, int h) {
   (void)w;
   (void)h;
+  printf("screen wayland: libgui built WITHOUT --wayland (stub)\n");
   return -1;
 }
 void screen_wayland_present(uint32_t *canvas, int w, int h) {
