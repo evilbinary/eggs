@@ -11,6 +11,7 @@
 #include "image.h"
 #include "stdarg.h"
 #include "stdio.h"
+#include "stdlib.h"
 #include "string.h"
 #include "time.h"
 #include "unistd.h"
@@ -1402,6 +1403,48 @@ static void screen_canvas32_to_nv12(u8 *dst, const u32 *src, int w, int h) {
 
 #endif
 
+/* XWIN_WINDOW / XWIN_WINDOW_BUFFER：每帧处理 CLOSE / RESIZE 系统事件。
+ * 鼠标/键盘事件不会被取走，仍留给应用自己的 event_read_*。 */
+static void screen_xwin_handle_sys(void) {
+  xwin_event_t ev;
+
+  while (gscreen.xwin_handle != 0 &&
+         xwin_get_sys_event(gscreen.xwin_handle, &ev) > 0) {
+    if (ev.type == XEVENT_CLOSE) {
+      xwin_destroy(gscreen.xwin_handle);
+      gscreen.xwin_handle = 0;
+      exit(0);
+    }
+    if (ev.type == XEVENT_RESIZE) {
+      int border = gscreen.content_x;
+      int title = gscreen.content_y;
+      int cw = (int)ev.data.resize.width - border * 2;
+      int ch = (int)ev.data.resize.height - title - border;
+      if (cw <= 0) cw = 1;
+      if (ch <= 0) ch = 1;
+      if (cw == gscreen.width && ch == gscreen.height) {
+        continue;
+      }
+      gscreen.width = cw;
+      gscreen.height = ch;
+      gscreen.buffer_length = cw * ch * 4;
+      if (gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW) {
+        u32* fb = xwin_get_window_fb(gscreen.xwin_handle);
+        if (fb != NULL) {
+          gscreen.buffer = fb;
+        }
+      } else {
+        u32* nb = realloc(gscreen.buffer, gscreen.buffer_length);
+        if (nb != NULL) {
+          gscreen.buffer = nb;
+          memset(gscreen.buffer, 0, gscreen.buffer_length);
+        }
+      }
+      gscreen.pbuffer = gscreen.buffer;
+    }
+  }
+}
+
 void screen_flush() {
   u32 t0, t1;
 
@@ -1414,6 +1457,7 @@ void screen_flush() {
   /* 【xwin 多窗口】装饰与合成交给内核 WM。 */
   if (gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) {
+    screen_xwin_handle_sys();
     if (gscreen.xwin_handle == 0 || gscreen.buffer == NULL) {
       return;
     }
@@ -1435,6 +1479,10 @@ void screen_flush() {
     xwin_render();
     t1 = screen_now_ms();
     g_acc_render_ms += t1 - t0;
+
+    /* render 里的 xinput_poll 可能刚处理了拖拽 resize/最大化：必须在
+     * 应用下一帧 draw 之前把新尺寸/新缓冲取回来。 */
+    screen_xwin_handle_sys();
     screen_stats_frame_done();
     return;
   }

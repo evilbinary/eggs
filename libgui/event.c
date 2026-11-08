@@ -30,32 +30,7 @@ u8 alt_p = 0;
 u32 col = 0;
 u32 row = 0;
 
-typedef struct xwin_event {
-  u32 type;
-  u32 window_id;
-  u32 time;
-  union {
-    struct {
-      i32 x, y;
-      i32 rel_x, rel_y;
-      u32 button;
-      i32 wheel;
-    } mouse;
-    struct {
-      u32 keycode;
-      u32 scancode;
-      u32 mods;
-      u32 pressed;
-      char ch;
-    } key;
-  } data;
-} xwin_event_t;
-
-#define XEVENT_MOUSE_MOVE 1
-#define XEVENT_MOUSE_DOWN 2
-#define XEVENT_MOUSE_UP 3
-#define XEVENT_KEY_DOWN 7
-#define XEVENT_KEY_UP 8
+/* xwin_event_t / XEVENT_* 统一放在 xwin_user.h。 */
 
 /* 内核事件坐标是"窗口内"的；画布坐标要去掉装饰偏移（窗口模式），
  * 再保持 libgui 原有的 Y 方向约定。 */

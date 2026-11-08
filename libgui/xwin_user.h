@@ -42,9 +42,48 @@ void xwin_draw_text(xwin_handle_t win, i32 x, i32 y, const char* text, u32 color
 void xwin_blit(xwin_handle_t win, i32 x, i32 y, const u32* data, u32 w, u32 h);
 
 // 事件
+typedef struct xwin_event {
+  u32 type;
+  u32 window_id;
+  u32 time;
+  union {
+    struct {
+      i32 x, y;
+      i32 rel_x, rel_y;
+      u32 button;
+      i32 wheel;
+    } mouse;
+    struct {
+      u32 keycode;
+      u32 scancode;
+      u32 mods;
+      u32 pressed;
+      char ch;
+    } key;
+    struct {
+      u32 width, height;
+      u32 old_width, old_height;
+    } resize;
+    struct {
+      i32 x, y;
+      i32 old_x, old_y;
+    } move;
+  } data;
+} xwin_event_t;
+
+#define XEVENT_MOUSE_MOVE 1
+#define XEVENT_MOUSE_DOWN 2
+#define XEVENT_MOUSE_UP 3
+#define XEVENT_KEY_DOWN 7
+#define XEVENT_KEY_UP 8
+#define XEVENT_RESIZE 11
+#define XEVENT_CLOSE 13
+
 int xwin_get_event(void* event);
 /* 只取属于 win 的事件；队列里其它窗口的事件会留在队列里。 */
 int xwin_get_event_for(xwin_handle_t win, void* event);
+/* 只取 CLOSE/RESIZE 系统事件，鼠标/键盘事件留在队列里。 */
+int xwin_get_sys_event(xwin_handle_t win, void* event);
 void xwin_process_events(void);
 
 // 渲染
@@ -81,6 +120,7 @@ u32 xwin_get_ticks(void);
 #define SYS_XWIN_GET_TICKS     (SYS_XWIN_BASE + 25) /* schedule ticks */
 #define SYS_XWIN_GET_DECOR     (SYS_XWIN_BASE + 26) /* title<<16 | border */
 #define SYS_XWIN_GET_WINDOW_FB (SYS_XWIN_BASE + 27) /* 窗口客户区缓冲 VA */
+#define SYS_XWIN_GET_SYS_EVENT (SYS_XWIN_BASE + 28) /* CLOSE/RESIZE */
 
 /* 当前主题的窗口装饰尺寸（客户区偏移）。低 16 位边框，高 16 位标题栏。 */
 u32 xwin_get_decor(void);

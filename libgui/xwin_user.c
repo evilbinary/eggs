@@ -125,6 +125,11 @@ int xwin_get_event_for(xwin_handle_t win, void* event) {
                            0);
 }
 
+int xwin_get_sys_event(xwin_handle_t win, void* event) {
+  return (int)xwin_syscall(SYS_XWIN_GET_SYS_EVENT, (long)win, (long)event, 0,
+                           0, 0, 0);
+}
+
 void xwin_process_events(void) {
   xwin_syscall(SYS_XWIN_PROCESS_EVENTS, 0, 0, 0, 0, 0, 0);
 }
