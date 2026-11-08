@@ -43,7 +43,7 @@ void theme_manager_destroy(void) {
     // 销毁所有主题
     for (int i = 0; i < g_theme_manager->theme_count; i++) {
         if (g_theme_manager->themes[i]) {
-            theme_destroy(g_theme_manager->themes[i]);
+            yui_theme_destroy(g_theme_manager->themes[i]);
         }
     }
     
@@ -90,7 +90,7 @@ Theme* theme_manager_load_theme(const char* theme_path) {
         int new_capacity = manager->theme_capacity * 2;
         Theme** new_themes = (Theme**)realloc(manager->themes, sizeof(Theme*) * new_capacity);
         if (!new_themes) {
-            theme_destroy(theme);
+            yui_theme_destroy(theme);
             return NULL;
         }
         
@@ -143,7 +143,7 @@ Theme* theme_manager_load_theme_from_json(const char* json_str) {
         int new_capacity = manager->theme_capacity * 2;
         Theme** new_themes = (Theme**)realloc(manager->themes, sizeof(Theme*) * new_capacity);
         if (!new_themes) {
-            theme_destroy(theme);
+            yui_theme_destroy(theme);
             return NULL;
         }
         
@@ -241,7 +241,7 @@ void theme_manager_unload_theme(const char* theme_name) {
             }
             
             // 销毁主题
-            theme_destroy(manager->themes[i]);
+            yui_theme_destroy(manager->themes[i]);
             
             // 从数组中移除
             for (int j = i; j < manager->theme_count - 1; j++) {

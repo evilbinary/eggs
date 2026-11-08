@@ -9,7 +9,7 @@
 #define printf
 
 // 创建主题对象
-Theme* theme_create(const char* name, const char* version) {
+Theme* yui_theme_create(const char* name, const char* version) {
     Theme* theme = (Theme*)malloc(sizeof(Theme));
     if (!theme) {
         return NULL;
@@ -33,7 +33,7 @@ Theme* theme_create(const char* name, const char* version) {
 }
 
 // 销毁主题对象
-void theme_destroy(Theme* theme) {
+void yui_theme_destroy(Theme* theme) {
     if (!theme) {
         return;
     }
@@ -112,7 +112,7 @@ Theme* theme_load_from_json(cJSON* json) {
     }
     
     // 创建主题对象
-    Theme* theme = theme_create(name, version);
+    Theme* theme = yui_theme_create(name, version);
     if (!theme) {
         return NULL;
     }

@@ -44,10 +44,10 @@ typedef struct Theme {
 } Theme;
 
 // 创建主题对象
-Theme* theme_create(const char* name, const char* version);
+Theme* yui_theme_create(const char* name, const char* version);
 
 // 销毁主题对象
-void theme_destroy(Theme* theme);
+void yui_theme_destroy(Theme* theme);
 
 // 从JSON文件加载主题
 Theme* theme_load_from_file(const char* json_path);
