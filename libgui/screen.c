@@ -1457,7 +1457,6 @@ void screen_flush() {
   /* 【xwin 多窗口】装饰与合成交给内核 WM。 */
   if (gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW ||
       gscreen.screen_mode == SCREEN_MODE_XWIN_WINDOW_BUFFER) {
-    screen_xwin_handle_sys();
     if (gscreen.xwin_handle == 0 || gscreen.buffer == NULL) {
       return;
     }
