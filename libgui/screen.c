@@ -25,13 +25,10 @@
 // #define ROTATE_180 1
 #endif
 
+#include "screen_wayland.h"
+
 screen_info_t gscreen;
 
-/* Wayland 上屏后端（screen_wayland.c）。非 Wayland 构建时是空实现。 */
-int screen_wayland_init(int w, int h);
-void screen_wayland_present(uint32_t *canvas, int w, int h);
-void screen_wayland_set_title(const char *title);
-void screen_wayland_shutdown(void);
 
 /* 用户态耗时：用 xwin_get_ticks（与内核 schedule tick 一致，1tick=1ms@1kHz） */
 static u32 screen_now_ms(void) { return xwin_get_ticks(); }

@@ -6,9 +6,11 @@
  *
  * 不依赖 wayland-egl / EGL；纯 wl_shm 上屏。
  */
+#include "screen_wayland.h"
+
 #ifdef ENABLE_WAYLAND
 
-#include <stdint.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -327,7 +329,21 @@ void screen_wayland_present(uint32_t *canvas, int w, int h) {
   if (!wl.configured) {
     wl_display_roundtrip(wl.display);
   }
+  /* 【必须读事件】否则 wl_buffer.release 收不到，busy 永远不清，画面
+   * 会停在第一帧。非阻塞 poll，不拖慢应用主循环。 */
   wl_display_dispatch_pending(wl.display);
+  if (wl_display_prepare_read(wl.display) == 0) {
+    struct pollfd pfd;
+    pfd.fd = wl_display_get_fd(wl.display);
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    if (poll(&pfd, 1, 0) > 0) {
+      wl_display_read_events(wl.display);
+    } else {
+      wl_display_cancel_read(wl.display);
+    }
+    wl_display_dispatch_pending(wl.display);
+  }
   if (!wl.configured || w != wl.width || h != wl.height) {
     return;
   }
@@ -396,6 +412,7 @@ void screen_wayland_present(uint32_t *canvas, int w, int h) {
   (void)w;
   (void)h;
 }
+/* 没开 --wayland 时给空函数，保证 libgui 在其它平台也能正常链接。 */
 void screen_wayland_set_title(const char *title) { (void)title; }
 void screen_wayland_shutdown(void) {}
 

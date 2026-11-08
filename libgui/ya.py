@@ -13,7 +13,10 @@ add_deps("jpeg","png","algorithm")
 add_files(
     'screen.c',
     'event.c',
-    'xwin_user.c'
+    'xwin_user.c',
+    # 不开 --wayland 时只编译文件里的 #else 空实现，
+    # 避免 screen.c 的调用在其它平台变成 undefined reference。
+    'screen_wayland.c',
 )
 
 add_includedirs(
@@ -37,7 +40,6 @@ if has_config("wayland"):
     add_includedirs('../wayland-protocols/gen', '../weston', '../weston/shared',
                     public=True)
     add_files(
-        'screen_wayland.c',
         # eventdemo 同款 CSD
         '../weston/shared/frame.c',
         '../weston/shared/cairo-util.c',
