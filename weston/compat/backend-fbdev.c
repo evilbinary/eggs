@@ -112,6 +112,7 @@ struct fbdev_backend {
 	int fb_width;
 	int fb_height;
 	int fb_stride;
+	int fb_bpp;
 	/* framebuffer 实际像素格式（16bpp=RGB565 / 32bpp=XRGB8888）。
 	 * Pi5 固件即使请求 32bpp 也会给 16bpp（见 bcm2712.c 的 GET_PITCH），
 	 * GL renderer 的 read_format 和 renderbuffer 都用它。 */
@@ -136,6 +137,11 @@ struct fbdev_backend {
 	struct wl_event_source *input_source;
 	int rel_x;
 	int rel_y;
+
+	/* 软件光标上次画在 fb 上的位置，用于 Pixman 路径只重绘光标区域。 */
+	int cursor_x;
+	int cursor_y;
+	int cursor_valid;
 };
 
 struct fbdev_head {
@@ -161,6 +167,100 @@ static inline struct fbdev_output *
 to_fbdev_output(struct weston_output *base)
 {
 	return container_of(base, struct fbdev_output, base);
+}
+
+/* ---- 软件光标 ------------------------------------------------------
+ * 本系统没有 xcursor 主题（/usr/share/icons 不存在），desktop-shell 也就
+ * 不会通过 wl_pointer.set_cursor 给出光标图像，weston 的 cursor_layer 是空
+ * 的。这里在每帧把合成结果写进 /dev/fb0 之后，用 CPU 画一个 16x16 箭头。
+ *
+ * 位置直接取 weston 自己的 pointer->pos，而不是后端另记一份：事件命中、
+ * 抓取、焦点用的都是这个坐标，必须完全一致。pointer->sprite 非空说明
+ * 客户端自己设置了光标（cursor_layer 里有 view，renderer 会画），这时
+ * 就不再叠加软件箭头。
+ */
+static const char fbdev_cursor_arrow[16][17] = {
+	"#               ",
+	"##              ",
+	"#.#             ",
+	"#..#            ",
+	"#...#           ",
+	"#....#          ",
+	"#.....#         ",
+	"#......#        ",
+	"#.......#       ",
+	"#........#      ",
+	"#.....#####     ",
+	"#..#..#         ",
+	"#.# #..#        ",
+	"##   #..#       ",
+	"#     #..#      ",
+	"       ##       ",
+};
+
+static void
+fbdev_cursor_damage(struct fbdev_backend *b, pixman_region32_t *damage)
+{
+	struct weston_pointer *pointer = b->seat.pointer_state;
+	int cx, cy;
+
+	if (pointer == NULL || pointer->sprite != NULL)
+		return;
+
+	cx = (int)pointer->pos.c.x;
+	cy = (int)pointer->pos.c.y;
+
+	/* 旧位置要把箭头擦掉；新位置要先把场景拷过来再画箭头。 */
+	if (b->cursor_valid) {
+		pixman_region32_union_rect(damage, damage, b->cursor_x,
+					   b->cursor_y, 16, 16);
+	}
+	pixman_region32_union_rect(damage, damage, cx, cy, 16, 16);
+}
+
+static void
+fbdev_draw_software_cursor(struct fbdev_backend *b)
+{
+	struct weston_pointer *pointer = b->seat.pointer_state;
+	int cx, cy, x, y;
+
+	if (b->fb == NULL || pointer == NULL || pointer->sprite != NULL)
+		return;
+
+	cx = (int)pointer->pos.c.x;
+	cy = (int)pointer->pos.c.y;
+
+	for (y = 0; y < 16; y++) {
+		int py = cy + y;
+		char *row;
+
+		if (py < 0 || py >= b->fb_height)
+			continue;
+		row = (char *)b->fb + (size_t)py * b->fb_stride;
+
+		for (x = 0; x < 16; x++) {
+			char c = fbdev_cursor_arrow[y][x];
+			int px;
+
+			if (c == ' ')
+				continue;
+			px = cx + x;
+			if (px < 0 || px >= b->fb_width)
+				continue;
+
+			if (b->fb_bpp == 16) {
+				((uint16_t *)row)[px] =
+					(c == '#') ? 0x0000 : 0xffff;
+			} else {
+				((uint32_t *)row)[px] =
+					(c == '#') ? 0x00000000 : 0x00ffffff;
+			}
+		}
+	}
+
+	b->cursor_x = cx;
+	b->cursor_y = cy;
+	b->cursor_valid = 1;
 }
 
 /* ---------------------------------------------------------------- output */
@@ -196,13 +296,35 @@ fbdev_output_repaint(struct weston_output *base)
 	struct fbdev_backend *b = output->backend;
 	struct weston_compositor *ec = base->compositor;
 	pixman_region32_t damage;
+	static int repaint_no;
+	int rn = repaint_no++;
 
 	assert(output->renderbuffer);
+
+	if (rn < 6) {
+		weston_log("fbdev: repaint #%d begin\n", rn);
+	}
 
 	/* 这一帧要重画的区域：pixman/GL 会把它合成进 /dev/fb0 的内存里 */
 	pixman_region32_init(&damage);
 	weston_output_flush_damage_for_primary_plane(base, &damage);
+
+	/* GL：V3D 在"只重绘脏区"路径下会卡死，必须整帧重绘。
+	 * Pixman：整屏软件重绘 0.5 秒，鼠标会卡；只补光标旧/新两个 16x16
+	 * 小区域即可，场景本身的 damage 由 flush 正常带进来。 */
+	if (ec->renderer->type == WESTON_RENDERER_GL) {
+		pixman_region32_union_rect(&damage, &damage, 0, 0,
+					   base->current_mode->width,
+					   base->current_mode->height);
+	} else {
+		fbdev_cursor_damage(b, &damage);
+	}
+
 	ec->renderer->repaint_output(base, &damage, output->renderbuffer);
+
+	if (rn < 6) {
+		weston_log("fbdev: repaint #%d rendered\n", rn);
+	}
 
 	/* GL 读回到 32bpp 影子缓冲；V3D 的 RGB565 glReadPixels 会返回全 0，
 	 * 这里在 CPU 里转成 RGB565 写进 fb。pixman 路径直接写 fb，不需要。 */
@@ -229,6 +351,14 @@ fbdev_output_repaint(struct weston_output *base)
 			}
 		}
 	}
+
+	if (rn < 6) {
+		weston_log("fbdev: repaint #%d converted\n", rn);
+	}
+
+	/* 光标画在整帧输出之后（GL 路径上面刚把影子缓冲整帧转成 RGB565）。 */
+	fbdev_draw_software_cursor(b);
+
 	pixman_region32_fini(&damage);
 
 	/* 【每帧踢一下显示刷新】pixman 只改了显存内容，没有任何"提交"动作：
@@ -243,6 +373,10 @@ fbdev_output_repaint(struct weston_output *base)
 
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
 	weston_output_arm_frame_timer(base, output->finish_frame_timer);
+
+	if (rn < 6) {
+		weston_log("fbdev: repaint #%d done\n", rn);
+	}
 
 	return 0;
 }
@@ -545,6 +679,21 @@ fbdev_input_flush_motion(struct fbdev_backend *b, struct timespec *ts)
 	notify_motion(&ev);
 	notify_pointer_frame(&b->seat);
 
+	{
+		static int motion_log;
+		if (motion_log++ < 8) {
+			struct weston_pointer *p = b->seat.pointer_state;
+			weston_log("fbdev: motion rel=%d,%d pos=%d,%d\n",
+				   (int)rel.x, (int)rel.y,
+				   p ? (int)p->pos.c.x : -1,
+				   p ? (int)p->pos.c.y : -1);
+		}
+	}
+
+	/* 【软件光标】没有 cursor_layer view 时，weston_pointer_move_to() 不会
+	 * 给光标区域排重绘，必须自己催一帧，否则箭头只更新位置不更新画面。 */
+	weston_compositor_schedule_repaint(b->compositor);
+
 	b->rel_x = 0;
 	b->rel_y = 0;
 }
@@ -575,6 +724,16 @@ fbdev_input_handler(int fd, uint32_t mask, void *data)
 		return 0;
 
 	len = read(fd, ev, sizeof ev);
+	{
+		static int read_log;
+		if (read_log++ < 8) {
+			weston_log("fbdev: input read len=%d first=%u/%u/%d\n",
+				   (int)len,
+				   len >= (ssize_t)sizeof ev[0] ? ev[0].type : 0,
+				   len >= (ssize_t)sizeof ev[0] ? ev[0].code : 0,
+				   len >= (ssize_t)sizeof ev[0] ? ev[0].value : 0);
+		}
+	}
 	if (len <= 0)
 		return 0;
 
@@ -715,6 +874,7 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 	b->fb_width = (int)var.xres;
 	b->fb_height = (int)var.yres;
 	b->fb_stride = (int)fix.line_length;
+	b->fb_bpp = (int)var.bits_per_pixel;
 	b->var = var;
 
 	if (b->fb_width <= 0 || b->fb_height <= 0 || b->fb_stride <= 0 ||
