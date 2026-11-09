@@ -138,6 +138,11 @@ struct fbdev_backend {
 	int rel_x;
 	int rel_y;
 
+	/* 键盘 /dev/input/event1（内核 usb_keyboard 注册的 evdev 设备） */
+	int kbd_fd;
+	struct wl_event_source *kbd_source;
+	bool kbd_ready;
+
 	/* 软件光标上次画在 fb 上的位置，用于 Pixman 路径只重绘光标区域。 */
 	int cursor_x;
 	int cursor_y;
@@ -770,6 +775,48 @@ fbdev_input_handler(int fd, uint32_t mask, void *data)
 	return 0;
 }
 
+static int
+fbdev_keyboard_handler(int fd, uint32_t mask, void *data)
+{
+	struct fbdev_backend *b = data;
+	struct fbdev_input_event ev[64];
+	ssize_t len;
+	ssize_t i;
+	ssize_t count;
+
+	if (!(mask & WL_EVENT_READABLE) || !b->kbd_ready)
+		return 0;
+
+	len = read(fd, ev, sizeof ev);
+	if (len <= 0)
+		return 0;
+
+	count = len / (ssize_t)sizeof ev[0];
+	for (i = 0; i < count; i++) {
+		struct timespec ts;
+		struct weston_key_event key;
+
+		if (ev[i].type != EV_KEY)
+			continue;
+		/* event1 是纯键盘设备；BTN_* 不应出现，真出现也不当键处理 */
+		if (ev[i].code >= 0x100)
+			continue;
+		if (ev[i].value != 0 && ev[i].value != 1)
+			continue;
+
+		ts.tv_sec = (time_t)ev[i].sec;
+		ts.tv_nsec = (long)ev[i].usec * 1000;
+		weston_key_event_init(&key, &ts, &b->seat, ev[i].code,
+				      ev[i].value ?
+				      WL_KEYBOARD_KEY_STATE_PRESSED :
+				      WL_KEYBOARD_KEY_STATE_RELEASED,
+				      STATE_UPDATE_AUTOMATIC);
+		notify_key(&key);
+	}
+
+	return 0;
+}
+
 static void
 fbdev_input_init(struct fbdev_backend *b)
 {
@@ -778,6 +825,35 @@ fbdev_input_init(struct fbdev_backend *b)
 	weston_seat_init(&b->seat, b->compositor, "seat0");
 	b->input_ready = true;
 	weston_seat_init_pointer(&b->seat);
+
+	/* 键盘 seat 用全局 keymap（/usr/share/X11/xkb 已存在）。失败只影响
+	 * 键盘，不能连累鼠标，所以单独判返回值。xkb context/规则名要在
+	 * 这里显式初始化：上游只有 libinput 后端会调它。 */
+	weston_compositor_set_xkb_rule_names(b->compositor, NULL);
+	if (weston_seat_init_keyboard(&b->seat, NULL) == 0) {
+		b->kbd_ready = true;
+	} else {
+		weston_log("fbdev: keyboard seat init failed (no keymap?)\n");
+	}
+
+	b->kbd_fd = open("/dev/input/event1",
+			 O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (b->kbd_fd < 0) {
+		weston_log("fbdev: open /dev/input/event1 failed: %s "
+			   "(desktop will have no keyboard)\n", strerror(errno));
+	} else {
+		loop = wl_display_get_event_loop(b->compositor->wl_display);
+		b->kbd_source = wl_event_loop_add_fd(loop, b->kbd_fd,
+						     WL_EVENT_READABLE,
+						     fbdev_keyboard_handler, b);
+		if (b->kbd_source == NULL) {
+			weston_log("fbdev: cannot watch /dev/input/event1\n");
+			close(b->kbd_fd);
+			b->kbd_fd = -1;
+		} else {
+			weston_log("fbdev: keyboard /dev/input/event1 ready\n");
+		}
+	}
 
 	b->input_fd = open("/dev/input/event0",
 			   O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -804,6 +880,16 @@ fbdev_input_init(struct fbdev_backend *b)
 static void
 fbdev_input_fini(struct fbdev_backend *b)
 {
+	if (b->kbd_source) {
+		wl_event_source_remove(b->kbd_source);
+		b->kbd_source = NULL;
+	}
+	if (b->kbd_fd >= 0) {
+		close(b->kbd_fd);
+		b->kbd_fd = -1;
+	}
+	b->kbd_ready = false;
+
 	if (b->input_source) {
 		wl_event_source_remove(b->input_source);
 		b->input_source = NULL;

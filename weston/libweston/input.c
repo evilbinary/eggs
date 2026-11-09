@@ -4005,12 +4005,11 @@ weston_compositor_set_xkb_rule_names(struct weston_compositor *ec,
 				     struct xkb_rule_names *names)
 {
 	if (ec->xkb_context == NULL) {
-		/* YiYiYa: 镜像里没有 /usr/share/X11/xkb，xkbcommon 在默认
-		 * include path 全部不存在时会直接返回 NULL，weston 启动即失败。
-		 * fbdev 后端目前不初始化键盘（不需要 keymap），所以这里不要
-		 * 默认数据路径；以后要接键盘时先把 xkeyboard-config 数据装进
-		 * 镜像，再改回 XKB_CONTEXT_NO_FLAGS。 */
-		ec->xkb_context = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES);
+		/* YiYiYa: 镜像里已经有 /usr/share/X11/xkb（compat/geometry/
+		 * keycodes/rules/symbols/types），fbdev 后端要用 USB 键盘，
+		 * 必须让 xkbcommon 走默认 include 路径才能编出 keymap。
+		 * 以前是 XKB_CONTEXT_NO_DEFAULT_INCLUDES（那时不接键盘）。 */
+		ec->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (ec->xkb_context == NULL) {
 			weston_log("failed to create XKB context\n");
 			return -1;
