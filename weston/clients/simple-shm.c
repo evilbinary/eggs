@@ -792,7 +792,25 @@ create_display(const struct format *format, bool paint_format)
 		exit(1);
 	}
 	display->display = wl_display_connect(NULL);
-	assert(display->display);
+	if (!display->display) {
+		char name[32];
+		int n;
+
+		/* Weston 没带 --socket 时会用 wl_display_add_socket_auto，
+		 * 名字可能是 wayland-0..N（旧 socket/lock 残留会把 0 顶掉）。
+		 * 环境里的 WAYLAND_DISPLAY 不一定对，逐个试一遍。 */
+		for (n = 0; n < 10 && !display->display; n++) {
+			snprintf(name, sizeof(name), "wayland-%d", n);
+			display->display = wl_display_connect(name);
+		}
+	}
+	if (!display->display) {
+		fprintf(stderr,
+			"wl_display_connect failed (XDG_RUNTIME_DIR=%s WAYLAND_DISPLAY=%s)\n",
+			getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "?",
+			getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "?");
+		exit(1);
+	}
 
 	display->format = format;
 	display->paint_format = paint_format;

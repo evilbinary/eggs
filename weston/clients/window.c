@@ -7217,6 +7217,8 @@ display_run(struct display *display)
 	struct epoll_event ep[16];
 	int i, count, ret;
 
+	/* 内核/驱动异常时可能返回坏 event；先清零，下面的 null 检查兜底。 */
+	memset(ep, 0, sizeof(ep));
 	display->running = 1;
 	while (1) {
 		/*
@@ -7271,6 +7273,12 @@ display_run(struct display *display)
 		display->display_fd_was_read = false;
 		for (i = 0; i < count; i++) {
 			task = ep[i].data.ptr;
+			if (task == NULL || task->run == NULL) {
+				fprintf(stderr,
+					"display_run: null task at epoll event %d/%d events=%#x\n",
+					i, count, ep[i].events);
+				continue;
+			}
 			task->run(task, ep[i].events);
 		}
 		if (!display->display_fd_was_read)
