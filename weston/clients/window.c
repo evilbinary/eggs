@@ -7217,8 +7217,6 @@ display_run(struct display *display)
 	struct epoll_event ep[16];
 	int i, count, ret;
 
-	/* 内核/驱动异常时可能返回坏 event；先清零，下面的 null 检查兜底。 */
-	memset(ep, 0, sizeof(ep));
 	display->running = 1;
 	while (1) {
 		/*
