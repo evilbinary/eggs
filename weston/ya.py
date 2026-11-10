@@ -58,6 +58,8 @@ ensure_gl_shader_headers()
 
 target("weston")
 set_kind("shared")
+# 桌面启动性能：即使 debug 构建也给 libweston 开 -O2（-g 仍保留）。
+add_cflags('-O2')
 # 共享库必须按位置无关编（模块和可执行文件都要通过 GOT/PLT 引用它）
 add_cflags('-fPIC')
 
