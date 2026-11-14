@@ -547,6 +547,7 @@ static int drm_screen_ensure_info(void) {
 }
 
 #define DRM_MAX_BO_MAP 64
+static void bo_cpu_va_free(unsigned int va, unsigned int size);
 static struct {
   unsigned int handle;
   unsigned int cpu_va;
@@ -589,6 +590,8 @@ void drm_bo_map_remove(unsigned int handle) {
         foot_cap_unmap((foot_cap_t)g_drm_bo_map[i].cap);
         foot_cap_revoke((foot_cap_t)g_drm_bo_map[i].cap);
       }
+      /* 归还 CPU VA，避免单调增长到 EXEC_ADDR 覆盖库代码。 */
+      bo_cpu_va_free(g_drm_bo_map[i].cpu_va, g_drm_bo_map[i].size);
       g_drm_bo_map[i].handle = 0;
       g_drm_bo_map[i].cpu_va = 0;
       g_drm_bo_map[i].size = 0;
@@ -704,6 +707,71 @@ int drm_gem_ioctl(unsigned long request, void* arg) {
  * ------------------------------------------------------------------ */
 static unsigned int g_last_bo_cap;
 
+/* 【BO CPU VA 池】以前 next_va 从 0x52000000 单调递增，GEM_CLOSE 只
+ * unmap 不归还。涨到 EXEC_ADDR=0x60000000 就会把 libweston 的代码页
+ * 映射成 BO 像素，表现为“合法指令地址 UNDEF”、dmabuf/pixman 野指针。
+ * 现在用有界 bitmap 池（0x52000000-0x5F000000），GEM_CLOSE 归还复用。 */
+#define BO_CPU_VA_BASE 0x52000000u
+#define BO_CPU_VA_END 0x5f000000u
+#define BO_CPU_VA_PAGES ((BO_CPU_VA_END - BO_CPU_VA_BASE) / 4096u)
+static uint64_t bo_cpu_va_bitmap[(BO_CPU_VA_PAGES + 63) / 64];
+
+static int bo_cpu_va_test(unsigned int page) {
+  return (int)((bo_cpu_va_bitmap[page >> 6] >> (page & 63)) & 1u);
+}
+
+static void bo_cpu_va_mark(unsigned int page, int used) {
+  uint64_t mask = 1ull << (page & 63);
+  if (used) {
+    bo_cpu_va_bitmap[page >> 6] |= mask;
+  } else {
+    bo_cpu_va_bitmap[page >> 6] &= ~mask;
+  }
+}
+
+static int bo_cpu_va_alloc(unsigned int size, unsigned int* out_va) {
+  unsigned int pages = (size + 4095u) / 4096u;
+  unsigned int page, run = 0, start = 0;
+
+  if (pages == 0 || pages > BO_CPU_VA_PAGES) {
+    return -1;
+  }
+  for (page = 0; page < BO_CPU_VA_PAGES; page++) {
+    if (bo_cpu_va_test(page)) {
+      run = 0;
+      continue;
+    }
+    if (run == 0) {
+      start = page;
+    }
+    if (++run == pages) {
+      unsigned int i;
+      for (i = 0; i < pages; i++) {
+        bo_cpu_va_mark(start + i, 1);
+      }
+      *out_va = BO_CPU_VA_BASE + start * 4096u;
+      return 0;
+    }
+  }
+  return -1;
+}
+
+static void bo_cpu_va_free(unsigned int va, unsigned int size) {
+  unsigned int first, pages, i;
+
+  if (va < BO_CPU_VA_BASE || va >= BO_CPU_VA_END || size == 0) {
+    return;
+  }
+  first = (va - BO_CPU_VA_BASE) / 4096u;
+  pages = (size + 4095u) / 4096u;
+  if (pages > BO_CPU_VA_PAGES - first) {
+    pages = BO_CPU_VA_PAGES - first;
+  }
+  for (i = 0; i < pages; i++) {
+    bo_cpu_va_mark(first + i, 0);
+  }
+}
+
 /* v3d.c 在 alloc 成功后取走本次 arena capability，随 BO handle 记录，
  * GEM_CLOSE 时 unmap + revoke，避免物理页泄漏。 */
 unsigned int drm_bo_take_last_cap(void) {
@@ -714,20 +782,23 @@ unsigned int drm_bo_take_last_cap(void) {
 
 __attribute__((weak)) int bridge_bo_alloc(unsigned int size, unsigned int* pa,
                                           unsigned int* cpu_va) {
-  static unsigned long next_va = 0x52000000UL;
-  unsigned int p = 0, s = 0;
+  unsigned int p = 0, s = 0, va = 0;
   foot_cap_t cap = foot_cap_alloc_arena(size, 0, 0, &p, &s);
   if (cap == FOOT_CAP_NONE || s < size) {
     return -1;
   }
-  unsigned long va = next_va;
-  next_va += (s + 0xFFFu) & ~0xFFFUL;
-  if (foot_cap_map(cap, (void*)va, 0, s) != 0) {
+  if (bo_cpu_va_alloc(s, &va) != 0) {
+    foot_cap_revoke(cap);
+    return -1;
+  }
+  if (foot_cap_map(cap, (void*)(uintptr_t)va, 0, s) != 0) {
+    bo_cpu_va_free(va, s);
+    foot_cap_revoke(cap);
     return -1;
   }
   g_last_bo_cap = cap;
   *pa = p;
-  *cpu_va = (unsigned int)va;
+  *cpu_va = va;
   return 0;
 }
 

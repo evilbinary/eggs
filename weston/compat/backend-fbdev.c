@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -470,33 +471,33 @@ fbdev_output_repaint(struct weston_output *base)
 	 * 并进 damage，否则鼠标会“停在旧位置”不动（画面其它部分仍刷新）。 */
 	if (pointer != NULL && pointer->sprite != NULL) {
 		struct weston_view *sv = pointer->sprite;
-		pixman_box32_t *bb =
-			pixman_region32_extents(&sv->transform.boundingbox);
-		int nx, ny, nw, nh;
+		/* 【不要用 transform.boundingbox】它依赖视图变换更新时序，
+		 * 某些帧可能是空的/陈旧的，拿它扩 damage 会把区域算错。
+		 * cursor view 的位置就是 geometry.pos_offset，尺寸取 surface。 */
+		int nx = (int)sv->geometry.pos_offset.x;
+		int ny = (int)sv->geometry.pos_offset.y;
+		int nw = sv->surface ? sv->surface->width : 0;
+		int nh = sv->surface ? sv->surface->height : 0;
 
-		if (bb->x2 > bb->x1 && bb->y2 > bb->y1) {
-			nx = bb->x1;
-			ny = bb->y1;
-			nw = bb->x2 - bb->x1;
-			nh = bb->y2 - bb->y1;
-		} else {
-			nx = (int)sv->geometry.pos_offset.x;
-			ny = (int)sv->geometry.pos_offset.y;
-			nw = sv->surface ? sv->surface->width : 0;
-			nh = sv->surface ? sv->surface->height : 0;
+		/* 尺寸异常/未提交就不扩 damage，避免把整个屏幕拖进脏区。 */
+		if (nw <= 0 || nh <= 0 || nw > 4096 || nh > 4096) {
+			nw = 0;
+			nh = 0;
 		}
 
-		if (b->sprite_valid) {
+		if (b->sprite_valid && nw > 0) {
 			pixman_region32_union_rect(&damage, &damage,
 						   b->sprite_x, b->sprite_y,
 						   b->sprite_w, b->sprite_h);
 		}
-		pixman_region32_union_rect(&damage, &damage, nx, ny, nw, nh);
+		if (nw > 0)
+			pixman_region32_union_rect(&damage, &damage, nx, ny,
+						   nw, nh);
 		b->sprite_x = nx;
 		b->sprite_y = ny;
 		b->sprite_w = nw;
 		b->sprite_h = nh;
-		b->sprite_valid = true;
+		b->sprite_valid = (nw > 0);
 	} else {
 		b->sprite_valid = false;
 	}
@@ -511,16 +512,16 @@ fbdev_output_repaint(struct weston_output *base)
 		      !pixman_region32_not_empty(&damage) &&
 		      pointer != NULL && pointer->sprite == NULL;
 
-	/* GL 默认整帧重绘（V3D 的部分重绘历史上会卡死）。
-	 * [fbdev] partial-damage=1 时按真实脏区重绘；拖窗口/局部刷新
-	 * 只重画旧/新窗口矩形，不再付 1080p 全屏的代价。 */
-	partial = gl && b->partial_damage && !cursor_only &&
-		  pixman_region32_not_empty(&damage);
+	/* partial-damage=true 时用 gl-renderer 的
+	 * gl_force_full_redraw_of_shadow_fb quirk：draw 永远整帧（V3D 安全），
+	 * 但 glReadPixels/格式转换只做 damage 矩形。
+	 * partial-damage=false 时退回整屏 union + 全屏回读。 */
+	partial = gl && b->partial_damage;
 
 	/* Pixman：整屏软件重绘 0.5 秒，鼠标会卡；只补光标旧/新两个 16x16
 	 * 小区域即可，场景本身的 damage 由 flush 正常带进来。 */
 	if (gl) {
-		if (!cursor_only && !partial)
+		if (!partial)
 			pixman_region32_union_rect(&damage, &damage, 0, 0,
 						   base->current_mode->width,
 						   base->current_mode->height);
@@ -1179,6 +1180,20 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 		return -1;
 	}
 	b->fb_len = want;
+
+	/* 一次性记录 fb 的用户态映射地址：确认它不会落进
+	 * EXEC_ADDR(0x60000000) 的库代码区（mmap 可能重叠 lazy 库页）。 */
+	{
+		char abuf[64];
+		int afd;
+		int an = snprintf(abuf, sizeof(abuf), "fb=%p len=%u\n",
+				  b->fb, (unsigned)want);
+		afd = open("/etc/fbaddr", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (afd >= 0) {
+			(void)write(afd, abuf, (size_t)an);
+			close(afd);
+		}
+	}
 
 	weston_log("fbdev: %s %dx%d %ubpp, stride %d, %u bytes mapped\n", path,
 		   b->fb_width, b->fb_height, var.bits_per_pixel, b->fb_stride,
