@@ -26,6 +26,7 @@
 #include <wayland-server-core.h>
 
 #include <libweston/libweston.h>
+#include <libweston/config-parser.h>
 #include <libweston/windowed-output-api.h>
 #include <libweston/zalloc.h>
 
@@ -89,6 +90,7 @@ struct fb_fix_screeninfo {
 #define SYN_REPORT	0x00
 #define REL_X		0x00
 #define REL_Y		0x01
+
 #define REL_WHEEL	0x08
 #define BTN_LEFT	0x110
 #define BTN_RIGHT	0x111
@@ -137,6 +139,8 @@ struct fbdev_backend {
 	struct wl_event_source *input_source;
 	int rel_x;
 	int rel_y;
+	/* 鼠标位移缩放，来自 weston.ini 的 [fbdev] pointer-scale（默认 1.0）。 */
+	double pointer_scale;
 
 	/* 键盘 /dev/input/event1（内核 usb_keyboard 注册的 evdev 设备） */
 	int kbd_fd;
@@ -674,8 +678,8 @@ fbdev_input_flush_motion(struct fbdev_backend *b, struct timespec *ts)
 	if (b->rel_x == 0 && b->rel_y == 0)
 		return;
 
-	rel.x = b->rel_x;
-	rel.y = b->rel_y;
+	rel.x = b->rel_x * b->pointer_scale;
+	rel.y = b->rel_y * b->pointer_scale;
 	/* 只带 REL 位：abs / rel_unaccel 传 NULL 是安全的（实现里只在
 	 * 对应 mask 位置位时才解引用）。 */
 	weston_pointer_motion_event_init(&ev, ts, &b->seat,
@@ -1029,6 +1033,37 @@ weston_backend_init(struct weston_compositor *compositor,
 	b->input_fd = -1;
 	b->compositor = compositor;
 	b->refresh = config->refresh > 0 ? config->refresh : DEFAULT_REFRESH;
+	/* 【指针位移倍率】fbdev 后端直接读 evdev，不经过 libinput，所以
+	 * [libinput] 的 accel-profile/accel-speed 对它无效。倍率从 weston.ini
+	 * 的 [fbdev] pointer-scale 读，默认 1.0（原始 1:1）。
+	 * 前端加载配置后会把实际路径写进 WESTON_CONFIG_FILE，这里复用它，
+	 * 保证 -c/自定义路径和默认路径都能读到同一份文件。 */
+	b->pointer_scale = 1.0;
+	{
+		const char *cfg_path = getenv(WESTON_CONFIG_FILE_ENV_VAR);
+		struct weston_config *wc;
+
+		if (cfg_path == NULL || cfg_path[0] == '\0')
+			cfg_path = "/etc/xdg/weston/weston.ini";
+		wc = weston_config_parse(cfg_path);
+		if (wc != NULL) {
+			struct weston_config_section *sec =
+				weston_config_get_section(wc, "fbdev", NULL, NULL);
+			if (sec != NULL) {
+				double v = 1.0;
+				if (weston_config_section_get_double(
+						sec, "pointer-scale", &v, 1.0) == 0 &&
+				    v >= 0.25 && v <= 10.0) {
+					b->pointer_scale = v;
+				}
+			}
+			weston_config_destroy(wc);
+		} else {
+			weston_log("fbdev: cannot read %s, pointer-scale=1.00\n",
+				   cfg_path);
+		}
+		weston_log("fbdev: pointer-scale=%.2f\n", b->pointer_scale);
+	}
 
 	/* 先打开 fb：Pi5 固件实际给的是 16bpp（即使请求 32），GL renderer
 	 * 的 formats / read_format 必须按 fb 的真实 bpp 选。 */
