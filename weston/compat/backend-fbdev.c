@@ -170,6 +170,14 @@ struct fbdev_backend {
 	 * 场景没变就完全不用跑 GL 整帧 + glReadPixels + 全屏转换。 */
 	uint8_t cursor_bg[16 * 16 * 4];
 
+	/* 客户端 cursor sprite 的上一帧位置/大小：partial-damage 时
+	 * primary plane 的 flush 不一定包含光标层，必须显式补进 damage，
+	 * 否则原生光标会停在旧画面。 */
+	int sprite_x;
+	int sprite_y;
+	int sprite_w;
+	int sprite_h;
+	bool sprite_valid;
 };
 
 struct fbdev_head {
@@ -456,6 +464,42 @@ fbdev_output_repaint(struct weston_output *base)
 	/* 这一帧要重画的区域：pixman/GL 会把它合成进 /dev/fb0 的内存里 */
 	pixman_region32_init(&damage);
 	weston_output_flush_damage_for_primary_plane(base, &damage);
+
+	/* 客户端 cursor sprite 是单独的 cursor layer，primary plane 的
+	 * flush 不保证包含它。partial-damage 下必须把旧/新光标矩形显式
+	 * 并进 damage，否则鼠标会“停在旧位置”不动（画面其它部分仍刷新）。 */
+	if (pointer != NULL && pointer->sprite != NULL) {
+		struct weston_view *sv = pointer->sprite;
+		pixman_box32_t *bb =
+			pixman_region32_extents(&sv->transform.boundingbox);
+		int nx, ny, nw, nh;
+
+		if (bb->x2 > bb->x1 && bb->y2 > bb->y1) {
+			nx = bb->x1;
+			ny = bb->y1;
+			nw = bb->x2 - bb->x1;
+			nh = bb->y2 - bb->y1;
+		} else {
+			nx = (int)sv->geometry.pos_offset.x;
+			ny = (int)sv->geometry.pos_offset.y;
+			nw = sv->surface ? sv->surface->width : 0;
+			nh = sv->surface ? sv->surface->height : 0;
+		}
+
+		if (b->sprite_valid) {
+			pixman_region32_union_rect(&damage, &damage,
+						   b->sprite_x, b->sprite_y,
+						   b->sprite_w, b->sprite_h);
+		}
+		pixman_region32_union_rect(&damage, &damage, nx, ny, nw, nh);
+		b->sprite_x = nx;
+		b->sprite_y = ny;
+		b->sprite_w = nw;
+		b->sprite_h = nh;
+		b->sprite_valid = true;
+	} else {
+		b->sprite_valid = false;
+	}
 
 	/* 【GL 光标帧】场景没有任何新的 damage，只是软件光标在移动。
 	 * 这时文件里已经恢复了旧光标背景，画面场景与上一帧完全一致：
