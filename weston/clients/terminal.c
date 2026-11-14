@@ -908,7 +908,7 @@ terminal_resize(struct terminal *terminal, int columns, int rows)
 
 struct color_scheme DEFAULT_COLORS = {
 	{
-		{0,    0,    0,    1}, /* black */
+		{0,    0,    0,    0.85}, /* black (85% alpha) */
 		{0.66, 0,    0,    1}, /* red */
 		{0  ,  0.66, 0,    1}, /* green */
 		{0.66, 0.33, 0,    1}, /* orange (nicer than muddy yellow) */
@@ -2952,7 +2952,7 @@ terminal_create(struct display *display)
 	window_set_title(terminal->window, terminal->title);
 	window_set_appid(terminal->window,
 			 "org.freedesktop.weston.wayland-terminal");
-	widget_set_transparent(terminal->widget, 0);
+	widget_set_transparent(terminal->widget, 1);
 
 	init_state_machine(&terminal->state_machine);
 	init_color_table(terminal);
