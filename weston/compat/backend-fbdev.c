@@ -15,9 +15,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -172,55 +170,7 @@ struct fbdev_backend {
 	 * 场景没变就完全不用跑 GL 整帧 + glReadPixels + 全屏转换。 */
 	uint8_t cursor_bg[16 * 16 * 4];
 
-	/* 临时诊断：每 120 帧把帧数/光标帧/renderer 耗时/转换耗时写到
-	 * /etc/fbdev-diag.log。稳定后删除。 */
-	uint32_t diag_frames;
-	uint32_t diag_cursor_frames;
-	uint32_t diag_partial_frames;
-	uint32_t diag_motion_events;
-	uint32_t diag_sprite_motion;
-	uint64_t diag_render_us;
-	uint64_t diag_convert_us;
 };
-
-static uint64_t
-fbdev_now_us(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000000ull +
-	       (uint64_t)ts.tv_nsec / 1000ull;
-}
-
-static void
-fbdev_diag_flush(struct fbdev_backend *b)
-{
-	char buf[256];
-	int n;
-	int fd;
-
-	n = snprintf(buf, sizeof(buf),
-		     "frames=%u cursor=%u partial=%u motion=%u sprite=%u "
-		     "render_us=%llu convert_us=%llu\n",
-		     b->diag_frames, b->diag_cursor_frames,
-		     b->diag_partial_frames,
-		     b->diag_motion_events, b->diag_sprite_motion,
-		     (unsigned long long)b->diag_render_us,
-		     (unsigned long long)b->diag_convert_us);
-	fd = open("/etc/fbdev-diag.log", O_WRONLY | O_CREAT | O_APPEND, 0666);
-	if (fd >= 0) {
-		(void)write(fd, buf, (size_t)n);
-		close(fd);
-	}
-	b->diag_frames = 0;
-	b->diag_cursor_frames = 0;
-	b->diag_partial_frames = 0;
-	b->diag_motion_events = 0;
-	b->diag_sprite_motion = 0;
-	b->diag_render_us = 0;
-	b->diag_convert_us = 0;
-}
 
 struct fbdev_head {
 	struct weston_head base;
@@ -523,12 +473,6 @@ fbdev_output_repaint(struct weston_output *base)
 	partial = gl && b->partial_damage && !cursor_only &&
 		  pixman_region32_not_empty(&damage);
 
-	b->diag_frames++;
-	if (cursor_only)
-		b->diag_cursor_frames++;
-	if (partial)
-		b->diag_partial_frames++;
-
 	/* Pixman：整屏软件重绘 0.5 秒，鼠标会卡；只补光标旧/新两个 16x16
 	 * 小区域即可，场景本身的 damage 由 flush 正常带进来。 */
 	if (gl) {
@@ -540,13 +484,7 @@ fbdev_output_repaint(struct weston_output *base)
 		fbdev_cursor_damage(b, &damage);
 	}
 
-	{
-		uint64_t t0 = fbdev_now_us();
-
-		ec->renderer->repaint_output(base, &damage,
-					     output->renderbuffer);
-		b->diag_render_us += fbdev_now_us() - t0;
-	}
+	ec->renderer->repaint_output(base, &damage, output->renderbuffer);
 
 	if (rn < 6) {
 		weston_log("fbdev: repaint #%d rendered%s\n", rn,
@@ -558,10 +496,7 @@ fbdev_output_repaint(struct weston_output *base)
 	 * partial=1 时只转 damage 矩形。 */
 	if (ec->renderer->type == WESTON_RENDERER_GL && b->gl_shadow != NULL &&
 	    !cursor_only) {
-		uint64_t t0 = fbdev_now_us();
-
 		fbdev_convert_damage(b, base, &damage);
-		b->diag_convert_us += fbdev_now_us() - t0;
 	}
 
 	if (rn < 6) {
@@ -585,9 +520,6 @@ fbdev_output_repaint(struct weston_output *base)
 
 	/* 没有 vsync 硬件中断，用定时器按刷新率排下一帧 */
 	weston_output_arm_frame_timer(base, output->finish_frame_timer);
-
-	if (b->diag_frames >= 120)
-		fbdev_diag_flush(b);
 
 	if (rn < 6) {
 		weston_log("fbdev: repaint #%d done\n", rn);
@@ -914,11 +846,6 @@ fbdev_input_flush_motion(struct fbdev_backend *b, struct timespec *ts)
 	/* 【软件光标】没有 cursor_layer view 时，weston_pointer_move_to() 不会
 	 * 给光标区域排重绘，必须自己催一帧，否则箭头只更新位置不更新画面。 */
 	weston_compositor_schedule_repaint(b->compositor);
-
-	b->diag_motion_events++;
-	if (b->seat.pointer_state != NULL &&
-	    b->seat.pointer_state->sprite != NULL)
-		b->diag_sprite_motion++;
 
 	b->rel_x = 0;
 	b->rel_y = 0;

@@ -3610,18 +3610,6 @@ pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
 	if (!pointer)
 		return;
 
-	/* YiYiYa: fbdev 后端在 /dev/fb0 上自己画软件箭头。客户端 cursor
-	 * sprite 会让每次鼠标移动都产生 damage，而 V3D 不能只重绘脏区，
-	 * 只能整屏 GL + 回读（实测 ~76ms/帧），光标就明显跟不上手。
-	 * 后端初始化时设置 WESTON_SOFTWARE_CURSOR，这里统一忽略客户端
-	 * 光标；文字/缩放等形状暂时都由后端箭头代替。 */
-	if (getenv("WESTON_SOFTWARE_CURSOR") != NULL ||
-	    access("/dev/fb0", F_OK) == 0) {
-		if (pointer->sprite)
-			pointer_unmap_sprite(pointer);
-		return;
-	}
-
 	if (surface_resource)
 		surface = wl_resource_get_user_data(surface_resource);
 
