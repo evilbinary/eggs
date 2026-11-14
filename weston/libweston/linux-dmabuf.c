@@ -594,7 +594,11 @@ format_table_get_format_index(struct weston_dmabuf_feedback_format_table *format
 			      uint32_t format, uint64_t modifier, uint16_t *index_out)
 {
 	uint16_t index;
-	unsigned int num_elements = format_table->size / sizeof(index);
+	/* data 表项是 {u32 format, u32 pad, u64 modifier} = 16 字节。
+	 * 这里原来除以 sizeof(index)（uint16_t=2），把表当成 8 倍长，
+	 * 会越界读 mmap 后面的垃圾，dmabuf feedback 时在 pixman 里崩。 */
+	unsigned int num_elements =
+		format_table->size / sizeof(format_table->data[0]);
 
 	for (index = 0; index < num_elements; index++) {
 		if (format_table->data[index].format == format &&

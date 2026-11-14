@@ -15,7 +15,6 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -1181,19 +1180,6 @@ fbdev_open(struct fbdev_backend *b, const char *path)
 	}
 	b->fb_len = want;
 
-	/* 一次性记录 fb 的用户态映射地址：确认它不会落进
-	 * EXEC_ADDR(0x60000000) 的库代码区（mmap 可能重叠 lazy 库页）。 */
-	{
-		char abuf[64];
-		int afd;
-		int an = snprintf(abuf, sizeof(abuf), "fb=%p len=%u\n",
-				  b->fb, (unsigned)want);
-		afd = open("/etc/fbaddr", O_WRONLY | O_CREAT | O_TRUNC, 0666);
-		if (afd >= 0) {
-			(void)write(afd, abuf, (size_t)an);
-			close(afd);
-		}
-	}
 
 	weston_log("fbdev: %s %dx%d %ubpp, stride %d, %u bytes mapped\n", path,
 		   b->fb_width, b->fb_height, var.bits_per_pixel, b->fb_stride,
