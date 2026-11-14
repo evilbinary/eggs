@@ -153,6 +153,9 @@ struct fbdev_backend {
 	int rel_y;
 	/* 鼠标位移缩放，来自 weston.ini 的 [fbdev] pointer-scale（默认 1.0）。 */
 	double pointer_scale;
+	/* GL 是否按实际脏区重绘（来自 [fbdev] partial-damage）。
+	 * 默认关：V3D 的部分重绘路径历史上有卡死记录；打开前先确认。 */
+	bool partial_damage;
 
 	/* 键盘 /dev/input/event1（内核 usb_keyboard 注册的 evdev 设备） */
 	int kbd_fd;
@@ -173,6 +176,7 @@ struct fbdev_backend {
 	 * /etc/fbdev-diag.log。稳定后删除。 */
 	uint32_t diag_frames;
 	uint32_t diag_cursor_frames;
+	uint32_t diag_partial_frames;
 	uint32_t diag_motion_events;
 	uint32_t diag_sprite_motion;
 	uint64_t diag_render_us;
@@ -197,9 +201,10 @@ fbdev_diag_flush(struct fbdev_backend *b)
 	int fd;
 
 	n = snprintf(buf, sizeof(buf),
-		     "frames=%u cursor=%u motion=%u sprite=%u "
+		     "frames=%u cursor=%u partial=%u motion=%u sprite=%u "
 		     "render_us=%llu convert_us=%llu\n",
 		     b->diag_frames, b->diag_cursor_frames,
+		     b->diag_partial_frames,
 		     b->diag_motion_events, b->diag_sprite_motion,
 		     (unsigned long long)b->diag_render_us,
 		     (unsigned long long)b->diag_convert_us);
@@ -210,6 +215,7 @@ fbdev_diag_flush(struct fbdev_backend *b)
 	}
 	b->diag_frames = 0;
 	b->diag_cursor_frames = 0;
+	b->diag_partial_frames = 0;
 	b->diag_motion_events = 0;
 	b->diag_sprite_motion = 0;
 	b->diag_render_us = 0;
@@ -378,12 +384,14 @@ fbdev_draw_software_cursor(struct fbdev_backend *b)
 			if (px < 0 || px >= b->fb_width)
 				continue;
 
+			/* '#' 是箭头外轮廓，'.' 是内部：
+			 * 黑色填充 + 白边，深浅背景下都能看清。 */
 			if (b->fb_bpp == 16) {
 				((uint16_t *)row)[px] =
-					(c == '#') ? 0x0000 : 0xffff;
+					(c == '#') ? 0xffff : 0x0000;
 			} else {
 				((uint32_t *)row)[px] =
-					(c == '#') ? 0x00000000 : 0x00ffffff;
+					(c == '#') ? 0x00ffffff : 0x00000000;
 			}
 		}
 	}
@@ -391,35 +399,6 @@ fbdev_draw_software_cursor(struct fbdev_backend *b)
 	b->cursor_x = cx;
 	b->cursor_y = cy;
 	b->cursor_valid = 1;
-}
-
-/* 客户端 cursor sprite 会让每次鼠标移动都产生 damage；V3D 不能只重绘
- * 脏区，只能整屏 GL + 回读（实测 ~76ms/帧）。fbdev 后端本来就会在 fb
- * 上画软件箭头，所以这里直接把客户端的 cursor view 解绑。
- * 逻辑与 libweston/input.c 的 pointer_unmap_sprite() 保持一致。 */
-static void
-fbdev_drop_cursor_sprite(struct fbdev_backend *b)
-{
-	struct weston_pointer *pointer = b->seat.pointer_state;
-	struct weston_surface *surface;
-	static int drop_log;
-
-	if (pointer == NULL || pointer->sprite == NULL)
-		return;
-
-	if (drop_log++ < 8)
-		weston_log("fbdev: drop client cursor sprite\n");
-
-	surface = pointer->sprite->surface;
-	if (weston_surface_is_mapped(surface))
-		weston_surface_unmap(surface);
-
-	wl_list_remove(&pointer->sprite_destroy_listener.link);
-	surface->committed = NULL;
-	surface->committed_private = NULL;
-	weston_surface_set_label(surface, NULL);
-	weston_view_destroy(pointer->sprite);
-	pointer->sprite = NULL;
 }
 
 /* ---------------------------------------------------------------- output */
@@ -448,6 +427,56 @@ fbdev_output_start_repaint_loop(struct weston_output *output)
 	return 0;
 }
 
+/* 把 gl_shadow 里的 ARGB8888 按 damage 矩形转成 RGB565 写进 fb。
+ * 全屏帧 damage 就是整屏，等价于原来的逐行循环；partial-damage 打开时
+ * 只转真正脏的矩形，拖动窗口/局部刷新就不用付全屏转换的代价。 */
+static void
+fbdev_convert_damage(struct fbdev_backend *b, struct weston_output *base,
+		     pixman_region32_t *damage)
+{
+	const uint32_t *src = (const uint32_t *)b->gl_shadow;
+	int w = base->current_mode->width;
+	int h = base->current_mode->height;
+	pixman_box32_t *rects;
+	int n, i;
+
+	rects = pixman_region32_rectangles(damage, &n);
+	for (i = 0; i < n; i++) {
+		int x1 = rects[i].x1;
+		int y1 = rects[i].y1;
+		int x2 = rects[i].x2;
+		int y2 = rects[i].y2;
+		int x, y;
+
+		if (x1 < 0)
+			x1 = 0;
+		if (y1 < 0)
+			y1 = 0;
+		if (x2 > w)
+			x2 = w;
+		if (y2 > h)
+			y2 = h;
+		if (x1 >= x2 || y1 >= y2)
+			continue;
+
+		for (y = y1; y < y2; y++) {
+			uint16_t *dst = (uint16_t *)(b->fb +
+						     (size_t)y * b->fb_stride);
+			const uint32_t *row = src + (size_t)y * w;
+
+			for (x = x1; x < x2; x++) {
+				uint32_t p = row[x];
+				unsigned r = (p >> 16) & 0xff;
+				unsigned g = (p >> 8) & 0xff;
+				unsigned bl = p & 0xff;
+
+				dst[x] = (uint16_t)(((r >> 3) << 11) |
+						    ((g >> 2) << 5) | (bl >> 3));
+			}
+		}
+	}
+}
+
 static int
 fbdev_output_repaint(struct weston_output *base)
 {
@@ -459,6 +488,7 @@ fbdev_output_repaint(struct weston_output *base)
 	bool gl = ec->renderer->type == WESTON_RENDERER_GL;
 	bool had_cursor;
 	bool cursor_only;
+	bool partial;
 	static int repaint_no;
 	int rn = repaint_no++;
 
@@ -467,10 +497,6 @@ fbdev_output_repaint(struct weston_output *base)
 	if (rn < 6) {
 		weston_log("fbdev: repaint #%d begin\n", rn);
 	}
-
-	/* 客户端的 cursor sprite 在 V3D 上会逼出整屏重绘；直接换成
-	 * 后端的软件箭头。 */
-	fbdev_drop_cursor_sprite(b);
 
 	/* 先把上一帧的软件光标从显存里擦掉，让 fb 回到"纯场景"状态。
 	 * 只碰 16x16 像素；后面的整帧 GL 转换会覆盖全屏，无副作用。 */
@@ -491,17 +517,22 @@ fbdev_output_repaint(struct weston_output *base)
 		      !pixman_region32_not_empty(&damage) &&
 		      pointer != NULL && pointer->sprite == NULL;
 
+	/* GL 默认整帧重绘（V3D 的部分重绘历史上会卡死）。
+	 * [fbdev] partial-damage=1 时按真实脏区重绘；拖窗口/局部刷新
+	 * 只重画旧/新窗口矩形，不再付 1080p 全屏的代价。 */
+	partial = gl && b->partial_damage && !cursor_only &&
+		  pixman_region32_not_empty(&damage);
+
 	b->diag_frames++;
 	if (cursor_only)
 		b->diag_cursor_frames++;
+	if (partial)
+		b->diag_partial_frames++;
 
-	/* GL：V3D 在"只重绘脏区"路径下会卡死，必须整帧重绘。
-	 * 但 cursor_only 帧例外：damage 为空，renderer 不会画任何 view，
-	 * 只做 buffer/fence 记账，不存在"只画一部分"的 V3D 问题。
-	 * Pixman：整屏软件重绘 0.5 秒，鼠标会卡；只补光标旧/新两个 16x16
+	/* Pixman：整屏软件重绘 0.5 秒，鼠标会卡；只补光标旧/新两个 16x16
 	 * 小区域即可，场景本身的 damage 由 flush 正常带进来。 */
 	if (gl) {
-		if (!cursor_only)
+		if (!cursor_only && !partial)
 			pixman_region32_union_rect(&damage, &damage, 0, 0,
 						   base->current_mode->width,
 						   base->current_mode->height);
@@ -523,70 +554,13 @@ fbdev_output_repaint(struct weston_output *base)
 	}
 
 	/* GL 读回到 32bpp 影子缓冲；V3D 的 RGB565 glReadPixels 会返回全 0，
-	 * 这里在 CPU 里转成 RGB565 写进 fb。pixman 路径直接写 fb，不需要。 */
+	 * 这里在 CPU 里转成 RGB565 写进 fb。pixman 路径直接写 fb，不需要。
+	 * partial=1 时只转 damage 矩形。 */
 	if (ec->renderer->type == WESTON_RENDERER_GL && b->gl_shadow != NULL &&
 	    !cursor_only) {
-		const uint32_t *src = (const uint32_t *)b->gl_shadow;
-		int w = base->current_mode->width;
-		int h = base->current_mode->height;
 		uint64_t t0 = fbdev_now_us();
-		int y;
 
-		for (y = 0; y < h; y++) {
-			uint16_t *dst = (uint16_t *)(b->fb +
-						     (size_t)y * b->fb_stride);
-			const uint32_t *row = src + (size_t)y * w;
-			int x = 0;
-
-#if FBDEV_CONVERT_NEON && defined(__aarch64__)
-			/* 一次 8 像素：ARGB8888 → RGB565。全屏 1080p 时
-			 * 标量循环是每次内容更新（终端打字/拖窗）的瓶颈之一，
-			 * NEON 把这条路径的 CPU 时间压到原来的几分之一。 */
-			{
-				const uint16x4_t mask5 = vdup_n_u16(0x1f);
-				const uint16x4_t mask6 = vdup_n_u16(0x3f);
-
-				for (; x + 8 <= w; x += 8) {
-					uint32x4_t p0 = vld1q_u32(row + x);
-					uint32x4_t p1 = vld1q_u32(row + x + 4);
-					uint16x4_t r0, g0, b0, r1, g1, b1;
-					uint16x4_t o0, o1;
-
-					/* 这个 aarch64-none-elf GCC 12.2 的
-					 * vshrn_n_u32 内建会报 "must be a
-					 * constant immediate"，改用
-					 * vshrq_n_u32 + vmovn_u32 等价实现。 */
-					r0 = vand_u16(vmovn_u32(vshrq_n_u32(p0, 19)),
-						      mask5);
-					g0 = vand_u16(vmovn_u32(vshrq_n_u32(p0, 10)),
-						      mask6);
-					b0 = vand_u16(vmovn_u32(vshrq_n_u32(p0, 3)),
-						      mask5);
-					r1 = vand_u16(vmovn_u32(vshrq_n_u32(p1, 19)),
-						      mask5);
-					g1 = vand_u16(vmovn_u32(vshrq_n_u32(p1, 10)),
-						      mask6);
-					b1 = vand_u16(vmovn_u32(vshrq_n_u32(p1, 3)),
-						      mask5);
-
-					o0 = vorr_u16(vshl_n_u16(r0, 11),
-						      vorr_u16(vshl_n_u16(g0, 5), b0));
-					o1 = vorr_u16(vshl_n_u16(r1, 11),
-						      vorr_u16(vshl_n_u16(g1, 5), b1));
-					vst1q_u16(dst + x, vcombine_u16(o0, o1));
-				}
-			}
-#endif
-			for (; x < w; x++) {
-				uint32_t p = row[x];
-				unsigned r = (p >> 16) & 0xff;
-				unsigned g = (p >> 8) & 0xff;
-				unsigned bl = p & 0xff;
-
-				dst[x] = (uint16_t)(((r >> 3) << 11) |
-						    ((g >> 2) << 5) | (bl >> 3));
-			}
-		}
+		fbdev_convert_damage(b, base, &damage);
 		b->diag_convert_us += fbdev_now_us() - t0;
 	}
 
@@ -1259,10 +1233,6 @@ weston_backend_init(struct weston_compositor *compositor,
 	struct weston_fbdev_backend_config *config;
 	struct fbdev_backend *b;
 
-	/* 本后端在 fb 上自己画软件光标；让 libweston 忽略客户端的
-	 * cursor sprite（见 libweston/input.c 的 pointer_set_cursor）。 */
-	setenv("WESTON_SOFTWARE_CURSOR", "1", 1);
-
 	if (config_base == NULL ||
 	    config_base->struct_version != WESTON_FBDEV_BACKEND_CONFIG_VERSION ||
 	    config_base->struct_size >
@@ -1286,6 +1256,7 @@ weston_backend_init(struct weston_compositor *compositor,
 	 * 前端加载配置后会把实际路径写进 WESTON_CONFIG_FILE，这里复用它，
 	 * 保证 -c/自定义路径和默认路径都能读到同一份文件。 */
 	b->pointer_scale = 1.0;
+	b->partial_damage = false;
 	{
 		const char *cfg_path = getenv(WESTON_CONFIG_FILE_ENV_VAR);
 		struct weston_config *wc;
@@ -1298,10 +1269,17 @@ weston_backend_init(struct weston_compositor *compositor,
 				weston_config_get_section(wc, "fbdev", NULL, NULL);
 			if (sec != NULL) {
 				double v = 1.0;
+				bool pd = false;
+
 				if (weston_config_section_get_double(
 						sec, "pointer-scale", &v, 1.0) == 0 &&
 				    v >= 0.25 && v <= 10.0) {
 					b->pointer_scale = v;
+				}
+				if (weston_config_section_get_bool(
+						sec, "partial-damage", &pd,
+						false) == 0) {
+					b->partial_damage = pd;
 				}
 			}
 			weston_config_destroy(wc);
@@ -1309,7 +1287,8 @@ weston_backend_init(struct weston_compositor *compositor,
 			weston_log("fbdev: cannot read %s, pointer-scale=1.00\n",
 				   cfg_path);
 		}
-		weston_log("fbdev: pointer-scale=%.2f\n", b->pointer_scale);
+		weston_log("fbdev: pointer-scale=%.2f partial-damage=%d\n",
+			   b->pointer_scale, b->partial_damage);
 	}
 
 	/* 先打开 fb：Pi5 固件实际给的是 16bpp（即使请求 32），GL renderer
